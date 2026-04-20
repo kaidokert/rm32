@@ -621,6 +621,27 @@ impl MotorState {
             self.bemf.filter_level = 2;
         }
 
+        // Low voltage cutoff (checked at 1kHz rate via one_khz counter reset)
+        if self.one_khz_loop_counter == 0 && self.config.low_voltage_cut_off != 0 {
+            let threshold = if self.config.low_voltage_cut_off == 1 {
+                self.cell_count as u16 * 330 // low_cell_volt_cutoff default
+            } else {
+                self.config.absolute_voltage_cutoff as u16
+            };
+            if self.measurements.battery_voltage < threshold && threshold > 0 {
+                self.protection.low_voltage_count += 1;
+            } else if !self.protection.low_voltage_cutoff {
+                self.protection.low_voltage_count = 0;
+            }
+            if self.protection.low_voltage_count > 10000 {
+                self.protection.low_voltage_cutoff = true;
+                self.input.input = 0;
+                self.running = false;
+                self.input.zero_input_count = 0;
+                self.armed = false;
+            }
+        }
+
         // Temperature limiting
         if self.measurements.degrees_celsius > self.config.temperature_limit as i16 {
             self.duty.maximum = map(
