@@ -1,2 +1,7 @@
 [workspace]
-members = ["rm32"]
+members = ["rm32", "rm32_std"]
+resolver = "2"
+
+# rm32_stm32 is excluded from default build - it requires ARM target
+# Build with: cargo build -p rm32_stm32 --target thumbv6m-none-eabi
+exclude = ["rm32_stm32"]

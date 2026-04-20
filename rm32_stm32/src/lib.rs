@@ -1,14 +1,17 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! RM32 STM32 HAL implementation.
+//!
+//! Provides hardware drivers for STM32G0xx (initially STM32G071).
+//! Implements the `rm32::hal` traits for real hardware.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#![no_std]
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+// TODO: Implement HAL traits for STM32G071 peripherals:
+// - TIM1 → PwmOutput + PhaseOutput
+// - TIM2 → IntervalTimer
+// - TIM6 → 10kHz tick source
+// - TIM14/TIM16 → ComTimer
+// - COMP1 → Comparator
+// - USART2 → TelemetryUart
+// - ADC → Adc
+// - Flash → Flash
+// - DMA → InputCapture

@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rm32 = { path = "../rm32" }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+stm32g0xx-hal = { version = "0.2", features = ["stm32g071"] }
+embedded-hal = "1.0"
+
+[features]
+default = ["stm32g071"]
+stm32g071 = []

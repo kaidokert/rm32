@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+rm32 = { path = "../rm32" }
+
+[[bin]]
+name = "rm32_harness"
+path = "src/main.rs"
