@@ -149,6 +149,7 @@ pub struct MotorState {
 
     // Hardware config
     pub cell_count: u8,
+    pub cpu_mhz: u8,
     pub tim1_arr: u16,
     pub timer1_max_arr: u16,
     pub motor_kv: u16,
@@ -273,6 +274,7 @@ impl Default for MotorState {
             armed_timeout_count: 0,
 
             cell_count: 0,
+            cpu_mhz: 64,
             tim1_arr: 1999,
             timer1_max_arr: 1999,
             motor_kv: 2000,

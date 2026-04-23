@@ -101,12 +101,46 @@ pub fn decode_frame(
     }
 }
 
-/// Encode an eRPM telemetry response into a GCR buffer.
-/// Returns the number of entries written to `gcr_out`.
-pub fn encode_telemetry(com_time: u16, running: bool, gcr_out: &mut [u32], padding: usize) {
+/// GCR output bit shift — MCU-dependent.
+/// F051/F031/CH32V203: 6 (multiply by 64)
+/// All others (G071, G431, L431, F421, etc.): 7 (multiply by 128)
+pub const GCR_SHIFT_F0: u8 = 6;
+pub const GCR_SHIFT_G0: u8 = 7;
+
+/// Encode a raw 12-bit value into GCR buffer for bidir DShot response.
+/// Used for both eRPM and EDT frames.
+pub fn encode_gcr_frame(value_12bit: u16, gcr_out: &mut [u32], padding: usize, gcr_shift: u8) {
+    // Calculate checksum (XOR of nibbles, inverted)
+    let mut csum = 0u16;
+    let mut csum_data = value_12bit;
+    for _ in 0..3 {
+        csum ^= csum_data;
+        csum_data >>= 4;
+    }
+    csum = !csum & 0xF;
+
+    let full_number = (value_12bit << 4) | csum;
+
+    // GCR RLL encode 16 to 20 bit
+    let gcr_number: u32 = (GCR_ENCODE_TABLE[(full_number >> 12) as usize] as u32) << 15
+        | (GCR_ENCODE_TABLE[((full_number >> 8) & 0xF) as usize] as u32) << 10
+        | (GCR_ENCODE_TABLE[((full_number >> 4) & 0xF) as usize] as u32) << 5
+        | (GCR_ENCODE_TABLE[(full_number & 0xF) as usize] as u32);
+
+    // GCR RLL encode 20 to 21 bit
+    let multiplier = 1u32 << gcr_shift;
+    gcr_out[padding] = 0;
+    gcr_out[1 + padding] = multiplier;
+    for i in (0..20).rev() {
+        let bit = ((gcr_number >> i) & 1) ^ (gcr_out[padding + 20 - i] >> gcr_shift);
+        gcr_out[padding + 20 - i + 1] = bit << gcr_shift;
+    }
+}
+
+/// Convert commutation time to 12-bit eRPM value (shift + mantissa).
+pub fn erpm_to_12bit(com_time: u16, running: bool) -> u16 {
     let period = if !running { 65535u16 } else { com_time };
 
-    // Calculate shift amount
     let mut shift_amount = 0u8;
     for i in (9..=15).rev() {
         if period >> i == 1 {
@@ -115,32 +149,21 @@ pub fn encode_telemetry(com_time: u16, running: bool, gcr_out: &mut [u32], paddi
         }
     }
 
-    let dshot_number = ((shift_amount as u16) << 9) | (period >> shift_amount);
+    ((shift_amount as u16) << 9) | (period >> shift_amount)
+}
 
-    // Calculate checksum (XOR of nibbles, inverted)
-    let mut csum = 0u16;
-    let mut csum_data = dshot_number;
-    for _ in 0..3 {
-        csum ^= csum_data;
-        csum_data >>= 4;
-    }
-    csum = !csum & 0xF;
+/// Encode an eRPM telemetry response into a GCR buffer.
+/// `gcr_shift` is 6 for F051-like MCUs, 7 for G071-like MCUs.
+pub fn encode_telemetry_with_shift(
+    com_time: u16, running: bool, gcr_out: &mut [u32], padding: usize, gcr_shift: u8,
+) {
+    let value = erpm_to_12bit(com_time, running);
+    encode_gcr_frame(value, gcr_out, padding, gcr_shift);
+}
 
-    let full_number = (dshot_number << 4) | csum;
-
-    // GCR RLL encode 16 to 20 bit
-    let gcr_number: u32 = (GCR_ENCODE_TABLE[(full_number >> 12) as usize] as u32) << 15
-        | (GCR_ENCODE_TABLE[((full_number >> 8) & 0xF) as usize] as u32) << 10
-        | (GCR_ENCODE_TABLE[((full_number >> 4) & 0xF) as usize] as u32) << 5
-        | (GCR_ENCODE_TABLE[(full_number & 0xF) as usize] as u32);
-
-    // GCR RLL encode 20 to 21 bit (MCU_F051 variant: multiply by 64)
-    gcr_out[padding] = 0;
-    gcr_out[1 + padding] = 64;
-    for i in (0..20).rev() {
-        let bit = ((gcr_number >> i) & 1) ^ (gcr_out[padding + 20 - i] >> 6);
-        gcr_out[padding + 20 - i + 1] = bit << 6;
-    }
+/// Convenience wrapper using F051-compatible shift (for backward compat with tests).
+pub fn encode_telemetry(com_time: u16, running: bool, gcr_out: &mut [u32], padding: usize) {
+    encode_telemetry_with_shift(com_time, running, gcr_out, padding, GCR_SHIFT_F0);
 }
 
 #[cfg(test)]

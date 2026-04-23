@@ -47,6 +47,7 @@ mod tests {
 
     impl hal::Comparator for MockHal {
         fn output_level(&self) -> bool { self.comp_level }
+        fn set_step(&mut self, _step: u8, _rising: bool) {}
         fn change_input(&mut self) {}
         fn enable_interrupts(&mut self) { self.enable_comp_called = true; }
         fn mask_interrupts(&mut self) { self.mask_called = true; }
@@ -76,6 +77,8 @@ mod tests {
         fn enable_irq(&mut self) {}
         fn disable_irq(&mut self) {}
         fn reload_watchdog(&mut self) {}
+        fn delay_micros(&mut self, _us: u32) {}
+        fn delay_millis(&mut self, _ms: u32) {}
     }
 
     // =========================================================
@@ -968,5 +971,241 @@ mod tests {
         assert!(state.commutation.forward); // changed
         assert_eq!(state.timing.zero_crosses, 0);
         assert!(hal.mask_called);
+    }
+
+    // =================================================================
+    // ISR logic tests (platform-independent, using TestShared + MockHal)
+    // =================================================================
+
+    use crate::control::isr_logic::{self, TickCounters};
+    use crate::control::shared_impl::TestShared;
+    use crate::shared_comm::SharedComm as _;
+
+    fn make_counters() -> TickCounters {
+        TickCounters { ten_khz_counter: 0, one_khz_loop_counter: 0, armed_timeout_count: 0 }
+    }
+
+    // Separate mocks for isr_logic (needs 4 distinct &mut references)
+    struct MockPwm { last_duty: u16 }
+    impl hal::PwmOutput for MockPwm {
+        fn set_duty_all(&mut self, d: u16) { self.last_duty = d; }
+        fn set_auto_reload(&mut self, _: u16) {}
+        fn set_prescaler(&mut self, _: u16) {}
+        fn set_compare1(&mut self, _: u16) {}
+        fn set_compare2(&mut self, _: u16) {}
+        fn set_compare3(&mut self, _: u16) {}
+        fn generate_update_event(&mut self) {}
+    }
+    struct MockComp { level: bool, mask_called: bool }
+    impl hal::Comparator for MockComp {
+        fn output_level(&self) -> bool { self.level }
+        fn set_step(&mut self, _: u8, _: bool) {}
+        fn change_input(&mut self) {}
+        fn enable_interrupts(&mut self) {}
+        fn mask_interrupts(&mut self) { self.mask_called = true; }
+    }
+    struct MockPhase;
+    impl hal::PhaseOutput for MockPhase {
+        fn com_step(&mut self, _: u8) {}
+        fn all_off(&mut self) {}
+        fn full_brake(&mut self) {}
+        fn all_pwm(&mut self) {}
+        fn proportional_brake(&mut self) {}
+    }
+    struct MockInterval { count: u32 }
+    impl hal::IntervalTimer for MockInterval {
+        fn count(&self) -> u32 { self.count }
+        fn set_count(&mut self, v: u32) { self.count = v; }
+    }
+    struct MockComTimer;
+    impl hal::ComTimer for MockComTimer {
+        fn set_and_enable(&mut self, _: u16) {}
+        fn disable_interrupt(&mut self) {}
+        fn enable_interrupt(&mut self) {}
+    }
+
+    #[test]
+    fn isr_tick_throttle_maps_to_setpoint() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut counters = make_counters();
+        let shared = TestShared::new();
+        let mut pwm = MockPwm { last_duty: 0 };
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+        let mut interval = MockInterval { count: 0 };
+
+        shared.armed.set(true);
+        shared.newinput.set(1000);
+
+        isr_logic::ten_khz_tick(
+            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+        );
+
+        assert!(shared.duty_cycle_setpoint() > 0);
+        assert_eq!(shared.adjusted_input(), 1000);
+    }
+
+    #[test]
+    fn isr_tick_zero_throttle_no_setpoint() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut counters = make_counters();
+        let shared = TestShared::new();
+        let mut pwm = MockPwm { last_duty: 0 };
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+        let mut interval = MockInterval { count: 0 };
+
+        shared.armed.set(true);
+        shared.newinput.set(0);
+
+        isr_logic::ten_khz_tick(
+            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+        );
+
+        assert_eq!(shared.duty_cycle_setpoint(), 0);
+    }
+
+    #[test]
+    fn isr_tick_arming_sequence() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut counters = make_counters();
+        let shared = TestShared::new();
+        let mut pwm = MockPwm { last_duty: 0 };
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+        let mut interval = MockInterval { count: 0 };
+
+        shared.input_set.set(true);
+        shared.newinput.set(0);
+
+        for _ in 0..20000 {
+            isr_logic::ten_khz_tick(
+                &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+                &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            );
+        }
+        assert!(!shared.armed());
+
+        isr_logic::ten_khz_tick(
+            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+        );
+        assert!(shared.armed());
+    }
+
+    #[test]
+    fn isr_tick_signal_timeout_increments() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut counters = make_counters();
+        let shared = TestShared::new();
+        let mut pwm = MockPwm { last_duty: 0 };
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+        let mut interval = MockInterval { count: 0 };
+
+        isr_logic::ten_khz_tick(
+            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+        );
+
+        assert_eq!(shared.signal_timeout(), 1);
+    }
+
+    #[test]
+    fn isr_tick_ramp_limits_large_step() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut counters = make_counters();
+        let shared = TestShared::new();
+        let mut pwm = MockPwm { last_duty: 0 };
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+        let mut interval = MockInterval { count: 0 };
+
+        shared.armed.set(true);
+        shared.newinput.set(2047);
+        duty.last = 100;
+        duty.ramp_divider = 0;
+
+        isr_logic::ten_khz_tick(
+            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
+            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+        );
+
+        assert!(duty.cycle < 2000, "duty should be ramp-limited, got {}", duty.cycle);
+        assert!(duty.cycle > 100, "duty should increase from 100, got {}", duty.cycle);
+    }
+
+    #[test]
+    fn isr_commutation_timer_advances_step() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        let mut com_timer = MockComTimer;
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut phase = MockPhase;
+
+        let step_before = comm.step;
+        isr_logic::commutation_timer_expired(
+            &mut comm, &mut bemf, &shared,
+            &mut com_timer, &mut comp, &mut phase,
+        );
+
+        assert_ne!(comm.step, step_before);
+        assert_eq!(shared.zero_crosses(), 1);
+        assert!(!bemf.zc_found);
+    }
+
+    #[test]
+    fn isr_bemf_zero_cross_detected() {
+        let comm = crate::commutation::Commutation::new(); // rising=true
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut comp = MockComp { level: false, mask_called: false };
+        let mut interval = MockInterval { count: 500 };
+        let mut com_timer = MockComTimer;
+
+        bemf.filter_level = 2;
+        bemf.wait_time = 500;
+        // comp_level=false, rising=true → false != true → filter passes
+
+        isr_logic::bemf_zero_cross(
+            &comm, &mut bemf, &mut comp, &mut interval, &mut com_timer,
+        );
+
+        assert!(comp.mask_called);
+    }
+
+    #[test]
+    fn isr_bemf_zero_cross_filtered_out() {
+        let comm = crate::commutation::Commutation::new(); // rising=true
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut comp = MockComp { level: true, mask_called: false };
+        let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
+
+        bemf.filter_level = 2;
+        // comp_level=true, rising=true → true == true → filter rejects (early return)
+
+        isr_logic::bemf_zero_cross(
+            &comm, &mut bemf, &mut comp, &mut interval, &mut com_timer,
+        );
+
+        assert!(!comp.mask_called);
     }
 }

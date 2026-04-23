@@ -100,9 +100,106 @@ impl EepromConfig {
     }
 }
 
+pub const EEPROM_VERSION: u8 = 3;
+
+impl EepromConfig {
+    /// Check if loaded EEPROM data is valid (not blank/corrupt).
+    /// Blank flash (all 0xFF) will have eeprom_version=255 which fails.
+    pub fn is_valid(&self) -> bool {
+        // Version 0 is a fresh zero-init (valid but needs defaults applied)
+        // Version > EEPROM_VERSION suggests corrupt/blank flash
+        self.eeprom_version <= EEPROM_VERSION
+    }
+
+    /// Apply defaults for fields added in newer EEPROM versions.
+    /// Matches C's loadEEpromSettings() version migration.
+    pub fn apply_version_defaults(&mut self) {
+        if self.eeprom_version < EEPROM_VERSION {
+            self.max_ramp = 160;
+            self.minimum_duty_cycle = 1;
+            self.disable_stick_calibration = 0;
+            self.absolute_voltage_cutoff = 10;
+            self.current_p = 100;
+            self.current_i = 0;
+            self.current_d = 100;
+            self.active_brake_power = 0;
+            self.reserved_eeprom_3 = [0; 4];
+        }
+        self.eeprom_version = EEPROM_VERSION;
+    }
+}
+
 impl Default for EepromConfig {
     fn default() -> Self {
         // Zero-init matches C behavior for fresh EEPROM
         unsafe { core::mem::zeroed() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blank_flash_is_invalid() {
+        // All 0xFF simulates erased flash
+        let mut cfg = EepromConfig::default();
+        for b in cfg.as_bytes_mut().iter_mut() { *b = 0xFF; }
+        assert!(!cfg.is_valid()); // eeprom_version=255 > EEPROM_VERSION
+    }
+
+    #[test]
+    fn zero_init_is_valid() {
+        let cfg = EepromConfig::default();
+        assert!(cfg.is_valid()); // eeprom_version=0 <= EEPROM_VERSION
+    }
+
+    #[test]
+    fn current_version_is_valid() {
+        let mut cfg = EepromConfig::default();
+        cfg.eeprom_version = EEPROM_VERSION;
+        assert!(cfg.is_valid());
+    }
+
+    #[test]
+    fn future_version_is_invalid() {
+        let mut cfg = EepromConfig::default();
+        cfg.eeprom_version = EEPROM_VERSION + 1;
+        assert!(!cfg.is_valid());
+    }
+
+    #[test]
+    fn version_defaults_applied_for_old_config() {
+        let mut cfg = EepromConfig::default(); // version=0
+        cfg.apply_version_defaults();
+        assert_eq!(cfg.eeprom_version, EEPROM_VERSION);
+        assert_eq!(cfg.max_ramp, 160);
+        assert_eq!(cfg.minimum_duty_cycle, 1);
+        assert_eq!(cfg.current_p, 100);
+        assert_eq!(cfg.current_d, 100);
+        assert_eq!(cfg.absolute_voltage_cutoff, 10);
+    }
+
+    #[test]
+    fn version_defaults_not_applied_for_current_config() {
+        let mut cfg = EepromConfig::default();
+        cfg.eeprom_version = EEPROM_VERSION;
+        cfg.max_ramp = 42; // custom value
+        cfg.apply_version_defaults();
+        assert_eq!(cfg.max_ramp, 42); // should NOT be overwritten
+    }
+
+    #[test]
+    fn blank_flash_fallback_produces_safe_defaults() {
+        // Simulate the full main.rs load path
+        let mut cfg = EepromConfig::default();
+        for b in cfg.as_bytes_mut().iter_mut() { *b = 0xFF; }
+        if !cfg.is_valid() {
+            cfg = EepromConfig::default();
+        }
+        cfg.apply_version_defaults();
+        assert_eq!(cfg.eeprom_version, EEPROM_VERSION);
+        assert_eq!(cfg.max_ramp, 160);
+        assert_eq!(cfg.motor_kv, 0); // zero-init default
     }
 }

@@ -1,15 +1,30 @@
 [package]
 name = "rm32_stm32"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 rm32 = { path = "../rm32" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
-stm32g0xx-hal = { version = "0.2", features = ["stm32g071"] }
 embedded-hal = "1.0"
+
+# MCU-specific HAL crates (only one active at a time)
+stm32g0xx-hal = { git = "https://github.com/stm32-rs/stm32g0xx-hal", features = ["stm32g071"], optional = true }
+stm32f0xx-hal = { version = "0.18", features = ["stm32f051"], optional = true }
+stm32l4xx-hal = { path = "../ref/stm32l4xx-hal", features = ["stm32l431", "rt"], optional = true }
+
+[[bin]]
+name = "rm32_firmware"
+path = "src/bin/main.rs"
 
 [features]
 default = ["stm32g071"]
-stm32g071 = []
+stm32g071 = ["dep:stm32g0xx-hal"]
+stm32f051 = ["dep:stm32f0xx-hal"]
+stm32l431 = ["dep:stm32l4xx-hal"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+debug = true

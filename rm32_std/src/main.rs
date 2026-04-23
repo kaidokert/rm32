@@ -49,6 +49,7 @@ impl hal::PwmOutput for StdHal {
 
 impl hal::Comparator for StdHal {
     fn output_level(&self) -> bool { self.comp_level }
+    fn set_step(&mut self, _step: u8, _rising: bool) {}
     fn change_input(&mut self) {}
     fn enable_interrupts(&mut self) {}
     fn mask_interrupts(&mut self) { self.mask_called = true; }
@@ -78,6 +79,8 @@ impl hal::System for StdHal {
     fn enable_irq(&mut self) {}
     fn disable_irq(&mut self) {}
     fn reload_watchdog(&mut self) {}
+    fn delay_micros(&mut self, _us: u32) {}
+    fn delay_millis(&mut self, _ms: u32) {}
 }
 
 struct Harness {

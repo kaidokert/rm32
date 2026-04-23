@@ -26,6 +26,8 @@ pub trait PwmOutput {
 /// Comparator (BEMF sensing) interface
 pub trait Comparator {
     fn output_level(&self) -> bool;
+    /// Set the commutation step and rising/falling edge for BEMF sensing.
+    fn set_step(&mut self, step: u8, rising: bool);
     fn change_input(&mut self);
     fn enable_interrupts(&mut self);
     fn mask_interrupts(&mut self);
@@ -83,10 +85,18 @@ pub trait Flash {
     fn write(&mut self, address: u32, data: &[u8]);
 }
 
+/// Serial input RX (CRSF protocol)
+pub trait SerialInput {
+    /// Read available bytes into buffer. Returns number of bytes read.
+    fn read_available(&mut self, buf: &mut [u8]) -> usize;
+}
+
 /// System control (IRQ, watchdog, reset)
 pub trait System {
     fn reset(&mut self) -> !;
     fn enable_irq(&mut self);
     fn disable_irq(&mut self);
     fn reload_watchdog(&mut self);
+    fn delay_micros(&mut self, us: u32);
+    fn delay_millis(&mut self, ms: u32);
 }

@@ -543,6 +543,17 @@ impl MotorState {
                 self.timing.commutation_interval as i32, 96, 200,
                 self.timer1_max_arr as i32 / 2, self.timer1_max_arr as i32,
             ) as u16;
+        } else if self.config.variable_pwm == 2 {
+            // Automatic: scale average_interval by CPU_MHZ/9, clamped to 100-250
+            let avg = self.timing.average_interval;
+            let scale = self.cpu_mhz as u32 / 9;
+            self.tim1_arr = if avg < 100 && avg > 0 {
+                (100 * scale) as u16
+            } else if avg >= 250 || avg == 0 {
+                (250 * scale) as u16
+            } else {
+                (avg * scale) as u16
+            };
         }
 
         // Consumed current accumulation (1s interval)

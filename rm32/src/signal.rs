@@ -45,6 +45,21 @@ pub fn detect_input(dma_buffer: &[u32], cpu_mhz: u8) -> SignalType {
 
 /// Compute servo input from pulse width.
 /// Returns mapped throttle value (0-2047 for unidirectional).
+/// Compute MultiShot input from DMA buffer.
+/// MultiShot uses a single pulse width (243-1200µs → 0-2000 throttle).
+pub fn compute_multishot(dma_buffer: &[u32]) -> Option<u16> {
+    use crate::functions::map;
+    if dma_buffer.len() < 2 { return None; }
+    let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]);
+    if pulse > 0 && pulse < 1500 {
+        Some(map(pulse as i32, 243, 1200, 0, 2000) as u16)
+    } else {
+        None
+    }
+}
+
+/// Compute servo input from pulse width.
+/// Returns mapped throttle value (0-2047 for unidirectional).
 pub fn compute_servo_unidirectional(
     pulse_width: u16,
     low_threshold: u16,

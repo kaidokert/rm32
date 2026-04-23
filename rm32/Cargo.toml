@@ -5,6 +5,8 @@ edition = "2024"
 
 [dependencies]
 embedded-hal = "1.0"
+dronecan = { path = "../ref/dronecan-rust", default-features = false, optional = true }
 
 [features]
 default = []
+dronecan = ["dep:dronecan"]

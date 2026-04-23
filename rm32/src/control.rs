@@ -7,5 +7,7 @@
 
 pub mod state;
 pub mod tick;
+pub mod isr_logic;
+pub mod shared_impl;
 #[cfg(test)]
 mod tests;
