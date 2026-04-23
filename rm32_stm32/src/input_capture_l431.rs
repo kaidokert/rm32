@@ -35,15 +35,7 @@ const PSC: u32 = 0x28;
 const ARR: u32 = 0x2C;
 const CCR1: u32 = 0x34;
 
-#[inline(always)]
-unsafe fn write_reg(addr: u32, val: u32) { (addr as *mut u32).write_volatile(val); }
-#[inline(always)]
-unsafe fn read_reg(addr: u32) -> u32 { (addr as *const u32).read_volatile() }
-#[inline(always)]
-unsafe fn modify_reg(addr: u32, f: impl FnOnce(u32) -> u32) {
-    let ptr = addr as *mut u32;
-    ptr.write_volatile(f(ptr.read_volatile()));
-}
+use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
 
 pub struct L431DshotCapture {
     buffer_size: u16,

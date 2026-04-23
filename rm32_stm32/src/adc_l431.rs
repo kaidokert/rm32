@@ -30,15 +30,7 @@ const DMA_CH1_CPAR: u32 = DMA1_BASE + 0x10;
 const DMA_CH1_CMAR: u32 = DMA1_BASE + 0x14;
 const DMA_CSELR: u32 = DMA1_BASE + 0xA8;
 
-#[inline(always)]
-unsafe fn write_reg(addr: u32, val: u32) { (addr as *mut u32).write_volatile(val); }
-#[inline(always)]
-unsafe fn read_reg(addr: u32) -> u32 { (addr as *const u32).read_volatile() }
-#[inline(always)]
-unsafe fn modify_reg(addr: u32, f: impl FnOnce(u32) -> u32) {
-    let ptr = addr as *mut u32;
-    ptr.write_volatile(f(ptr.read_volatile()));
-}
+use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
 
 pub struct L431Adc { _private: () }
 

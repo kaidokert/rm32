@@ -32,21 +32,7 @@ const TIM2_BASE: u32 = 0x4000_0000;
 #[cfg(feature = "stm32l431")]
 const TIM14_BASE: u32 = 0x4001_4400;
 
-#[inline(always)]
-unsafe fn write_reg(base: u32, offset: u32, val: u32) {
-    ((base + offset) as *mut u32).write_volatile(val);
-}
-
-#[inline(always)]
-unsafe fn read_reg(base: u32, offset: u32) -> u32 {
-    ((base + offset) as *const u32).read_volatile()
-}
-
-#[inline(always)]
-unsafe fn modify_reg(base: u32, offset: u32, f: impl FnOnce(u32) -> u32) {
-    let ptr = (base + offset) as *mut u32;
-    ptr.write_volatile(f(ptr.read_volatile()));
-}
+use crate::regs::{write_off as write_reg, read_off as read_reg, modify_off as modify_reg};
 
 /// TIM2 as free-running interval timer (2MHz, 0.5µs/tick).
 pub struct Tim2Interval {

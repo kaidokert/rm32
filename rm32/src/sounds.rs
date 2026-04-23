@@ -59,7 +59,7 @@ impl Sounds {
         pwm.set_auto_reload(self.tim1_autoreload);
     }
 
-    /// Startup tune: three ascending tones.
+    /// Startup tune: plays BlueJay tune if present in EEPROM, else default 3-note tune.
     pub fn play_startup(
         &self,
         pwm: &mut impl PwmOutput,
@@ -69,9 +69,90 @@ impl Sounds {
         sys.disable_irq();
         self.play_note(pwm, phase, sys, 55, 3, 200);
         self.play_note(pwm, phase, sys, 40, 5, 200);
-        self.play_note(pwm, phase, sys, 25, 1, 200);
+        self.play_note(pwm, phase, sys, 25, 6, 200);
         self.silence(pwm, phase);
         sys.enable_irq();
+    }
+
+    /// Startup with BlueJay tune check: plays custom tune if EEPROM tune data exists.
+    pub fn play_startup_with_tune(
+        &self,
+        pwm: &mut impl PwmOutput,
+        phase: &mut impl PhaseOutput,
+        sys: &mut impl System,
+        tune: &[u8; 128],
+        cpu_mhz: u32,
+    ) {
+        sys.disable_irq();
+        if tune[0] != 0xFF {
+            // BlueJay tune present
+            self.play_bluejay_tune(pwm, phase, sys, tune, cpu_mhz);
+        } else {
+            // Default startup tune
+            self.play_note(pwm, phase, sys, 55, 3, 200);
+            self.play_note(pwm, phase, sys, 40, 5, 200);
+            self.play_note(pwm, phase, sys, 25, 6, 200);
+        }
+        self.silence(pwm, phase);
+        sys.enable_irq();
+    }
+
+    /// Play a BlueJay-encoded tune from the 128-byte EEPROM tune array.
+    fn play_bluejay_tune(
+        &self,
+        pwm: &mut impl PwmOutput,
+        phase: &mut impl PhaseOutput,
+        sys: &mut impl System,
+        tune: &[u8; 128],
+        cpu_mhz: u32,
+    ) {
+        let mut full_time_count = 0u32;
+        phase.com_step(3);
+
+        let mut i = 4;
+        while i < 126 {
+            sys.reload_watchdog();
+            let t4 = tune[i];
+            let t3 = tune[i + 1];
+
+            if t4 == 0 && t3 == 0 {
+                break;
+            }
+
+            if t4 == 255 && t3 != 0 {
+                // Extend duration
+                full_time_count += 1;
+            } else if t3 == 0 {
+                // Silence: duration = full_time_count * 255 + t4
+                let duration = full_time_count * 255 + t4 as u32;
+                pwm.set_duty_all(0);
+                sys.delay_millis(duration);
+                full_time_count = 0;
+            } else {
+                // Note: compute frequency and duration
+                let total_pulses = full_time_count * 255 + t4 as u32;
+                let t3_period = t3 as u32 * 247 + 4000;
+                let duration = (total_pulses * t3_period) / 11000;
+                let freq = 10_000_000u32 / t3_period;
+
+                // Play note using prescaler=9 and computed ARR
+                let timer_reload = cpu_mhz * 100_000 / freq;
+                pwm.set_prescaler(9);
+                pwm.set_auto_reload(timer_reload as u16);
+                let duty = self.volume as u32 * timer_reload / self.tim1_autoreload as u32;
+                pwm.set_duty_all(duty as u16);
+                sys.delay_millis(duration);
+                full_time_count = 0;
+            }
+
+            // Inter-note gap (if tune[3] > 239)
+            if tune[3] > 239 {
+                pwm.set_duty_all(0);
+                sys.delay_millis(10 * (255 - tune[3] as u32));
+            }
+
+            i += 2;
+        }
     }
 
     /// Input detected tune: three descending tones.

@@ -6,6 +6,7 @@
 
 use crate::commutation::Commutation;
 use crate::config::EepromConfig;
+use crate::constants::*;
 use crate::control::state::{BemfState, DutyState};
 use crate::functions::map;
 use crate::hal;
@@ -38,9 +39,12 @@ pub fn ten_khz_tick(
     let newinput = shared.newinput();
     shared.set_adjusted_input(newinput);
     if shared.armed() && !shared.stepper_sine() {
-        if newinput >= 47 {
+        if newinput >= THROTTLE_MIN_SIGNAL {
             let min_duty = duty.minimum;
-            let setpoint = map(newinput as i32, 47, 2047, min_duty as i32, 2000) as u16;
+            let setpoint = map(
+                newinput as i32, THROTTLE_MIN_SIGNAL as i32, DSHOT_MAX_THROTTLE as i32,
+                min_duty as i32, DUTY_SCALE_MAX as i32,
+            ) as u16;
             shared.set_duty_cycle_setpoint(setpoint);
             if !shared.running() {
                 shared.set_running(true);
@@ -53,6 +57,12 @@ pub fn ten_khz_tick(
             }
         } else {
             shared.set_duty_cycle_setpoint(0);
+            // Active brake mode 2: hold motor in comStep(2) at fixed power
+            if config.brake_on_stop == 2 {
+                phase.com_step(2);
+                let brake_duty = (config.active_brake_power as u32 * TIM1_DEFAULT_ARR as u32 / DUTY_SCALE_MAX as u32) * 10;
+                pwm.set_duty_all(brake_duty as u16);
+            }
         }
     }
 
@@ -68,7 +78,7 @@ pub fn ten_khz_tick(
     if !shared.armed() {
         if shared.input_set() && shared.adjusted_input() == 0 {
             counters.armed_timeout_count += 1;
-            if counters.armed_timeout_count > 20000 {
+            if counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
                 shared.set_armed(true);
                 counters.armed_timeout_count = 0;
             }
@@ -86,9 +96,9 @@ pub fn ten_khz_tick(
     ramp_limit(duty, shared);
 
     // PWM output
-    let tim1_arr = 1999u16; // TODO: use actual tim1_arr from config
+    let tim1_arr = TIM1_DEFAULT_ARR;
     if shared.armed() && shared.running() {
-        let adj = ((duty.cycle as u32 * tim1_arr as u32) / 2000 + 1) as u16;
+        let adj = ((duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
         pwm.set_duty_all(adj);
     } else {
         pwm.set_duty_all(0);
@@ -145,7 +155,7 @@ fn bemf_polling(
         shared.increment_zero_crosses();
         let zc = shared.zero_crosses();
         let ci = shared.commutation_interval();
-        if zc >= 20 && ci <= 2000 {
+        if zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
             shared.set_old_routine(false);
             comp.enable_interrupts();
         }

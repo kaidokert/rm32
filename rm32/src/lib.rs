@@ -7,6 +7,7 @@
 
 pub mod hal;
 pub mod config;
+pub mod constants;
 pub mod commutation;
 pub mod control;
 pub mod dshot;
@@ -29,3 +30,4 @@ pub mod edt;
 pub mod crsf;
 pub mod shared_comm;
 pub mod ws2812;
+pub mod fixed_mode;

@@ -15,6 +15,7 @@ pub mod phase;
 pub mod shared;
 pub mod main_loop;
 pub mod flash;
+pub mod regs;
 pub mod isr;
 pub mod isr_handlers;
 pub mod init;

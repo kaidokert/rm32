@@ -156,6 +156,8 @@ fn main() -> ! {
         desync_check: false,
         current_filter: rm32::current::CurrentFilter::new(),
         voltage_filter: rm32::filter::EwmaPow2::new(),
+        last_armed: false,
+        just_armed: false,
     };
 
     // --- Load EEPROM settings from flash ---
@@ -178,11 +180,38 @@ fn main() -> ! {
         main_state.low_cell_volt_cutoff = cfg.low_cell_volt_cutoff as u16 + 250;
     }
 
+    // Dead-time override from driving_brake_strength
+    let dead_time_override = {
+        let mut dbs = main_state.config.driving_brake_strength;
+        if dbs == 0 || dbs > 9 { dbs = 10; }
+        if dbs < 10 {
+            let dto = BOARD.dead_time as u16 + (150 - dbs as u16 * 10);
+            dto.min(200)
+        } else {
+            0
+        }
+    };
+
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {
         isr.config = main_state.config.clone();
         isr.forward = main_state.config.dir_reversed == 0;
+        // Apply dead-time override to duty thresholds
+        if dead_time_override > 0 {
+            isr.duty.min_startup += dead_time_override;
+            isr.duty.minimum += dead_time_override;
+            isr.duty.startup_max += dead_time_override;
+        }
     });
+
+    // Apply dead-time override to TIM1 BDTR register
+    if dead_time_override > 0 {
+        const TIM1_BDTR: u32 = 0x4001_2C44; // TIM1 base + 0x44
+        unsafe {
+            let bdtr = TIM1_BDTR as *mut u32;
+            bdtr.write_volatile(bdtr.read_volatile() | dead_time_override as u32);
+        }
+    }
 
     // --- ADC + Telemetry (already initialized by init(), create handles) ---
     #[cfg(feature = "stm32g071")]
@@ -206,18 +235,13 @@ fn main() -> ! {
 
     // --- Main loop ---
     let shared = isr::shared();
-    let mut last_armed = false;
     loop {
         main_state.tick(shared, &mut adc, &mut telem);
 
-        // WS2812 LED status updates (on state transitions only)
-        if BOARD.has_led {
-            let armed = shared.armed();
-            if armed && !last_armed {
-                use rm32::ws2812::{send_status, LedStatus};
-                cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
-            }
-            last_armed = armed;
+        // WS2812 LED status updates (on arming transition)
+        if BOARD.has_led && main_state.just_armed {
+            use rm32::ws2812::{send_status, LedStatus};
+            cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
         }
 
         // Dynamic interrupt priority swap (L431 only — M4F has preemption)

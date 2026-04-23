@@ -4,6 +4,7 @@
 //! owns protection/telemetry/config exclusively.
 
 use rm32::config::EepromConfig;
+use rm32::constants::*;
 use rm32::control::state::{Measurements, ProtectionState, TelemetryState};
 use rm32::current::CurrentFilter;
 use rm32::filter::EwmaPow2;
@@ -40,6 +41,9 @@ pub struct MainState {
     pub desync_check: bool,
     pub current_filter: CurrentFilter,
     pub voltage_filter: EwmaPow2<3>,
+    pub last_armed: bool,
+    /// Set on the tick when arming transition happens
+    pub just_armed: bool,
 }
 
 impl MainState {
@@ -66,10 +70,10 @@ impl MainState {
             self.protection.bemf_timeout_happened = 0;
         }
         // Dynamic BEMF timeout threshold: lenient at low throttle
-        if adj_input < 150 {
-            self.protection.bemf_timeout = 100;
+        if adj_input < BEMF_LENIENT_THROTTLE {
+            self.protection.bemf_timeout = BEMF_TIMEOUT_LENIENT;
         } else {
-            self.protection.bemf_timeout = 10;
+            self.protection.bemf_timeout = BEMF_TIMEOUT_STRICT;
         }
 
         // Desync detection
@@ -78,11 +82,11 @@ impl MainState {
                 self.last_average_interval as i32,
                 self.average_interval as i32,
             );
-            if diff > (self.average_interval >> 1) && self.average_interval < 2000 {
+            if diff > (self.average_interval >> 1) && self.average_interval < DESYNC_MAX_INTERVAL {
                 // Reset interval to 5000 if motor was running (>100 ZCs)
                 // Check before zeroing zero_crosses (C has this after, which is a bug)
                 if zc > 100 {
-                    self.average_interval = 5000;
+                    self.average_interval = DESYNC_RESET_INTERVAL;
                 }
                 shared.set_zero_crosses(0);
                 self.protection.desync_happened += 1;
@@ -123,7 +127,7 @@ impl MainState {
             } else if !self.protection.low_voltage_cutoff {
                 self.protection.low_voltage_count = 0;
             }
-            let lvc_limit = if shared.stepper_sine() { 1000 } else { 10000 };
+            let lvc_limit = if shared.stepper_sine() { LVC_STARTUP_THRESHOLD } else { LVC_NORMAL_THRESHOLD };
             if self.protection.low_voltage_count > lvc_limit {
                 self.protection.low_voltage_cutoff = true;
                 shared.set_armed(false);
@@ -154,6 +158,16 @@ impl MainState {
         shared.set_battery_voltage(self.measurements.battery_voltage);
         shared.set_degrees_celsius(self.measurements.degrees_celsius);
 
+        // Cell count auto-detection on arming transition
+        let armed = shared.armed();
+        self.just_armed = armed && !self.last_armed;
+        if self.just_armed {
+            if self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
+                self.cell_count = (self.measurements.battery_voltage / 370) as u8;
+            }
+        }
+        self.last_armed = armed;
+
         // Telemetry send
         if shared.send_telemetry() {
             let mut pkt = [0u8; 10];
@@ -165,7 +179,7 @@ impl MainState {
                 voltage_cv,
                 current_ca,
                 (self.measurements.consumed_current / 1000) as u16, // µAh → mAh
-                self.e_rpm * 100,
+                self.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
             );
             telem.send_dma(&pkt);
             shared.set_send_telemetry(false);

@@ -11,12 +11,27 @@ use rm32::hal::{PwmOutput, Comparator, IntervalTimer, ComTimer, PhaseOutput};
 static mut ISR_LOCAL: Option<IsrState> = None;
 
 /// Get or initialize the ISR-local state.
+/// If state was never initialized, enters emergency shutdown (all FETs off, infinite loop).
 /// # Safety
 /// Only call from ISR context (single-core, same-priority).
 #[inline(always)]
 pub unsafe fn isr_state() -> &'static mut IsrState {
     ISR_LOCAL.get_or_insert_with(|| {
-        isr::take_isr_state().expect("ISR state not initialized")
+        match isr::take_isr_state() {
+            Some(s) => s,
+            None => {
+                // Emergency: all FETs off via raw GPIO (can't use HAL without state)
+                // GPIOA BSRR: set PA7/8/9/10 low (high-side off)
+                (0x4800_0018 as *mut u32).write_volatile(
+                    (1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16))
+                );
+                // GPIOB BSRR: set PB0/1 low (low-side off)
+                (0x4800_0418 as *mut u32).write_volatile(
+                    (1 << (0 + 16)) | (1 << (1 + 16))
+                );
+                loop { cortex_m::asm::nop(); }
+            }
+        }
     })
 }
 

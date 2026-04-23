@@ -1,29 +1,12 @@
 //! Utility functions matching C functions.c
 
-/// Linear map with binary search (matches C recursive implementation).
+/// Linear interpolation with clamping. i64 intermediate prevents overflow.
 pub fn map(x: i32, in_min: i32, in_max: i32, out_min: i32, out_max: i32) -> i32 {
-    if x >= in_max {
-        return out_max;
-    }
-    if x <= in_min {
-        return out_min;
-    }
-    if in_min > in_max {
-        return map(x, in_max, in_min, out_max, out_min);
-    }
-    if out_min == out_max {
-        return out_min;
-    }
-    let in_mid = (in_min + in_max) >> 1;
-    let out_mid = (out_min + out_max) >> 1;
-    if in_min == in_mid {
-        return out_mid;
-    }
-    if x <= in_mid {
-        map(x, in_min, in_mid, out_min, out_mid)
-    } else {
-        map(x, in_mid + 1, in_max, out_mid, out_max)
-    }
+    if in_max == in_min { return out_min; }
+    let lo = in_min.min(in_max);
+    let hi = in_min.max(in_max);
+    let x = if x < lo { lo } else if x > hi { hi } else { x };
+    ((x - in_min) as i64 * (out_max - out_min) as i64 / (in_max - in_min) as i64 + out_min as i64) as i32
 }
 
 /// Absolute difference between two integers.
@@ -87,13 +70,13 @@ mod tests {
 
     #[test]
     fn test_map_inverted_range() {
-        // When in_min > in_max, the >= in_max check fires first for any x >= 0
-        // This matches C behavior: map(50, 100, 0, 0, 1000) = 1000 (x >= in_max)
-        assert_eq!(map(50, 100, 0, 0, 1000), 1000);
-        // Negative x: x <= in_min(100)? No... x >= in_max(0) still true.
-        // Only x < in_max would bypass: map(-5, 100, 0, 0, 1000)
-        // x=-5 < in_max=0? No, -5 >= 0 is false. Then x <= in_min(100)? yes -> out_min=0
-        assert_eq!(map(-5, 100, 0, 0, 1000), 0);
+        // Inverted input range: in_min=100 > in_max=0
+        // map(50, 100, 0, 0, 1000): 50 is midpoint → 500
+        assert_eq!(map(50, 100, 0, 0, 1000), 500);
+        // Below range: clamped to 0 → maps to out_max=1000
+        assert_eq!(map(-5, 100, 0, 0, 1000), 1000);
+        // At in_min=100 → maps to out_min=0
+        assert_eq!(map(100, 100, 0, 0, 1000), 0);
     }
 
     #[test]

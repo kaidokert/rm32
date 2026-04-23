@@ -15,11 +15,7 @@ const EXTI_BASE: u32 = 0x4001_0400;
 
 // L4 EXTI register offsets: IMR1=0x00, EMR1=0x04, RTSR1=0x08, FTSR1=0x0C, SWIER1=0x10, PR1=0x14
 
-#[inline(always)]
-unsafe fn modify_reg(addr: u32, f: impl FnOnce(u32) -> u32) {
-    let ptr = addr as *mut u32;
-    ptr.write_volatile(f(ptr.read_volatile()));
-}
+use crate::regs::modify as modify_reg;
 
 /// Initialize COMP2 for BEMF sensing on L431.
 pub fn init_comp2() {
