@@ -50,3 +50,8 @@ pub const BEMF_TIMEOUT_STRICT: u8 = 10;
 
 /// Throttle level below which BEMF timeout is lenient
 pub const BEMF_LENIENT_THROTTLE: u16 = 150;
+
+/// Fixed-point shift for commutation advance timing.
+/// advance = (temp_advance * commutation_interval) >> ADVANCE_SHIFT
+/// Each unit of temp_advance represents ~1.4 degrees (360 / 256).
+pub const ADVANCE_SHIFT: u32 = 6;

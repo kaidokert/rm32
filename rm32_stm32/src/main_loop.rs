@@ -38,6 +38,8 @@ pub struct MainState {
     pub voltage_divider: u16,
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
+    pub stall_protection_adjust: i32,
+    pub stall_protect_target_interval: u16,
     pub desync_check: bool,
     pub current_filter: CurrentFilter,
     pub voltage_filter: EwmaPow2<3>,
@@ -167,6 +169,14 @@ impl MainState {
             }
         }
         self.last_armed = armed;
+
+        // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
+        if self.config.stall_protection != 0 && shared.running() {
+            let ci = shared.commutation_interval() as i32;
+            let target = self.stall_protect_target_interval as i32;
+            self.stall_protection_adjust += self.stall_pid.calculate(ci, target);
+            self.stall_protection_adjust = self.stall_protection_adjust.clamp(0, 150 * 10000);
+        }
 
         // Telemetry send
         if shared.send_telemetry() {

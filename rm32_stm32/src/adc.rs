@@ -12,7 +12,12 @@
 use crate::pac::{ADC, DMA1, GPIOA, RCC};
 use rm32::hal::Adc;
 
-/// Static DMA buffer for ADC readings (3 x 16-bit).
+// ADC DMA buffer is intentionally kept as a static mut rather than a field on AdcReader.
+// The ADC DMA runs in circular mode: the MAR is configured once in init() and the
+// hardware continuously refills the buffer without software involvement. If the buffer
+// were a struct field, the struct (and therefore the buffer) could be moved in memory
+// after init() returns, causing DMA to write to a stale address and silently corrupt
+// memory. Keeping it static guarantees a fixed address for the lifetime of the program.
 static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
 
 pub struct AdcReader {
@@ -23,7 +28,7 @@ impl AdcReader {
     /// Create a handle to already-initialized ADC hardware.
     pub fn post_init() -> Self { Self { _private: () } }
 
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         let rcc = unsafe { &*RCC::ptr() };
         let gpioa = unsafe { &*GPIOA::ptr() };
         let adc = unsafe { &*ADC::ptr() };
@@ -101,15 +106,15 @@ impl AdcReader {
 
         // Calibrate
         adc.cr().write(|w| unsafe { w.bits(1 << 31) }); // ADCAL
-        while unsafe { adc.cr().read().bits() } & (1 << 31) != 0 {}
+        crate::regs::wait_for(|| unsafe { adc.cr().read().bits() } & (1 << 31) == 0, 100_000, "ADC calibration")?;
 
         // Enable ADC
         cortex_m::asm::delay(64 * 20); // stabilization delay
         adc.isr().write(|w| unsafe { w.bits(1 << 0) }); // clear ADRDY
         adc.cr().write(|w| unsafe { w.bits(1 << 0) }); // ADEN
-        while adc.isr().read().bits() & (1 << 0) == 0 {} // wait ADRDY
+        crate::regs::wait_for(|| adc.isr().read().bits() & (1 << 0) != 0, 100_000, "ADC ready")?;
 
-        Self { _private: () }
+        Ok(Self { _private: () })
     }
 }
 

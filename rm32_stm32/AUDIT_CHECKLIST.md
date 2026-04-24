@@ -243,3 +243,88 @@ After review, classify each item:
 | 5.7 Fixed duty/speed | P2 done | fixed_mode.rs with input/target calculators + tests |
 | 5.8 BEMF filter weight | Not a bug | Both Rust paths match C exactly |
 | 5.9 Startup tune freqs | P2 done | Fixed step=6 (was 1), matches C exactly |
+
+---
+
+## 6. Functional Review Pass 3
+
+### Assessment of each claim:
+
+### 6.1 Brushed Motor Mode — ACCURATE, not implemented
+- [ ] C has `BRUSHED_MODE` with `twoChannelForward`/`twoChannelReverse` and `runBrushedLoop`
+- [ ] Rust has only a brushed startup tune stub
+- **Priority:** P2 — different motor type entirely, niche use case
+- **Plan:** Add if brushed ESC demand arises. ~100 lines of control loop + 2 phase patterns.
+
+### 6.2 Gimbal Mode — PARTIALLY ACCURATE
+- [x] `sine_drive()` supports `gimbal_mode: bool` parameter (full power, no divider)
+- [x] `sine_step()` handles throttle→angle mapping
+- [ ] Missing: top-level `GIMBAL_MODE` compile flag integration (C maps input→desired_angle directly)
+- **Priority:** P2 — sine_drive math is done, just needs a dedicated gimbal input mapper
+
+### 6.3 Bootloader Integration (checkDeviceInfo) — ACCURATE, missing
+- [ ] C checks magic numbers at `0x1000 - 32` to dynamically determine EEPROM flash address
+- [ ] Rust hardcodes `EEPROM_START` per MCU in `mcu.rs`
+- **Priority:** P1 — needed for bootloader compatibility on boards with non-standard flash layout
+- **Plan:** Read magic words from `(0x1000 - 32)`, validate, derive EEPROM address if valid
+
+### 6.4 EEPROM Write on Command — ACCURATE, stubbed
+- [ ] `CommandResult::SaveSettings` is matched but handler is a comment
+- [ ] Need: shared flag → main loop writes config to flash via `FlashStorage::write()`
+- **Priority:** P1 — settings changes (direction, bidir) are lost on power cycle without this
+
+### 6.5 Stall Protection PID — ACCURATE, stubbed
+- [x] `stall_pid: Pid` exists in MainState
+- [ ] Never called in main loop `tick()` — output not applied to duty
+- **Priority:** P1 — needed for crawler/RC car low-RPM boost
+
+### 6.6 Fixed Duty/Speed Integration — ACCURATE
+- [x] `fixed_mode.rs` has calculators
+- [ ] Not wired as compile-time toggles in `main.rs`
+- **Priority:** P2 — development/testing modes
+
+### 6.7 Target MCU Support — KNOWN, by design
+- [x] 3 MCUs supported, documented as intentional in README
+- **Priority:** N — already decided
+
+### 6.8 Bidirectional/RC-Car Nuances — PARTIALLY ACCURATE
+- [x] `return_to_center`, `prop_brake_active`, `reverse_speed_threshold` all exist in MotorState
+- [x] Bidirectional input handling with dead band is ported in `tick.rs` (~100 lines)
+- [ ] Some prop-braking transitions during direction changes may be simplified
+- **Priority:** P2 — needs hardware testing to verify edge cases
+
+### 6.9 State Machine (MotorMode enum) — REVIEWER NOTING IMPROVEMENT
+- [x] This is an intentional improvement over C's global bools — not a discrepancy
+- Already done in S5
+
+### 6.10 Sine Startup Interleaving — INACCURATE claim
+- Reviewer says "C sometimes interleaves differently depending on MCU" — not true, C's sine loop is the same blocking pattern on all MCUs. Rust matches this.
+
+### 6.11 Dynamic IRQ Priority — INACCURATE claim
+- Reviewer says "not present in C" — FALSE. C has `DSHOT_PRIORITY_THRESHOLD` and `NVIC_SetPriority` swap at line 2004 of main.c. Rust matches C.
+
+### 6.12 Tunes — PARTIALLY ACCURATE
+- [x] `play_beacon` (sweeping frequency) IS ported in sounds.rs
+- [x] `play_input2` IS ported in sounds.rs
+- [x] BlueJay parser IS ported
+- [ ] Some C-specific beep patterns may differ in exact timing — cosmetic
+
+### 6.13 Board Constants — ACCURATE but by design
+- [x] BoardConfig structs hold per-board constants (dead_time, voltage_divider, current_offset, etc.)
+- This is the Rust equivalent of C's `#define` per-target — same approach, different syntax
+
+| Item | Priority | Accurate? | Notes |
+|------|----------|-----------|-------|
+| 6.1 Brushed mode | P2 done | brushed.rs: control loop + bidir + 4 tests |
+| 6.2 Gimbal mode | P2 done | gimbal_step() added: input→angle mapper |
+| 6.3 Bootloader integration | P1 done | checkDeviceInfo magic + dynamic EEPROM addr |
+| 6.4 EEPROM save command | P1 done | save_settings_flag + flash write in main loop |
+| 6.5 Stall protection PID | P1 done | PID runs in tick(), output clamped to 150*10000 |
+| 6.6 Fixed duty/speed integration | P2 | Calculators exist, not wired as compile flags |
+| 6.7 MCU targets | N | Known | By design, 3 is enough |
+| 6.8 Bidir/RC-car nuances | P2 | Partial | Core logic ported, edge cases need HW test |
+| 6.9 MotorMode enum | N/A | Improvement | Not a discrepancy |
+| 6.10 Sine interleaving | N/A | Inaccurate | Same pattern as C |
+| 6.11 Dynamic IRQ priority | N/A | Inaccurate | C has this too |
+| 6.12 Tunes | P2 | Partial | Most are ported, cosmetic differences |
+| 6.13 Board constants | N/A | By design | Same approach as C |

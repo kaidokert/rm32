@@ -9,16 +9,13 @@
 use crate::pac::{DMA1, GPIOB, RCC, USART1};
 use rm32::hal::TelemetryUart;
 
-/// Static TX buffer — DMA reads from here.
-static mut TX_BUF: [u8; 49] = [0; 49];
-
 pub struct TelemUart {
-    _private: (),
+    tx_buf: [u8; 49],
 }
 
 impl TelemUart {
     /// Create a handle to already-initialized USART hardware.
-    pub fn post_init() -> Self { Self { _private: () } }
+    pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     /// Initialize USART1 + DMA3 for half-duplex telemetry TX.
     pub fn init() -> Self {
@@ -71,8 +68,9 @@ impl TelemUart {
         dmamux_c2cr.modify(|v| (v & !0x3F) | 51); // USART1_TX = request 51
 
         // Configure DMA channel 3 (index 2)
+        // MAR is set to 0 here; send_dma() sets the actual buffer address before each transfer.
         dma.ch(2).par().write(|w| unsafe { w.bits(usart.tdr().as_ptr() as u32) });
-        dma.ch(2).mar().write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch(2).mar().write(|w| unsafe { w.bits(0) });
 
         // Enable TC + TE interrupts on DMA channel 3
         // (DMA2_3 IRQ handler clears send_telemetry flag)
@@ -85,7 +83,7 @@ impl TelemUart {
             )
         });
 
-        Self { _private: () }
+        Self { tx_buf: [0; 49] }
     }
 }
 
@@ -94,18 +92,16 @@ impl TelemetryUart for TelemUart {
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
-        // Copy data into static buffer
+        // Copy data into instance buffer
         let len = data.len().min(49);
-        unsafe {
-            TX_BUF[..len].copy_from_slice(&data[..len]);
-        }
+        self.tx_buf[..len].copy_from_slice(&data[..len]);
 
         // Set TX direction
         usart.cr1().modify(|_, w| w.te().set_bit());
 
         // Configure and start DMA transfer
         dma.ch(2).cr().modify(|_, w| w.en().clear_bit()); // disable first
-        dma.ch(2).mar().write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch(2).mar().write(|w| unsafe { w.bits(self.tx_buf.as_ptr() as u32) });
         dma.ch(2).ndtr().write(|w| unsafe { w.bits(len as u32) });
 
         // Enable USART DMA TX request

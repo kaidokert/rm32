@@ -4,13 +4,6 @@
 //! L431 has a DMA request mux (CSELR register) unlike F051's fixed mapping.
 
 use rm32::hal::InputCapture;
-
-static mut DMA_BUFFER: [u32; 64] = [0; 64];
-static mut GCR_BUFFER: [u32; 37] = [0; 37];
-
-pub unsafe fn dma_buffer() -> &'static [u32; 64] { &DMA_BUFFER }
-pub unsafe fn gcr_buffer() -> &'static mut [u32; 37] { &mut GCR_BUFFER }
-
 use crate::periph_addr as addr;
 use crate::pac::{DMA1, GPIOA, TIM15};
 use crate::regs::{read as read_reg, modify as modify_reg};
@@ -21,18 +14,24 @@ pub struct L431DshotCapture {
     buffer_size: u16,
     ic_prescaler: u8,
     out_put: bool,
+    dma_buf: [u32; 64],
+    gcr_buf: [u32; 37],
 }
 
 impl L431DshotCapture {
     pub fn new() -> Self {
         Self {
             buffer_size: 32,
-            ic_prescaler: 80 / 6, // CPU_FREQUENCY_MHZ / 6 ≈ 13
+            ic_prescaler: 80 / 6,
             out_put: false,
+            dma_buf: [0; 64],
+            gcr_buf: [0; 37],
         }
     }
 
     pub fn is_output(&self) -> bool { self.out_put }
+    pub fn dma_buffer(&self) -> &[u32; 64] { &self.dma_buf }
+    pub fn gcr_buffer(&mut self) -> &mut [u32; 37] { &mut self.gcr_buf }
 
     pub fn init(&self) {
         let gpioa = unsafe { &*GPIOA::ptr() };
@@ -77,7 +76,7 @@ impl InputCapture for L431DshotCapture {
             self.out_put = false;
 
             // DMA CH5: periph→memory, 32-bit, TCIE
-            dma.cmar5.write(|w| w.bits(DMA_BUFFER.as_ptr() as u32));
+            dma.cmar5.write(|w| w.bits(self.dma_buf.as_ptr() as u32));
             dma.cpar5.write(|w| w.bits(tim.ccr1.as_ptr() as u32));
             dma.cndtr5.write(|w| w.bits(self.buffer_size as u32));
             dma.ccr5.write(|w| w.bits(0x98B));
@@ -106,7 +105,7 @@ impl InputCapture for L431DshotCapture {
             modify_reg(TIM15::ptr() as u32 + 0x44, |v| v | (1 << 15)); // BDTR MOE
             self.out_put = true;
 
-            dma.cmar5.write(|w| w.bits(GCR_BUFFER.as_ptr() as u32));
+            dma.cmar5.write(|w| w.bits(self.gcr_buf.as_ptr() as u32));
             dma.cpar5.write(|w| w.bits(tim.ccr1.as_ptr() as u32));
             dma.cndtr5.write(|w| w.bits(23 + self.buffer_size as u32 / 4));
             dma.ccr5.write(|w| w.bits(0x99B));

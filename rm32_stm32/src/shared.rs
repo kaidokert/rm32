@@ -21,6 +21,8 @@ pub struct SharedState {
     dshot: AtomicBool,
     servo_pwm: AtomicBool,
     dshot_telemetry: AtomicBool,
+    save_settings_flag: AtomicBool,
+    send_esc_info_flag: AtomicBool,
 
     // Timing (ISR writes, main reads)
     zero_crosses: AtomicU32,
@@ -53,6 +55,8 @@ impl SharedState {
             dshot: AtomicBool::new(false),
             servo_pwm: AtomicBool::new(false),
             dshot_telemetry: AtomicBool::new(false),
+            save_settings_flag: AtomicBool::new(false),
+            send_esc_info_flag: AtomicBool::new(false),
             zero_crosses: AtomicU32::new(0),
             commutation_interval: AtomicU32::new(12500),
             newinput: AtomicU16::new(0),
@@ -112,6 +116,12 @@ impl SharedState {
 
     pub fn dshot_telemetry(&self) -> bool { self.dshot_telemetry.load(ORD) }
     pub fn set_dshot_telemetry(&self, v: bool) { self.dshot_telemetry.store(v, ORD); }
+
+    pub fn save_settings_flag(&self) -> bool { self.save_settings_flag.load(ORD) }
+    pub fn set_save_settings_flag(&self, v: bool) { self.save_settings_flag.store(v, ORD); }
+
+    pub fn send_esc_info_flag(&self) -> bool { self.send_esc_info_flag.load(ORD) }
+    pub fn set_send_esc_info_flag(&self, v: bool) { self.send_esc_info_flag.store(v, ORD); }
 
     // --- U32 accessors ---
 

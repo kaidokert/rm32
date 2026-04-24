@@ -100,11 +100,11 @@ pub fn handle_dma_tc() {
             state.hal.input.receive_dshot_dma();
         } else {
             #[cfg(feature = "stm32g071")]
-            let gcr = unsafe { crate::input_capture::gcr_buffer() };
+            let gcr = state.hal.input.gcr_buffer();
             #[cfg(feature = "stm32f051")]
-            let gcr = unsafe { crate::input_capture_f051::gcr_buffer() };
+            let gcr = state.hal.input.gcr_buffer();
             #[cfg(feature = "stm32l431")]
-            let gcr = unsafe { crate::input_capture_l431::gcr_buffer() };
+            let gcr = state.hal.input.gcr_buffer();
 
             // EDT: decide whether to send eRPM or extended data frame
             let value_12bit = match state.edt.next_frame(
@@ -132,11 +132,11 @@ pub fn handle_exti_frame() {
     let shared = isr::shared();
 
     #[cfg(feature = "stm32g071")]
-    let buf = unsafe { crate::input_capture::dma_buffer() };
+    let buf = state.hal.input.dma_buffer();
     #[cfg(feature = "stm32f051")]
-    let buf = unsafe { crate::input_capture_f051::dma_buffer() };
+    let buf = state.hal.input.dma_buffer();
     #[cfg(feature = "stm32l431")]
-    let buf = unsafe { crate::input_capture_l431::dma_buffer() };
+    let buf = state.hal.input.dma_buffer();
 
     #[cfg(feature = "stm32g071")]
     let pin_high = unsafe { (0x4800_0410 as *const u32).read_volatile() } & (1 << 4) != 0; // GPIOB IDR, PB4
@@ -179,13 +179,13 @@ pub fn handle_exti_frame() {
         );
         match result {
             rm32::dshot_commands::CommandResult::SaveSettings => {
-                // Signal main loop to save (via shared flag or similar)
+                shared.set_save_settings_flag(true);
             }
             rm32::dshot_commands::CommandResult::PlayTone(_tone) => {
-                // Beacons: would need PWM output, handled in main
+                // Beacons: handled in main loop
             }
             rm32::dshot_commands::CommandResult::SendEscInfo => {
-                // Signal main loop to send ESC info packet
+                shared.set_send_esc_info_flag(true);
             }
             _ => {}
         }

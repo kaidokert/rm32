@@ -53,7 +53,7 @@ pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
         use rm32::hal::InputCapture;
         input.receive_dshot_dma();
     }
-    let _adc = crate::adc::AdcReader::init();
+    let _ = crate::adc::AdcReader::init();
     let _telem = crate::telemetry_uart::TelemUart::init();
 
     // TIM6: 20kHz
@@ -184,7 +184,7 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
     }
 
     // ADC
-    let _adc = crate::adc_f051::F051Adc::init();
+    let _ = crate::adc_f051::F051Adc::init(); // Result ignored — ADC failure is non-fatal
 
     // UART telemetry
     let _telem = crate::telemetry_uart_f051::F051TelemUart::init();
@@ -326,7 +326,7 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
     }
 
     // ADC
-    let _adc = crate::adc_l431::L431Adc::init();
+    let _ = crate::adc_l431::L431Adc::init();
 
     // UART telemetry
     let _telem = crate::telemetry_uart_l431::L431TelemUart::init();

@@ -5,6 +5,12 @@
 
 use rm32::hal::Adc;
 
+// ADC DMA buffer is intentionally kept as a static mut rather than a field on L431Adc.
+// The ADC DMA runs in circular mode: the MAR is configured once in init() and the
+// hardware continuously refills the buffer without software involvement. If the buffer
+// were a struct field, the struct (and therefore the buffer) could be moved in memory
+// after init() returns, causing DMA to write to a stale address and silently corrupt
+// memory. Keeping it static guarantees a fixed address for the lifetime of the program.
 static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
 
 use crate::periph_addr as addr;
@@ -18,7 +24,7 @@ pub struct L431Adc { _private: () }
 impl L431Adc {
     pub fn post_init() -> Self { Self { _private: () } }
 
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         let adc = unsafe { &*ADC1::ptr() };
         let adc_common = unsafe { &*ADC_COMMON::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
@@ -81,16 +87,16 @@ impl L431Adc {
             // Calibrate (single-ended)
             adc.cr.modify(|_, w| w.adcaldif().clear_bit()); // ADCALDIF = 0 (single-ended)
             adc.cr.modify(|_, w| w.adcal().set_bit());       // ADCAL
-            while adc.cr.read().adcal().bit_is_set() {}
+            crate::regs::wait_for(|| !adc.cr.read().adcal().bit_is_set(), 100_000, "ADC calibration")?;
 
             cortex_m::asm::delay(80 * 20);
 
             // Enable ADC
             adc.isr.write(|w| unsafe { w.bits(1 << 0) }); // clear ADRDY
             adc.cr.modify(|_, w| w.aden().set_bit()); // ADEN
-            while adc.isr.read().adrdy().bit_is_clear() {}
+            crate::regs::wait_for(|| adc.isr.read().adrdy().bit_is_set(), 100_000, "ADC ready")?;
         }
-        Self { _private: () }
+        Ok(Self { _private: () })
     }
 }
 

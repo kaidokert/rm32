@@ -12,30 +12,61 @@
 //!   Phase C: high=PA8,  low=PA7
 
 use rm32::hal::PhaseOutput;
+use crate::pac::{GPIOA, GPIOB};
 
-// GPIO register offsets (standard for all STM32)
-const MODER: u32 = 0x00;
-const BSRR: u32 = 0x18;
-
-use crate::periph_addr as addr;
-
-const GPIOA_BASE: u32 = addr::GPIOA;
-const GPIOB_BASE: u32 = addr::GPIOB;
-
-/// GPIO mode values (STM32G0 MODER register: 2 bits per pin)
-const MODE_INPUT: u32 = 0b00;
+/// GPIO MODER values: 2 bits per pin
 const MODE_OUTPUT: u32 = 0b01;
 const MODE_ALTERNATE: u32 = 0b10;
 
-/// Phase pin descriptor
+/// Phase pin descriptor — port reference + pin number.
 struct PhasePin {
-    port_is_a: bool, // true = GPIOA, false = GPIOB
-    pin: u8,         // pin number 0-15
+    /// True = GPIOA, false = GPIOB
+    port_is_a: bool,
+    pin: u8,
+}
+
+impl PhasePin {
+    #[inline(always)]
+    fn moder_ptr(&self) -> *mut u32 {
+        // MODER is at offset 0x00 from GPIO base — same as the PAC's RegisterBlock start
+        if self.port_is_a { GPIOA::PTR as *mut u32 } else { GPIOB::PTR as *mut u32 }
+    }
+
+    #[inline(always)]
+    fn bsrr_ptr(&self) -> *mut u32 {
+        // BSRR is at offset 0x18
+        if self.port_is_a {
+            (GPIOA::PTR as u32 + 0x18) as *mut u32
+        } else {
+            (GPIOB::PTR as u32 + 0x18) as *mut u32
+        }
+    }
+
+    /// Set MODER bits for this pin.
+    #[inline(always)]
+    fn set_mode(&self, mode: u32) {
+        let offset = self.pin as u32 * 2;
+        unsafe {
+            let ptr = self.moder_ptr();
+            ptr.write_volatile((ptr.read_volatile() & !(0b11 << offset)) | (mode << offset));
+        }
+    }
+
+    /// Set pin high via BSRR (write-only, no read needed).
+    #[inline(always)]
+    fn set_high(&self) {
+        unsafe { self.bsrr_ptr().write_volatile(1 << self.pin); }
+    }
+
+    /// Set pin low via BSRR reset bits.
+    #[inline(always)]
+    fn set_low(&self) {
+        unsafe { self.bsrr_ptr().write_volatile(1 << (self.pin + 16)); }
+    }
 }
 
 /// 3-phase driver for HARDWARE_GROUP_G0_A.
 pub struct PhaseDriver {
-    // Pin assignments
     a_high: PhasePin, // PA10
     a_low: PhasePin,  // PB1
     b_high: PhasePin, // PA9
@@ -46,7 +77,6 @@ pub struct PhaseDriver {
 }
 
 impl PhaseDriver {
-    /// Create phase driver for HARDWARE_GROUP_G0_A pin assignment.
     pub fn new_g0_a(comp_pwm: bool) -> Self {
         Self {
             a_high: PhasePin { port_is_a: true, pin: 10 },
@@ -60,97 +90,42 @@ impl PhaseDriver {
     }
 
     #[inline(always)]
-    fn port_base(&self, pin: &PhasePin) -> u32 {
-        if pin.port_is_a { GPIOA_BASE } else { GPIOB_BASE }
-    }
-
-    #[inline(always)]
-    fn set_mode(&self, pin: &PhasePin, mode: u32) {
-        let base = self.port_base(pin);
-        let offset = pin.pin as u32 * 2;
-        unsafe {
-            let ptr = (base + MODER) as *mut u32;
-            let val = ptr.read_volatile();
-            ptr.write_volatile((val & !(0b11 << offset)) | (mode << offset));
-        }
-    }
-
-    #[inline(always)]
-    fn set_high(&self, pin: &PhasePin) {
-        let base = self.port_base(pin);
-        unsafe { ((base + BSRR) as *mut u32).write_volatile(1 << pin.pin); }
-    }
-
-    #[inline(always)]
-    fn set_low(&self, pin: &PhasePin) {
-        let base = self.port_base(pin);
-        unsafe { ((base + BSRR) as *mut u32).write_volatile(1 << (pin.pin + 16)); }
-    }
-
-    /// Phase PWM: high-side alternate, low-side alternate (comp_pwm) or off.
-    #[inline(always)]
     fn phase_pwm(&self, high: &PhasePin, low: &PhasePin) {
         if !self.comp_pwm {
-            self.set_mode(low, MODE_OUTPUT);
-            self.set_low(low);
+            low.set_mode(MODE_OUTPUT);
+            low.set_low();
         } else {
-            self.set_mode(low, MODE_ALTERNATE);
+            low.set_mode(MODE_ALTERNATE);
         }
-        self.set_mode(high, MODE_ALTERNATE);
+        high.set_mode(MODE_ALTERNATE);
     }
 
-    /// Phase LOW: low-side on, high-side off.
     #[inline(always)]
     fn phase_low(&self, high: &PhasePin, low: &PhasePin) {
-        self.set_mode(low, MODE_OUTPUT);
-        self.set_high(low); // turn on low-side FET
-        self.set_mode(high, MODE_OUTPUT);
-        self.set_low(high); // turn off high-side FET
+        low.set_mode(MODE_OUTPUT);
+        low.set_high();
+        high.set_mode(MODE_OUTPUT);
+        high.set_low();
     }
 
-    /// Phase FLOAT: both FETs off.
     #[inline(always)]
     fn phase_float(&self, high: &PhasePin, low: &PhasePin) {
-        self.set_mode(low, MODE_OUTPUT);
-        self.set_low(low); // low-side off
-        self.set_mode(high, MODE_OUTPUT);
-        self.set_low(high); // high-side off
+        low.set_mode(MODE_OUTPUT);
+        low.set_low();
+        high.set_mode(MODE_OUTPUT);
+        high.set_low();
     }
 }
 
 impl PhaseOutput for PhaseDriver {
     fn com_step(&mut self, step: u8) {
         match step {
-            1 => { // A-B: A=PWM, B=LOW, C=FLOAT
-                self.phase_float(&self.c_high, &self.c_low);
-                self.phase_low(&self.b_high, &self.b_low);
-                self.phase_pwm(&self.a_high, &self.a_low);
-            }
-            2 => { // C-B: C=PWM, B=LOW, A=FLOAT
-                self.phase_float(&self.a_high, &self.a_low);
-                self.phase_low(&self.b_high, &self.b_low);
-                self.phase_pwm(&self.c_high, &self.c_low);
-            }
-            3 => { // C-A: C=PWM, A=LOW, B=FLOAT
-                self.phase_float(&self.b_high, &self.b_low);
-                self.phase_low(&self.a_high, &self.a_low);
-                self.phase_pwm(&self.c_high, &self.c_low);
-            }
-            4 => { // B-A: B=PWM, A=LOW, C=FLOAT
-                self.phase_float(&self.c_high, &self.c_low);
-                self.phase_low(&self.a_high, &self.a_low);
-                self.phase_pwm(&self.b_high, &self.b_low);
-            }
-            5 => { // B-C: B=PWM, C=LOW, A=FLOAT
-                self.phase_float(&self.a_high, &self.a_low);
-                self.phase_low(&self.c_high, &self.c_low);
-                self.phase_pwm(&self.b_high, &self.b_low);
-            }
-            6 => { // A-C: A=PWM, C=LOW, B=FLOAT
-                self.phase_float(&self.b_high, &self.b_low);
-                self.phase_low(&self.c_high, &self.c_low);
-                self.phase_pwm(&self.a_high, &self.a_low);
-            }
+            1 => { self.phase_float(&self.c_high, &self.c_low); self.phase_low(&self.b_high, &self.b_low); self.phase_pwm(&self.a_high, &self.a_low); }
+            2 => { self.phase_float(&self.a_high, &self.a_low); self.phase_low(&self.b_high, &self.b_low); self.phase_pwm(&self.c_high, &self.c_low); }
+            3 => { self.phase_float(&self.b_high, &self.b_low); self.phase_low(&self.a_high, &self.a_low); self.phase_pwm(&self.c_high, &self.c_low); }
+            4 => { self.phase_float(&self.c_high, &self.c_low); self.phase_low(&self.a_high, &self.a_low); self.phase_pwm(&self.b_high, &self.b_low); }
+            5 => { self.phase_float(&self.a_high, &self.a_low); self.phase_low(&self.c_high, &self.c_low); self.phase_pwm(&self.b_high, &self.b_low); }
+            6 => { self.phase_float(&self.b_high, &self.b_low); self.phase_low(&self.c_high, &self.c_low); self.phase_pwm(&self.a_high, &self.a_low); }
             _ => {}
         }
     }
@@ -174,16 +149,11 @@ impl PhaseOutput for PhaseDriver {
     }
 
     fn proportional_brake(&mut self) {
-        // All high-side off, all low-side PWM (duty cycle controls braking force)
-        self.set_mode(&self.a_high, MODE_OUTPUT);
-        self.set_low(&self.a_high);
-        self.set_mode(&self.b_high, MODE_OUTPUT);
-        self.set_low(&self.b_high);
-        self.set_mode(&self.c_high, MODE_OUTPUT);
-        self.set_low(&self.c_high);
-
-        self.set_mode(&self.a_low, MODE_ALTERNATE);
-        self.set_mode(&self.b_low, MODE_ALTERNATE);
-        self.set_mode(&self.c_low, MODE_ALTERNATE);
+        self.a_high.set_mode(MODE_OUTPUT); self.a_high.set_low();
+        self.b_high.set_mode(MODE_OUTPUT); self.b_high.set_low();
+        self.c_high.set_mode(MODE_OUTPUT); self.c_high.set_low();
+        self.a_low.set_mode(MODE_ALTERNATE);
+        self.b_low.set_mode(MODE_ALTERNATE);
+        self.c_low.set_mode(MODE_ALTERNATE);
     }
 }

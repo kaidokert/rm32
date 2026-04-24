@@ -12,7 +12,7 @@ use rm32::commutation::Commutation;
 use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, TelemetryState};
 use rm32::config::EepromConfig;
 use rm32::pid::Pid;
-use rm32::hal::{PwmOutput, PhaseOutput, System};
+use rm32::hal::{PwmOutput, PhaseOutput, System, TelemetryUart as _};
 
 use rm32_stm32::isr::{self, IsrState, IsrHal};
 use rm32_stm32::flash::FlashStorage;
@@ -154,6 +154,8 @@ fn main() -> ! {
         voltage_divider: BOARD.voltage_divider,
         millivolt_per_amp: BOARD.millivolt_per_amp,
         current_offset: BOARD.current_offset,
+        stall_protection_adjust: 0,
+        stall_protect_target_interval: BOARD.stall_protect_interval,
         desync_check: false,
         current_filter: rm32::current::CurrentFilter::new(),
         voltage_filter: rm32::filter::EwmaPow2::new(),
@@ -161,11 +163,31 @@ fn main() -> ! {
         just_armed: false,
     };
 
+    // --- Check bootloader device info for dynamic EEPROM address ---
+    let eeprom_address = {
+        const DEVINFO_MAGIC1: u32 = 0x5925_E3DA;
+        const DEVINFO_MAGIC2: u32 = 0x4EB8_63D9;
+        const DEVINFO_ADDR: u32 = 0x1000 - 32;
+        let magic1 = unsafe { (DEVINFO_ADDR as *const u32).read_volatile() };
+        let magic2 = unsafe { ((DEVINFO_ADDR + 4) as *const u32).read_volatile() };
+        if magic1 == DEVINFO_MAGIC1 && magic2 == DEVINFO_MAGIC2 {
+            let device_code = unsafe { *((DEVINFO_ADDR + 8 + 4) as *const u8) };
+            match device_code {
+                0x1F => 0x0800_7C00u32,
+                0x35 => 0x0800_F800u32,
+                0x2B => 0x0801_F800u32,
+                _ => config::EEPROM_START as u32,
+            }
+        } else {
+            config::EEPROM_START as u32
+        }
+    };
+
     // --- Load EEPROM settings from flash ---
     let flash = FlashStorage::new();
     {
         use rm32::hal::Flash as _;
-        flash.read(config::EEPROM_START, main_state.config.as_bytes_mut());
+        flash.read(eeprom_address, main_state.config.as_bytes_mut());
     }
     // Validate and apply version migration
     if !main_state.config.is_valid() {
@@ -355,6 +377,26 @@ fn main() -> ! {
                     ((NVIC_IPR + COMP_IRQ) as *mut u8).write_volatile(0x00);
                 }
             }
+        }
+
+        // EEPROM save on DShot command
+        if shared.save_settings_flag() {
+            shared.set_save_settings_flag(false);
+            // Copy ISR config back and write to flash
+            isr::with_isr_state(|isr| {
+                main_state.config = isr.config.clone();
+            });
+            let mut flash = FlashStorage::new();
+            use rm32::hal::Flash as _;
+            flash.write(eeprom_address, main_state.config.as_bytes());
+        }
+
+        // ESC info response on DShot command
+        if shared.send_esc_info_flag() {
+            shared.set_send_esc_info_flag(false);
+            let mut info_pkt = [0u8; 49];
+            rm32::telemetry::make_info_packet(&mut info_pkt, main_state.config.as_bytes());
+            telem.send_dma(&info_pkt);
         }
 
         sys.reload_watchdog();

@@ -11,7 +11,12 @@
 
 use rm32::hal::Adc;
 
-/// Static DMA buffer for ADC readings (3 x 16-bit).
+// ADC DMA buffer is intentionally kept as a static mut rather than a field on F051Adc.
+// The ADC DMA runs in circular mode: the MAR is configured once in init() and the
+// hardware continuously refills the buffer without software involvement. If the buffer
+// were a struct field, the struct (and therefore the buffer) could be moved in memory
+// after init() returns, causing DMA to write to a stale address and silently corrupt
+// memory. Keeping it static guarantees a fixed address for the lifetime of the program.
 static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
 
 use crate::periph_addr as addr;
@@ -27,7 +32,7 @@ pub struct F051Adc {
 impl F051Adc {
     pub fn post_init() -> Self { Self { _private: () } }
 
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         unsafe {
             // Enable clocks: ADC (APB2ENR bit 9), DMA1 (AHBENR bit 0)
             let apb2enr = (RCC_BASE + 0x18) as *mut u32;
@@ -82,7 +87,7 @@ impl F051Adc {
 
             // Calibrate
             adc.cr.write(|w| w.adcal().start_calibration());
-            while adc.cr.read().adcal().is_calibrating() {}
+            crate::regs::wait_for(|| !adc.cr.read().adcal().is_calibrating(), 100_000, "ADC calibration")?;
 
             // Stabilization delay
             cortex_m::asm::delay(48 * 20);
@@ -90,9 +95,9 @@ impl F051Adc {
             // Enable ADC
             adc.isr.write(|w| w.bits(1 << 0)); // clear ADRDY
             adc.cr.write(|w| w.aden().set_bit());
-            while adc.isr.read().adrdy().bit_is_clear() {} // wait ADRDY
+            crate::regs::wait_for(|| adc.isr.read().adrdy().bit_is_set(), 100_000, "ADC ready")?;
         }
-        Self { _private: () }
+        Ok(Self { _private: () })
     }
 }
 

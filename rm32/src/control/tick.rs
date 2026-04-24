@@ -91,9 +91,9 @@ impl MotorState {
             (self.timing.commutation_interval + zc_avg) >> 1;
 
         let advance = if self.config.auto_advance == 0 {
-            (self.timing.commutation_interval * self.bemf.temp_advance as u32) >> 6
+            (self.timing.commutation_interval * self.bemf.temp_advance as u32) >> crate::constants::ADVANCE_SHIFT
         } else {
-            (self.timing.commutation_interval * self.bemf.auto_advance_level as u32) >> 6
+            (self.timing.commutation_interval * self.bemf.auto_advance_level as u32) >> crate::constants::ADVANCE_SHIFT
         };
         self.bemf.advance = advance as u16;
 

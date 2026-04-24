@@ -5,18 +5,16 @@
 
 use rm32::hal::TelemetryUart;
 
-static mut TX_BUF: [u8; 49] = [0; 49];
-
 use crate::periph_addr as addr;
 use crate::pac::{DMA1, GPIOB, USART1};
 use crate::regs::modify as modify_reg;
 
 const RCC_BASE: u32 = addr::RCC;
 
-pub struct L431TelemUart { _private: () }
+pub struct L431TelemUart { tx_buf: [u8; 49] }
 
 impl L431TelemUart {
-    pub fn post_init() -> Self { Self { _private: () } }
+    pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     pub fn init() -> Self {
         let gpiob = unsafe { &*GPIOB::ptr() };
@@ -53,8 +51,9 @@ impl L431TelemUart {
             dma.cselr.modify(|r, w| w.bits((r.bits() & !(0xF << 12)) | (2 << 12)));
 
             // DMA CH4: memory→periph, 8-bit, MINC, TCIE
+            // MAR is set to 0 here; send_dma() sets the actual buffer address before each transfer.
             dma.cpar4.write(|w| w.bits(usart.tdr.as_ptr() as u32));
-            dma.cmar4.write(|w| w.bits(TX_BUF.as_ptr() as u32));
+            dma.cmar4.write(|w| w.bits(0));
             dma.ccr4.write(|w| w.bits(
                 (1 << 1)   // TCIE
                 | (1 << 3) // TEIE
@@ -62,7 +61,7 @@ impl L431TelemUart {
                 | (1 << 7) // MINC
             ));
         }
-        Self { _private: () }
+        Self { tx_buf: [0; 49] }
     }
 }
 
@@ -72,10 +71,10 @@ impl TelemetryUart for L431TelemUart {
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
+        self.tx_buf[..len].copy_from_slice(&data[..len]);
         unsafe {
-            TX_BUF[..len].copy_from_slice(&data[..len]);
             dma.ccr4.modify(|r, w| w.bits(r.bits() & !1)); // disable
-            dma.cmar4.write(|w| w.bits(TX_BUF.as_ptr() as u32));
+            dma.cmar4.write(|w| w.bits(self.tx_buf.as_ptr() as u32));
             dma.cndtr4.write(|w| w.bits(len as u32));
             usart.cr3.modify(|_, w| w.dmat().set_bit()); // DMAT
             dma.ccr4.modify(|r, w| w.bits(r.bits() | 1)); // enable

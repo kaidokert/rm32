@@ -12,35 +12,13 @@
 use crate::pac::{DMA1, TIM3, RCC, GPIOB};
 use rm32::hal::InputCapture;
 
-/// Static DMA buffer — must be at a fixed address for DMA peripheral.
-/// Accessed by DMA hardware (write) and EXTI ISR (read).
-static mut DMA_BUFFER: [u32; 64] = [0; 64];
-
-/// Static GCR telemetry response buffer for bidir DShot TX.
-/// Written by encode_telemetry, read by DMA during send.
-static mut GCR_BUFFER: [u32; 37] = [0; 37];
-
-/// Get a reference to the DMA buffer for frame decoding in ISR.
-///
-/// # Safety
-/// Only call from ISR context (DMA is disabled when reading).
-pub unsafe fn dma_buffer() -> &'static [u32; 64] {
-    &DMA_BUFFER
-}
-
-/// Get a mutable reference to the GCR buffer for encoding telemetry response.
-///
-/// # Safety
-/// Only call from ISR context when DMA is not active on this buffer.
-pub unsafe fn gcr_buffer() -> &'static mut [u32; 37] {
-    &mut GCR_BUFFER
-}
-
-/// Input capture state
+/// Input capture state — owns DMA and GCR buffers.
 pub struct DshotCapture {
     buffer_size: u16,
     ic_prescaler: u8,
     out_put: bool,
+    dma_buf: [u32; 64],
+    gcr_buf: [u32; 37],
 }
 
 impl DshotCapture {
@@ -49,13 +27,15 @@ impl DshotCapture {
             buffer_size: 32,
             ic_prescaler: 64 / 6, // CPU_FREQUENCY_MHZ / 6
             out_put: false,
+            dma_buf: [0; 64],
+            gcr_buf: [0; 37],
         }
     }
 
     /// Returns true if currently in output (TX) mode.
-    pub fn is_output(&self) -> bool {
-        self.out_put
-    }
+    pub fn is_output(&self) -> bool { self.out_put }
+    pub fn dma_buffer(&self) -> &[u32; 64] { &self.dma_buf }
+    pub fn gcr_buffer(&mut self) -> &mut [u32; 37] { &mut self.gcr_buf }
 
     /// Initialize TIM3 + DMA1_CH1 for input capture.
     pub fn init(&self) {
@@ -115,7 +95,7 @@ impl DshotCapture {
 
         // DMA1 Channel 1 config
         dma.ch(0).cr().write(|w| unsafe { w.bits(0) }); // disable first
-        dma.ch(0).mar().write(|w| unsafe { w.bits(DMA_BUFFER.as_ptr() as u32) });
+        dma.ch(0).mar().write(|w| unsafe { w.bits(self.dma_buf.as_ptr() as u32) });
         dma.ch(0).par().write(|w| unsafe { w.bits(tim3.ccr1().as_ptr() as u32) });
         dma.ch(0).ndtr().write(|w| unsafe { w.bits(self.buffer_size as u32) });
         // Enable: mem increment, 32-bit periph/mem, transfer complete IRQ
@@ -154,7 +134,7 @@ impl InputCapture for DshotCapture {
 
         // DMA: memory→peripheral, read GCR buffer, write to CCR1
         dma.ch(0).cr().write(|w| unsafe { w.bits(0) }); // disable
-        dma.ch(0).mar().write(|w| unsafe { w.bits(GCR_BUFFER.as_ptr() as u32) });
+        dma.ch(0).mar().write(|w| unsafe { w.bits(self.gcr_buf.as_ptr() as u32) });
         dma.ch(0).par().write(|w| unsafe { w.bits(tim3.ccr1().as_ptr() as u32) });
         dma.ch(0).ndtr().write(|w| unsafe { w.bits(23 + self.buffer_size as u32 / 4) }); // 23 + padding
         // 0x99B = DIR=1 (mem→periph) | MINC | PSIZE=16bit | MSIZE=32bit | TCIE | EN

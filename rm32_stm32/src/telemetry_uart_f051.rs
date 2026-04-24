@@ -8,15 +8,12 @@ use crate::pac::{DMA1, GPIOB, RCC, USART1};
 use crate::regs::modify as modify_reg;
 use crate::periph_addr as addr;
 
-/// Static TX buffer — DMA reads from here.
-static mut TX_BUF: [u8; 49] = [0; 49];
-
 pub struct F051TelemUart {
-    _private: (),
+    tx_buf: [u8; 49],
 }
 
 impl F051TelemUart {
-    pub fn post_init() -> Self { Self { _private: () } }
+    pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     pub fn init() -> Self {
         let rcc = unsafe { &*RCC::ptr() };
@@ -54,7 +51,7 @@ impl F051TelemUart {
 
         // DMA1 Channel 2: USART1_TX (fixed on F0)
         dma.ch2.par.write(|w| unsafe { w.bits(usart.tdr.as_ptr() as u32) });
-        dma.ch2.mar.write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch2.mar.write(|w| unsafe { w.bits(0) }); // set by send_dma()
         dma.ch2.cr.write(|w| {
             w.tcie().enabled()
              .teie().enabled()
@@ -62,7 +59,7 @@ impl F051TelemUart {
              .minc().enabled()
         });
 
-        Self { _private: () }
+        Self { tx_buf: [0; 49] }
     }
 }
 
@@ -72,14 +69,12 @@ impl TelemetryUart for F051TelemUart {
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
-        unsafe {
-            TX_BUF[..len].copy_from_slice(&data[..len]);
-        }
+        self.tx_buf[..len].copy_from_slice(&data[..len]);
 
         // Disable DMA channel
         dma.ch2.cr.modify(|_, w| w.en().clear_bit());
         // Set address and count
-        dma.ch2.mar.write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch2.mar.write(|w| unsafe { w.bits(self.tx_buf.as_ptr() as u32) });
         dma.ch2.ndtr.write(|w| unsafe { w.bits(len as u32) });
         // Enable USART DMA TX request
         usart.cr3.modify(|_, w| w.dmat().set_bit());

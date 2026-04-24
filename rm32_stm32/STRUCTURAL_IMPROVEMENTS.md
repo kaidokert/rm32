@@ -25,11 +25,23 @@
 - **Risk:** Low — isolated to config.rs
 - **Effort:** 1 hour
 
-### S7. DMA buffer ownership
-- **Current:** `static mut DMA_BUFFER: [u32; 64]` with `unsafe` accessor functions
-- **Fix:** Use `cortex_m::singleton!()` or move into DshotCapture struct
-- **Risk:** Medium — DMA hardware holds raw pointer, lifetime must be `'static`
-- **Effort:** 1 hour per MCU (3 MCUs)
+### S7. DMA buffer ownership — DONE
+- Moved 6 of 9 `static mut` buffers into owning structs (input capture × 3 MCUs, telemetry × 3 MCUs)
+- ADC buffers remain `static mut` (circular DMA, documented reason)
+- ISR accesses via safe struct methods instead of `unsafe fn` free functions
+
+### S11. Fallible init with Result
+- **Current:** `init()` functions return `Self` and hang on hardware failure (busy-wait loops)
+- **Fix:** Return `Result<Self, InitError>` with timeout on hardware flag waits
+- **Risk:** Low — isolated to init paths, doesn't affect ISR performance
+- **Effort:** 2 hours
+- **Impact:** Firmware can enter safe mode instead of hanging on bad hardware
+
+### S12. Convert phase.rs BSRR to PAC
+- **Current:** `phase.rs` uses raw `(GPIOA_BASE + BSRR) as *mut u32` for pin toggling
+- **Fix:** Use PAC `gpioa.bsrr().write(|w| ...)` — should be zero-cost, same codegen
+- **Risk:** Low — verify no performance regression in ISR
+- **Effort:** 30 minutes
 
 ### S9. Newtype units (selective)
 - **Current:** All values are raw u16/u32/i32
@@ -58,7 +70,20 @@
 3. ~~S4~~ DONE
 4. ~~S2~~ DONE
 5. ~~S8~~ DONE (PAC sweep)
-6. **S6** — Safe EEPROM serialization + size assert (1 hr)
-7. **S5** — Motor state enum (2-3 hr)
-8. **S7** — DMA buffer ownership (3 hr)
-9. **S9** — Newtypes (selective, opportunistic)
+6. ~~S6~~ DONE (size assert + from_bytes)
+7. ~~S5~~ DONE (MotorMode enum, AtomicU8)
+8. ~~S7~~ DONE (DMA buffers in structs, ADC stays static)
+9. **S12** — Convert phase.rs BSRR to PAC (30 min)
+10. **S11** — Fallible init with Result (2 hr)
+11. **S9** — Newtypes (selective, opportunistic)
+12. **S10** — Tick decomposition (if it grows)
+
+## NOT ADDING (from latest review)
+
+| Suggestion | Why not |
+|-----------|---------|
+| Generic ADC/UART drivers | 3 concrete types with MCU-specific register layouts. Generics add complexity for no benefit. |
+| Const generic pins | Pin assignments are board compile-time constants. Over-engineering. |
+| Bitfield crates | PAC already provides named bitfields. |
+| bytemuck for EEPROM | All fields `u8`/`[u8;N]`, no padding. Size assert catches layout issues. |
+| HAL trait bypass fix | Reviewer misread — core uses traits, raw access is in HAL *implementation*. |

@@ -141,7 +141,7 @@ fn bemf_polling(
         let ci = shared.commutation_interval();
         let new_ci = (bemf.this_zc_time as u32 + 3 * ci) / 4;
         shared.set_commutation_interval(new_ci);
-        let advance = (bemf.temp_advance as u32 * new_ci) >> 6;
+        let advance = (bemf.temp_advance as u32 * new_ci) >> ADVANCE_SHIFT;
         bemf.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
         let zc = shared.zero_crosses();
         if zc >= 5 {
@@ -201,7 +201,7 @@ pub fn commutation_timer_expired(
     let ci = shared.commutation_interval();
     let new_ci = (ci + zc_avg) >> 1;
     shared.set_commutation_interval(new_ci);
-    let advance = (new_ci * bemf.temp_advance as u32) >> 6;
+    let advance = (new_ci * bemf.temp_advance as u32) >> ADVANCE_SHIFT;
     bemf.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
     comp.enable_interrupts();
     shared.increment_zero_crosses();

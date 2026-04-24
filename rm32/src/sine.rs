@@ -124,6 +124,33 @@ pub fn sine_step(
     }
 }
 
+/// Gimbal mode step: maps input directly to angle, steps toward it.
+/// Returns (delay_us, pwm_values).
+pub fn gimbal_step(
+    positions: &mut PhasePositions,
+    current_angle: &mut i16,
+    input: u16,
+    gate_drive_offset: i16,
+    timer1_max_arr: u16,
+) -> (u16, (u16, u16, u16)) {
+    let desired_angle = if input > 1000 {
+        crate::functions::map(input as i32, 1000, 2000, 180, 360) as i16
+    } else {
+        crate::functions::map(input as i32, 0, 1000, 0, 180) as i16
+    };
+
+    if *current_angle > desired_angle {
+        positions.advance(true); // forward
+        *current_angle -= 1;
+    } else if *current_angle < desired_angle {
+        positions.advance(false); // reverse
+        *current_angle += 1;
+    }
+
+    let pwm = sine_drive(positions, gate_drive_offset, timer1_max_arr, 10, true);
+    (300, pwm) // 300us step delay for gimbal
+}
+
 /// Phase positions for sinusoidal drive (0-359 degrees).
 #[derive(Clone, Default)]
 pub struct PhasePositions {
