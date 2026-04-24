@@ -14,27 +14,11 @@ use rm32::hal::Adc;
 /// Static DMA buffer for ADC readings (3 x 16-bit).
 static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
 
-const RCC_BASE: u32 = 0x4002_1000;
-const ADC_BASE: u32 = 0x4001_2400;
-const DMA1_BASE: u32 = 0x4002_0000;
-const GPIOA_BASE: u32 = 0x4800_0000;
+use crate::periph_addr as addr;
+use crate::pac::{ADC, DMA1, GPIOA};
+use crate::regs::modify as modify_reg;
 
-// DMA1 Channel 1 registers
-const DMA_CH1_CCR: u32 = DMA1_BASE + 0x08;
-const DMA_CH1_CNDTR: u32 = DMA1_BASE + 0x0C;
-const DMA_CH1_CPAR: u32 = DMA1_BASE + 0x10;
-const DMA_CH1_CMAR: u32 = DMA1_BASE + 0x14;
-
-// ADC register offsets
-const ADC_ISR: u32 = ADC_BASE + 0x00;
-const ADC_CR: u32 = ADC_BASE + 0x08;
-const ADC_CFGR1: u32 = ADC_BASE + 0x0C;
-const ADC_SMPR: u32 = ADC_BASE + 0x14;
-const ADC_CHSELR: u32 = ADC_BASE + 0x28;
-const ADC_DR: u32 = ADC_BASE + 0x40;
-const ADC_CCR: u32 = ADC_BASE + 0x308; // Common config
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
+const RCC_BASE: u32 = addr::RCC;
 
 pub struct F051Adc {
     _private: (),
@@ -51,52 +35,62 @@ impl F051Adc {
             let ahbenr = (RCC_BASE + 0x14) as *mut u32;
             ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0)); // DMA1EN
 
-            // PA2, PA6 as analog
-            modify_reg(GPIOA_BASE, |v| v | (0b11 << 4) | (0b11 << 12)); // PA2, PA6
+            // PA2, PA6 as analog via PAC
+            let gpioa = &*GPIOA::ptr();
+            gpioa.moder.modify(|_, w| {
+                w.moder2().analog()
+                 .moder6().analog()
+            });
 
             // DMA1 Channel 1: periph→memory, 16-bit, memory increment, circular
-            write_reg(DMA_CH1_CCR, 0); // disable
-            write_reg(DMA_CH1_CPAR, ADC_DR);
-            write_reg(DMA_CH1_CMAR, ADC_DMA_BUF.as_ptr() as u32);
-            write_reg(DMA_CH1_CNDTR, 3);
-            write_reg(DMA_CH1_CCR,
-                (1 << 5)       // CIRC (circular mode)
-                | (1 << 7)     // MINC (memory increment)
-                | (0b01 << 8)  // PSIZE = 16-bit (F0 ADC DR is 16-bit accessible)
-                | (0b01 << 10) // MSIZE = 16-bit
-            );
-            modify_reg(DMA_CH1_CCR, |v| v | 1); // EN
+            let dma = &*DMA1::ptr();
+            let adc_ref = &*ADC::ptr();
+            dma.ch1.cr.write(|w| w.en().disabled()); // disable
+            dma.ch1.par.write(|w| w.bits(&adc_ref.dr as *const _ as u32));
+            dma.ch1.mar.write(|w| w.bits(ADC_DMA_BUF.as_ptr() as u32));
+            dma.ch1.ndtr.write(|w| w.bits(3));
+            dma.ch1.cr.write(|w| {
+                w.circ().enabled()
+                 .minc().enabled()
+                 .psize().bits16()
+                 .msize().bits16()
+            });
+            dma.ch1.cr.modify(|_, w| w.en().enabled());
 
-            // ADC clock: PCLK/4
-            modify_reg(ADC_CFGR1 + 4, |_| 0b10 << 30); // CFGR2: CKMODE = PCLK/4
+            let adc = &*ADC::ptr();
 
-            // Enable temperature sensor
-            modify_reg(ADC_CCR, |v| v | (1 << 23)); // TSEN
+            // ADC clock: PCLK/4 — CFGR2 is at offset 0x10 from ADC base
+            // cfgr2 is not directly in the PAC layout we can modify easily by name,
+            // keep raw access for this CCR2/CFGR2 register
+            adc.cfgr2.modify(|_, w| w.bits(0b10 << 30)); // CKMODE = PCLK/4
+
+            // Enable temperature sensor via CCR register
+            adc.ccr.modify(|_, w| w.tsen().set_bit());
 
             // Sampling time: 71.5 ADC clock cycles
-            write_reg(ADC_SMPR, 0b110); // SMP = 71.5 cycles
+            adc.smpr.write(|w| w.bits(0b110)); // SMP = 71.5 cycles
 
             // Channel selection: CH2 (current) | CH6 (voltage) | CH16 (temp)
             // F0 CHSELR is a bitmask — channels are scanned in ascending order
-            write_reg(ADC_CHSELR, (1 << 2) | (1 << 6) | (1 << 16));
+            adc.chselr.write(|w| w.bits((1 << 2) | (1 << 6) | (1 << 16)));
 
-            // Enable DMA on ADC
-            modify_reg(ADC_CFGR1, |v| (v & !(0b11)) | (1 << 0) | (1 << 1)); // DMAEN=1, DMACFG=1 (circular)
+            // Enable DMA on ADC: DMAEN=1, DMACFG=1 (circular)
+            adc.cfgr1.modify(|_, w| w.dmaen().set_bit().dmacfg().set_bit());
 
-            // Resolution 12-bit, right-aligned, scan direction forward
-            modify_reg(ADC_CFGR1, |v| v & !(0b11 << 3)); // RES=00 (12-bit)
+            // Resolution 12-bit (RES=00), right-aligned, scan direction forward
+            adc.cfgr1.modify(|r, w| w.bits(r.bits() & !(0b11 << 3))); // RES=00 (12-bit)
 
             // Calibrate
-            write_reg(ADC_CR, 1 << 31); // ADCAL
-            while read_reg(ADC_CR) & (1 << 31) != 0 {}
+            adc.cr.write(|w| w.adcal().start_calibration());
+            while adc.cr.read().adcal().is_calibrating() {}
 
             // Stabilization delay
             cortex_m::asm::delay(48 * 20);
 
             // Enable ADC
-            write_reg(ADC_ISR, 1 << 0); // clear ADRDY
-            write_reg(ADC_CR, 1 << 0); // ADEN
-            while read_reg(ADC_ISR) & (1 << 0) == 0 {} // wait ADRDY
+            adc.isr.write(|w| w.bits(1 << 0)); // clear ADRDY
+            adc.cr.write(|w| w.aden().set_bit());
+            while adc.isr.read().adrdy().bit_is_clear() {} // wait ADRDY
         }
         Self { _private: () }
     }
@@ -104,7 +98,8 @@ impl F051Adc {
 
 impl Adc for F051Adc {
     fn start_conversion(&mut self) {
-        unsafe { modify_reg(ADC_CR, |v| v | (1 << 2)); } // ADSTART
+        let adc = unsafe { &*ADC::ptr() };
+        adc.cr.modify(|_, w| w.adstart().start_conversion());
     }
 
     fn raw_current(&self) -> u16 {

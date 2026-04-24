@@ -4,50 +4,43 @@
 //!   INP: PB4 (IO1)
 //!   INM: switched per step — PB7 (IO2), PA5 (IO5), PA4 (IO4)
 //!   EXTI line 22
-//!
-//! COMP2_CSR at 0x4001_0204
 
-const RCC_BASE: u32 = 0x4002_1000;
-const GPIOA_BASE: u32 = 0x4800_0000;
-const GPIOB_BASE: u32 = 0x4800_0400;
-const COMP2_CSR: u32 = 0x4001_0204;
-const EXTI_BASE: u32 = 0x4001_0400;
-
-// L4 EXTI register offsets: IMR1=0x00, EMR1=0x04, RTSR1=0x08, FTSR1=0x0C, SWIER1=0x10, PR1=0x14
-
+use crate::periph_addr as addr;
+use crate::pac::{COMP, EXTI, GPIOA, GPIOB};
 use crate::regs::modify as modify_reg;
+
+const RCC_BASE: u32 = addr::RCC;
 
 /// Initialize COMP2 for BEMF sensing on L431.
 pub fn init_comp2() {
+    let gpioa = unsafe { &*GPIOA::ptr() };
+    let gpiob = unsafe { &*GPIOB::ptr() };
+    let comp = unsafe { &*COMP::ptr() };
+    let exti = unsafe { &*EXTI::ptr() };
+
     unsafe {
         // Enable GPIOA, GPIOB clocks (AHB2ENR bits 0, 1)
         modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 0) | (1 << 1));
 
         // PA4, PA5 as analog (INM inputs)
-        modify_reg(GPIOA_BASE, |v| v | (0b11 << 8) | (0b11 << 10));
+        gpioa.moder.modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));
         // PB4 as analog (INP), PB7 as analog (INM)
-        modify_reg(GPIOB_BASE, |v| v | (0b11 << 8) | (0b11 << 14));
+        gpiob.moder.modify(|_, w| w.moder4().bits(0b11).moder7().bits(0b11));
 
-        // Configure COMP2_CSR:
-        //   INMSEL = 0b101 (PB7 = IO2, initial — switched per step by change_input)
-        //   INPSEL = 0b00 (IO1 = PB4)
-        //   PWRMODE = 0b00 (high speed)
-        //   Polarity = non-inverted
-        //   EN = 1
-        (COMP2_CSR as *mut u32).write_volatile(
-            (0b101 << 4)    // INMSEL = IO2 (PB7)
-            | (0b00 << 7)   // INPSEL = IO1 (PB4)
-            | (0b00 << 2)   // PWRMODE = high speed
-            | (1 << 0)      // EN
-        );
+        // Configure COMP2 via PAC
+        comp.comp2_csr.write(|w| {
+            w.comp2_inmsel().bits(0b101) // PB7 = IO2
+             .comp2_inpsel().bits(0b00) // IO1 = PB4
+             .comp2_pwrmode().bits(0b00) // high speed
+             .comp2_en().set_bit()
+        });
 
         // Wait for startup (~5us at 80MHz)
         cortex_m::asm::delay(400);
 
-        // EXTI line 22: start with interrupts disabled
-        modify_reg(EXTI_BASE, |v| v & !(1 << 22)); // IMR1
-        // Both edges initially
-        modify_reg(EXTI_BASE + 0x08, |v| v | (1 << 22)); // RTSR1
-        modify_reg(EXTI_BASE + 0x0C, |v| v | (1 << 22)); // FTSR1
+        // EXTI line 22 via PAC
+        exti.imr1.modify(|r, w| w.bits(r.bits() & !(1 << 22)));
+        exti.rtsr1.modify(|r, w| w.bits(r.bits() | (1 << 22)));
+        exti.ftsr1.modify(|r, w| w.bits(r.bits() | (1 << 22)));
     }
 }

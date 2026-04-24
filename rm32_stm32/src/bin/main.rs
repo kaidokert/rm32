@@ -126,6 +126,7 @@ fn main() -> ! {
         transfer: rm32::transfer::TransferState::default(),
         config: EepromConfig::default(),
         forward: true,
+        tim1_arr: config::TIM1_AUTORELOAD,
         frametime_low: 400,
         frametime_high: 600,
         ten_khz_counter: 0,
@@ -180,6 +181,37 @@ fn main() -> ! {
         main_state.low_cell_volt_cutoff = cfg.low_cell_volt_cutoff as u16 + 250;
     }
 
+    // Startup duty cycle from EEPROM (matches C: minimum_duty_cycle*10 + startup_power)
+    let minimum_duty_cycle = {
+        let mdc = main_state.config.minimum_duty_cycle;
+        if mdc > 0 && mdc < 51 { mdc as u16 * 10 } else { 0 }
+    };
+    let min_startup_duty = {
+        let sp = main_state.config.startup_power;
+        if sp > 49 && sp < 151 {
+            minimum_duty_cycle + sp as u16
+        } else {
+            minimum_duty_cycle
+        }
+    };
+    let startup_max_duty = minimum_duty_cycle + 400;
+
+    // KV-based threshold scaling
+    let reverse_speed_threshold = rm32::functions::map(
+        main_state.motor_kv as i32, 300, 3000, 1000, 500,
+    ) as u16;
+
+    // PWM frequency → timer1_max_arr
+    let timer1_max_arr = {
+        let pf = main_state.config.pwm_frequency;
+        if pf > 7 && pf < 145 {
+            let divider = pf as u32 * 100 / 6;
+            (config::TIM1_AUTORELOAD as u32 * 400 / divider) as u16
+        } else {
+            config::TIM1_AUTORELOAD
+        }
+    };
+
     // Dead-time override from driving_brake_strength
     let dead_time_override = {
         let mut dbs = main_state.config.driving_brake_strength;
@@ -196,6 +228,12 @@ fn main() -> ! {
     isr::with_isr_state(|isr| {
         isr.config = main_state.config.clone();
         isr.forward = main_state.config.dir_reversed == 0;
+        // Apply timer1_max_arr from pwm_frequency config
+        isr.tim1_arr = timer1_max_arr;
+        // Apply startup duty from EEPROM
+        isr.duty.minimum = minimum_duty_cycle;
+        isr.duty.min_startup = min_startup_duty;
+        isr.duty.startup_max = startup_max_duty;
         // Apply dead-time override to duty thresholds
         if dead_time_override > 0 {
             isr.duty.min_startup += dead_time_override;
@@ -230,18 +268,65 @@ fn main() -> ! {
         rm32_stm32::telemetry_uart_l431::L431TelemUart::post_init(),
     );
 
+    // --- Sine mode state ---
+    let mut sine_positions = rm32::sine::PhasePositions { a: 0, b: 120, c: 240 };
+
     // --- Enable global interrupts ---
     unsafe { cortex_m::interrupt::enable() };
 
     // --- Main loop ---
     let shared = isr::shared();
     loop {
+        // Sine mode: step phases when stepper_sine is active
+        if shared.stepper_sine() {
+            use rm32::sine::{sine_step, SineStepResult};
+            let (result, (ch1, ch2, ch3)) = sine_step(
+                &mut sine_positions,
+                shared.newinput(),
+                shared.armed(),
+                true, // forward — TODO: use ISR state forward flag
+                main_state.config.motor_poles,
+                5, // changeover_step
+                BOARD.dead_time as i16,
+                config::TIM1_AUTORELOAD,
+                main_state.config.sine_mode_power,
+            );
+            // Apply PWM — need raw register writes since PWM is in ISR state
+            unsafe {
+                let tim1 = 0x4001_2C00u32;
+                ((tim1 + 0x34) as *mut u32).write_volatile(ch1 as u32);
+                ((tim1 + 0x38) as *mut u32).write_volatile(ch2 as u32);
+                ((tim1 + 0x3C) as *mut u32).write_volatile(ch3 as u32);
+            }
+            match result {
+                SineStepResult::Continue(delay_us) => {
+                    sys.delay_micros(delay_us as u32);
+                }
+                SineStepResult::Changeover { commutation_interval, .. } => {
+                    shared.set_stepper_sine(false);
+                    shared.set_running(true);
+                    shared.set_old_routine(true);
+                    shared.set_commutation_interval(commutation_interval);
+                    shared.set_zero_crosses(20);
+                }
+                SineStepResult::Idle => {}
+            }
+        }
+
         main_state.tick(shared, &mut adc, &mut telem);
 
-        // WS2812 LED status updates (on arming transition)
-        if BOARD.has_led && main_state.just_armed {
-            use rm32::ws2812::{send_status, LedStatus};
-            cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
+        // WS2812 LED status updates
+        if BOARD.has_led {
+            if main_state.just_armed {
+                use rm32::ws2812::{send_status, LedStatus};
+                cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
+            }
+            // Error LED on BEMF timeout (stuck rotor)
+            if main_state.protection.bemf_timeout_happened > main_state.protection.bemf_timeout
+                && main_state.config.stuck_rotor_protection != 0 {
+                use rm32::ws2812::{send_status, LedStatus};
+                cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Error));
+            }
         }
 
         // Dynamic interrupt priority swap (L431 only — M4F has preemption)

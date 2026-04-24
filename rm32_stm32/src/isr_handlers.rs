@@ -43,6 +43,7 @@ pub fn handle_tim6() {
         ten_khz_counter: state.ten_khz_counter,
         one_khz_loop_counter: state.one_khz_loop_counter,
         armed_timeout_count: state.armed_timeout_count,
+        tim1_arr: state.tim1_arr,
     };
     rm32::control::isr_logic::ten_khz_tick(
         &mut state.commutation,
@@ -59,6 +60,7 @@ pub fn handle_tim6() {
     state.ten_khz_counter = counters.ten_khz_counter;
     state.one_khz_loop_counter = counters.one_khz_loop_counter;
     state.armed_timeout_count = counters.armed_timeout_count;
+    state.tim1_arr = counters.tim1_arr;
 }
 
 /// Commutation timer expired (TIM14 ISR body).

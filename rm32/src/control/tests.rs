@@ -982,7 +982,7 @@ mod tests {
     use crate::shared_comm::SharedComm as _;
 
     fn make_counters() -> TickCounters {
-        TickCounters { ten_khz_counter: 0, one_khz_loop_counter: 0, armed_timeout_count: 0 }
+        TickCounters { ten_khz_counter: 0, one_khz_loop_counter: 0, armed_timeout_count: 0, tim1_arr: 1999 }
     }
 
     // Separate mocks for isr_logic (needs 4 distinct &mut references)
@@ -1207,5 +1207,69 @@ mod tests {
         );
 
         assert!(!comp.mask_called);
+    }
+
+    // =================================================================
+    // Variable PWM mode 2 tests
+    // =================================================================
+
+    #[test]
+    fn variable_pwm_mode2_clamps_low() {
+        let mut state = MotorState::default();
+        state.config.variable_pwm = 2;
+        state.cpu_mhz = 64;
+        state.timing.average_interval = 50; // below 100 floor
+        state.timer1_max_arr = 1999;
+        state.main_loop_tick();
+        // scale = cpu_mhz/9 = 64/9 = 7, then 100 * 7 = 700
+        assert_eq!(state.tim1_arr, 700);
+    }
+
+    #[test]
+    fn variable_pwm_mode2_clamps_high() {
+        let mut state = MotorState::default();
+        state.config.variable_pwm = 2;
+        state.cpu_mhz = 64;
+        state.timing.average_interval = 300; // above 250 ceiling
+        state.main_loop_tick();
+        assert_eq!(state.tim1_arr, 250 * (64 / 9));
+    }
+
+    #[test]
+    fn variable_pwm_mode2_scales_mid() {
+        let mut state = MotorState::default();
+        state.config.variable_pwm = 2;
+        state.cpu_mhz = 64;
+        state.timing.average_interval = 150;
+        state.main_loop_tick();
+        assert_eq!(state.tim1_arr, 150 * (64 / 9));
+    }
+
+    #[test]
+    fn variable_pwm_mode0_unchanged() {
+        let mut state = MotorState::default();
+        state.config.variable_pwm = 0;
+        state.tim1_arr = 1999;
+        state.timing.average_interval = 150;
+        state.main_loop_tick();
+        assert_eq!(state.tim1_arr, 1999);
+    }
+
+    // =================================================================
+    // Current scaling test
+    // =================================================================
+
+    #[test]
+    fn current_scaling_formula() {
+        // C formula: actual_current = ((smoothed * 3300/41) - (CURRENT_OFFSET * 100)) / MILLIVOLT_PER_AMP
+        let smoothed: u16 = 2048; // mid-range ADC
+        let offset: i16 = 498;
+        let mv_per_amp: u16 = 20;
+        let current_mv = (smoothed as i32) * 3300 / 41 - (offset as i32) * 100;
+        let actual_current = current_mv / mv_per_amp as i32;
+        // (2048 * 3300 / 41) = 164878 (integer), - 49800 = 115078
+        // 115078 / 20 = 5753 (integer)
+        assert!(actual_current > 5700 && actual_current < 5800,
+            "expected ~5750, got {}", actual_current);
     }
 }

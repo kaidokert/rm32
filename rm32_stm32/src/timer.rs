@@ -16,21 +16,15 @@ const CNT: u32 = 0x24;
 const PSC: u32 = 0x28;
 const ARR: u32 = 0x2C;
 
-#[cfg(feature = "stm32g071")]
-const TIM2_BASE: u32 = 0x4000_0000;
-#[cfg(feature = "stm32g071")]
-const TIM14_BASE: u32 = 0x4000_2000;
+use crate::periph_addr as addr;
 
-#[cfg(feature = "stm32f051")]
-const TIM2_BASE: u32 = 0x4000_0000;
-#[cfg(feature = "stm32f051")]
-const TIM14_BASE: u32 = 0x4000_2000;
+const TIM2_BASE: u32 = addr::TIM2;
 
+#[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
+const TIM14_BASE: u32 = addr::TIM14;
+// L431 uses TIM16 in place of TIM14 (same register layout)
 #[cfg(feature = "stm32l431")]
-const TIM2_BASE: u32 = 0x4000_0000;
-// L431 uses TIM16 in place of TIM14 (TIM16 base = 0x4001_4400)
-#[cfg(feature = "stm32l431")]
-const TIM14_BASE: u32 = 0x4001_4400;
+const TIM14_BASE: u32 = addr::TIM16;
 
 use crate::regs::{write_off as write_reg, read_off as read_reg, modify_off as modify_reg};
 

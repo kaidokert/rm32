@@ -7,25 +7,11 @@ use rm32::hal::TelemetryUart;
 
 static mut TX_BUF: [u8; 49] = [0; 49];
 
-const RCC_BASE: u32 = 0x4002_1000;
-const DMA1_BASE: u32 = 0x4002_0000;
-const GPIOB_BASE: u32 = 0x4800_0400;
-const USART1_BASE: u32 = 0x4001_3800;
+use crate::periph_addr as addr;
+use crate::pac::{DMA1, GPIOB, USART1};
+use crate::regs::modify as modify_reg;
 
-// DMA1 Channel 4 registers
-const DMA_CH4_CCR: u32 = DMA1_BASE + 0x44;
-const DMA_CH4_CNDTR: u32 = DMA1_BASE + 0x48;
-const DMA_CH4_CPAR: u32 = DMA1_BASE + 0x4C;
-const DMA_CH4_CMAR: u32 = DMA1_BASE + 0x50;
-const DMA_CSELR: u32 = DMA1_BASE + 0xA8;
-
-const USART_CR1: u32 = USART1_BASE + 0x00;
-const USART_CR3: u32 = USART1_BASE + 0x08;
-const USART_BRR: u32 = USART1_BASE + 0x0C;
-const USART_ISR: u32 = USART1_BASE + 0x1C;
-const USART_TDR: u32 = USART1_BASE + 0x28;
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
+const RCC_BASE: u32 = addr::RCC;
 
 pub struct L431TelemUart { _private: () }
 
@@ -33,6 +19,10 @@ impl L431TelemUart {
     pub fn post_init() -> Self { Self { _private: () } }
 
     pub fn init() -> Self {
+        let gpiob = unsafe { &*GPIOB::ptr() };
+        let usart = unsafe { &*USART1::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
             // Enable clocks: USART1 (APB2ENR bit 14), GPIOB (AHB2ENR bit 1), DMA1 (AHB1ENR bit 0)
             modify_reg(RCC_BASE + 0x60, |v| v | (1 << 14)); // APB2ENR
@@ -40,38 +30,37 @@ impl L431TelemUart {
             modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0));  // AHB1ENR DMA1EN
 
             // PB6: AF7 (USART1_TX), open-drain, pull-up
-            modify_reg(GPIOB_BASE, |v| (v & !(0b11 << 12)) | (0b10 << 12)); // AF mode
-            modify_reg(GPIOB_BASE + 0x04, |v| v | (1 << 6)); // open-drain
-            modify_reg(GPIOB_BASE + 0x0C, |v| (v & !(0b11 << 12)) | (0b01 << 12)); // pull-up
+            gpiob.moder.modify(|_, w| w.moder6().bits(0b10)); // AF mode
+            gpiob.otyper.modify(|_, w| w.ot6().set_bit());    // open-drain
+            gpiob.pupdr.modify(|_, w| w.pupdr6().bits(0b01)); // pull-up
             // AFRL: PB6 = AF7 (bits [27:24])
-            modify_reg(GPIOB_BASE + 0x20, |v| (v & !(0xF << 24)) | (7 << 24));
+            gpiob.afrl.modify(|_, w| w.afrl6().bits(7));
 
             // USART1: disable first
-            write_reg(USART_CR1, 0);
+            usart.cr1.write(|w| w.bits(0));
             // BRR = 80_000_000 / 115200 ≈ 694
-            write_reg(USART_BRR, 694);
+            usart.brr.write(|w| w.bits(694));
             // Half-duplex
-            modify_reg(USART_CR3, |v| v | (1 << 3)); // HDSEL
+            usart.cr3.modify(|_, w| w.hdsel().set_bit());
             // Enable TX + RX + UE
-            write_reg(USART_CR1, (1 << 3) | (1 << 2) | (1 << 0));
+            usart.cr1.write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
 
             // Wait TEACK + REACK
-            while read_reg(USART_ISR) & (1 << 21) == 0 {}
-            while read_reg(USART_ISR) & (1 << 22) == 0 {}
+            while !usart.isr.read().teack().bit_is_set() {}
+            while !usart.isr.read().reack().bit_is_set() {}
 
-            // DMA CSELR: CH4 request = 2 (USART1_TX)
-            // CH4 uses bits [15:12]
-            modify_reg(DMA_CSELR, |v| (v & !(0xF << 12)) | (2 << 12));
+            // DMA CSELR: CH4 request = 2 (USART1_TX), bits [15:12]
+            dma.cselr.modify(|r, w| w.bits((r.bits() & !(0xF << 12)) | (2 << 12)));
 
             // DMA CH4: memory→periph, 8-bit, MINC, TCIE
-            write_reg(DMA_CH4_CPAR, USART_TDR);
-            write_reg(DMA_CH4_CMAR, TX_BUF.as_ptr() as u32);
-            write_reg(DMA_CH4_CCR,
+            dma.cpar4.write(|w| w.bits(usart.tdr.as_ptr() as u32));
+            dma.cmar4.write(|w| w.bits(TX_BUF.as_ptr() as u32));
+            dma.ccr4.write(|w| w.bits(
                 (1 << 1)   // TCIE
                 | (1 << 3) // TEIE
                 | (1 << 4) // DIR = memory-to-periph
                 | (1 << 7) // MINC
-            );
+            ));
         }
         Self { _private: () }
     }
@@ -80,13 +69,16 @@ impl L431TelemUart {
 impl TelemetryUart for L431TelemUart {
     fn send_dma(&mut self, data: &[u8]) {
         let len = data.len().min(49);
+        let usart = unsafe { &*USART1::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
             TX_BUF[..len].copy_from_slice(&data[..len]);
-            modify_reg(DMA_CH4_CCR, |v| v & !1); // disable
-            write_reg(DMA_CH4_CMAR, TX_BUF.as_ptr() as u32);
-            write_reg(DMA_CH4_CNDTR, len as u32);
-            modify_reg(USART_CR3, |v| v | (1 << 7)); // DMAT
-            modify_reg(DMA_CH4_CCR, |v| v | 1); // enable
+            dma.ccr4.modify(|r, w| w.bits(r.bits() & !1)); // disable
+            dma.cmar4.write(|w| w.bits(TX_BUF.as_ptr() as u32));
+            dma.cndtr4.write(|w| w.bits(len as u32));
+            usart.cr3.modify(|_, w| w.dmat().set_bit()); // DMAT
+            dma.ccr4.modify(|r, w| w.bits(r.bits() | 1)); // enable
         }
     }
 }

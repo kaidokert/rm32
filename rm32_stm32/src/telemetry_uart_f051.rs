@@ -4,29 +4,12 @@
 //! DMA1 Channel 2 for TX transfers (fixed assignment, no DMAMUX on F0).
 
 use rm32::hal::TelemetryUart;
+use crate::pac::{DMA1, GPIOB, RCC, USART1};
+use crate::regs::modify as modify_reg;
+use crate::periph_addr as addr;
 
 /// Static TX buffer — DMA reads from here.
 static mut TX_BUF: [u8; 49] = [0; 49];
-
-const RCC_BASE: u32 = 0x4002_1000;
-const DMA1_BASE: u32 = 0x4002_0000;
-const GPIOB_BASE: u32 = 0x4800_0400;
-const USART1_BASE: u32 = 0x4001_3800;
-
-// DMA1 Channel 2 registers
-const DMA_CH2_CCR: u32 = DMA1_BASE + 0x1C;
-const DMA_CH2_CNDTR: u32 = DMA1_BASE + 0x20;
-const DMA_CH2_CPAR: u32 = DMA1_BASE + 0x24;
-const DMA_CH2_CMAR: u32 = DMA1_BASE + 0x28;
-
-// USART register offsets
-const USART_CR1: u32 = USART1_BASE + 0x00;
-const USART_CR3: u32 = USART1_BASE + 0x08;
-const USART_BRR: u32 = USART1_BASE + 0x0C;
-const USART_ISR: u32 = USART1_BASE + 0x1C;
-const USART_TDR: u32 = USART1_BASE + 0x28;
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
 
 pub struct F051TelemUart {
     _private: (),
@@ -36,47 +19,49 @@ impl F051TelemUart {
     pub fn post_init() -> Self { Self { _private: () } }
 
     pub fn init() -> Self {
+        let rcc = unsafe { &*RCC::ptr() };
+        let gpiob = unsafe { &*GPIOB::ptr() };
+        let usart = unsafe { &*USART1::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
+        // Enable clocks
         unsafe {
-            // Enable clocks: USART1 (APB2ENR bit 14), GPIOB (AHBENR bit 18), DMA1 (AHBENR bit 0)
-            let apb2enr = (RCC_BASE + 0x18) as *mut u32;
+            let rcc_base = addr::RCC;
+            let apb2enr = (rcc_base + 0x18) as *mut u32;
             apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 14)); // USART1EN
-            let ahbenr = (RCC_BASE + 0x14) as *mut u32;
+            let ahbenr = (rcc_base + 0x14) as *mut u32;
             ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0) | (1 << 18)); // DMA1EN, GPIOBEN
-
-            // PB6: alternate function (AF0 = USART1_TX), open-drain, pull-up
-            // MODER: AF mode (0b10)
-            modify_reg(GPIOB_BASE, |v| (v & !(0b11 << 12)) | (0b10 << 12)); // PB6 = AF
-            // OTYPER: open-drain
-            modify_reg(GPIOB_BASE + 0x04, |v| v | (1 << 6));
-            // PUPDR: pull-up
-            modify_reg(GPIOB_BASE + 0x0C, |v| (v & !(0b11 << 12)) | (0b01 << 12));
-            // AFRL: PB6 = AF0 (bits [27:24] = 0)
-            modify_reg(GPIOB_BASE + 0x20, |v| v & !(0xF << 24));
-
-            // USART1 config: disable first
-            write_reg(USART_CR1, 0);
-            // BRR = 48_000_000 / 115200 ≈ 417
-            write_reg(USART_BRR, 417);
-            // Half-duplex mode
-            modify_reg(USART_CR3, |v| v | (1 << 3)); // HDSEL
-            // Enable TX + RX + UE
-            write_reg(USART_CR1, (1 << 3) | (1 << 2) | (1 << 0)); // TE | RE | UE
-
-            // Wait for TEACK (bit 21) + REACK (bit 22)
-            while read_reg(USART_ISR) & (1 << 21) == 0 {}
-            while read_reg(USART_ISR) & (1 << 22) == 0 {}
-
-            // DMA1 Channel 2: USART1_TX (fixed assignment on F0)
-            // Configure: memory→periph, 8-bit, memory increment, TC interrupt
-            write_reg(DMA_CH2_CPAR, USART_TDR);
-            write_reg(DMA_CH2_CMAR, TX_BUF.as_ptr() as u32);
-            write_reg(DMA_CH2_CCR,
-                (1 << 1)   // TCIE
-                | (1 << 3) // TEIE
-                | (1 << 4) // DIR = memory-to-periph
-                | (1 << 7) // MINC
-            );
         }
+
+        // PB6: alternate function (AF0 = USART1_TX), open-drain, pull-up
+        let gpiob_base = addr::GPIOB;
+        unsafe {
+            modify_reg(gpiob_base, |v| (v & !(0b11 << 12)) | (0b10 << 12));
+            modify_reg(gpiob_base + 0x04, |v| v | (1 << 6)); // open-drain
+            modify_reg(gpiob_base + 0x0C, |v| (v & !(0b11 << 12)) | (0b01 << 12)); // pull-up
+            modify_reg(gpiob_base + 0x20, |v| v & !(0xF << 24)); // AF0
+        }
+
+        // USART1 config via PAC accessors
+        usart.cr1.write(|w| unsafe { w.bits(0) }); // disable
+        usart.brr.write(|w| unsafe { w.bits(417) }); // 48MHz / 115200
+        usart.cr3.write(|w| w.hdsel().set_bit()); // half-duplex
+        usart.cr1.write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
+
+        // Wait for TEACK + REACK
+        while !usart.isr.read().teack().bit_is_set() {}
+        while !usart.isr.read().reack().bit_is_set() {}
+
+        // DMA1 Channel 2: USART1_TX (fixed on F0)
+        dma.ch2.par.write(|w| unsafe { w.bits(usart.tdr.as_ptr() as u32) });
+        dma.ch2.mar.write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch2.cr.write(|w| {
+            w.tcie().enabled()
+             .teie().enabled()
+             .dir().from_memory()
+             .minc().enabled()
+        });
+
         Self { _private: () }
     }
 }
@@ -84,21 +69,21 @@ impl F051TelemUart {
 impl TelemetryUart for F051TelemUart {
     fn send_dma(&mut self, data: &[u8]) {
         let len = data.len().min(49);
+        let usart = unsafe { &*USART1::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
             TX_BUF[..len].copy_from_slice(&data[..len]);
-
-            // Disable DMA channel first
-            modify_reg(DMA_CH2_CCR, |v| v & !1);
-
-            // Set memory address and count
-            write_reg(DMA_CH2_CMAR, TX_BUF.as_ptr() as u32);
-            write_reg(DMA_CH2_CNDTR, len as u32);
-
-            // Enable USART DMA TX request
-            modify_reg(USART_CR3, |v| v | (1 << 7)); // DMAT
-
-            // Enable DMA channel
-            modify_reg(DMA_CH2_CCR, |v| v | 1);
         }
+
+        // Disable DMA channel
+        dma.ch2.cr.modify(|_, w| w.en().clear_bit());
+        // Set address and count
+        dma.ch2.mar.write(|w| unsafe { w.bits(TX_BUF.as_ptr() as u32) });
+        dma.ch2.ndtr.write(|w| unsafe { w.bits(len as u32) });
+        // Enable USART DMA TX request
+        usart.cr3.modify(|_, w| w.dmat().set_bit());
+        // Enable DMA channel
+        dma.ch2.cr.modify(|_, w| w.en().set_bit());
     }
 }

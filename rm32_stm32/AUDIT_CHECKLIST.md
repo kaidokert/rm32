@@ -178,3 +178,68 @@ After review, classify each item:
 | 3.2 Logic duplication | P1 done | SharedComm trait + isr_logic.rs in core. Thin wrappers |
 | 4.1 EEPROM validation | P0 | Safety. Blank flash = garbage config without this |
 | 4.2 Watchdog coverage | P1 done | IWDG was never started! Now configured + enabled per MCU |
+
+---
+
+## 5. Functional Review Pass 2
+
+### 5.1 KISS Telemetry eRPM Bug — FIXED
+- [x] Rust sent `e_rpm * 100` but e_rpm is already in units of 100 eRPM → reports 2x actual
+- [x] Fixed: send `e_rpm` directly (matches C)
+
+### 5.2 Cell Count Detection — FIXED
+- [x] Auto-detects `cell_count = battery_voltage / 370` on arming transition
+- [x] Only when `cell_count == 0` and `low_voltage_cut_off == 1` (matches C)
+- [x] `just_armed` flag added for arming transition detection (also used by WS2812 LED)
+
+### 5.3 Dead-Time Override
+- [ ] C applies `driving_brake_strength` to BDTR dead-time and startup duty
+- [ ] Rust reads the EEPROM field but never applies to hardware
+- **Priority:** P1 — affects braking behavior and FET safety margins
+
+### 5.4 BlueJay Tune Parser
+- [ ] C parses 128-byte tune array from EEPROM with full-time/duration encoding
+- [ ] Rust plays hardcoded 3-note tune, ignores EEPROM tune data
+- **Priority:** P2 — cosmetic, user tunes
+
+### 5.5 Gimbal / Sinusoidal Mode — DONE
+- [x] 360-entry `PWM_SIN` table added to `sine.rs` (matches C exactly)
+- [x] `sine_drive()` — computes 3-phase PWM from phase positions + config
+- [x] `sine_step()` — main loop step function with changeover detection
+- [x] `SineStepResult` enum: Continue(delay), Changeover{interval,step}, Idle
+- [x] Supports both sine startup and gimbal mode (power scaling difference)
+- [x] 5 new tests: table symmetry, PWM range, idle, continue, changeover
+- [ ] Integration into main loop (call `sine_step` when `stepper_sine` active)
+
+### 5.6 Active Brake (brake_on_stop == 2) — DONE
+- [x] When throttle=0 and `brake_on_stop == 2`: calls `phase.com_step(2)` with fixed duty
+- [x] Duty = `(active_brake_power * ARR / 2000) * 10` matching C formula
+- [x] Added to `ten_khz_tick()` zero-throttle branch in `isr_logic.rs`
+
+### 5.7 Fixed Duty / Fixed Speed Modes
+- [ ] C has `FIXED_DUTY_MODE` and `FIXED_SPEED_MODE` compile-time modes
+- [ ] Rust doesn't implement these
+- **Priority:** P2 — specialized modes, rarely used
+
+### 5.8 BEMF Filter Weight Difference — NOT A BUG
+- [x] Verified: C has TWO paths with different weights
+  - ISR (`interruptRoutine`): `(ci + (last+this)/2) / 2` — 0.5 weight ← Rust matches this
+  - Polling (`zcfoundroutine`): `(this + 3*ci) / 4` — 0.25 weight ← Rust matches this too
+- [x] Both Rust paths match their C counterparts exactly
+
+### 5.9 Startup Tune Frequencies
+- [ ] Rust uses hardcoded 440/880/1760 Hz
+- [ ] C uses prescaler-based ~428/585/923 Hz, prefers BlueJay tune if present
+- **Priority:** P2 — cosmetic, but noticeable to users
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| 5.1 KISS eRPM bug | P0 fixed | Was sending 2x actual eRPM |
+| 5.2 Cell count detection | P0 fixed | Auto-detect on arming: voltage / 370 |
+| 5.3 Dead-time override | P1 done | BDTR + duty thresholds adjusted from driving_brake_strength |
+| 5.4 BlueJay tunes | P2 done | Full parser + player in sounds.rs |
+| 5.5 Gimbal/sine mode | P1 done | Table + drive + step function. Main loop integration TODO |
+| 5.6 Active brake mode 2 | P1 done | comStep(2) + fixed duty in zero-throttle path |
+| 5.7 Fixed duty/speed | P2 done | fixed_mode.rs with input/target calculators + tests |
+| 5.8 BEMF filter weight | Not a bug | Both Rust paths match C exactly |
+| 5.9 Startup tune freqs | P2 done | Fixed step=6 (was 1), matches C exactly |

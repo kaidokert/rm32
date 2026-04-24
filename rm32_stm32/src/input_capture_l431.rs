@@ -11,31 +11,11 @@ static mut GCR_BUFFER: [u32; 37] = [0; 37];
 pub unsafe fn dma_buffer() -> &'static [u32; 64] { &DMA_BUFFER }
 pub unsafe fn gcr_buffer() -> &'static mut [u32; 37] { &mut GCR_BUFFER }
 
-const RCC_BASE: u32 = 0x4002_1000;
-const DMA1_BASE: u32 = 0x4002_0000;
-const TIM15_BASE: u32 = 0x4001_4000;
-const GPIOA_BASE: u32 = 0x4800_0000;
+use crate::periph_addr as addr;
+use crate::pac::{DMA1, GPIOA, TIM15};
+use crate::regs::{read as read_reg, modify as modify_reg};
 
-// DMA1 Channel 5 registers (offset = 0x08 + (n-1)*0x14, n=5 → 0x08 + 4*0x14 = 0x58)
-const DMA_CH5_CCR: u32 = DMA1_BASE + 0x58;
-const DMA_CH5_CNDTR: u32 = DMA1_BASE + 0x5C;
-const DMA_CH5_CPAR: u32 = DMA1_BASE + 0x60;
-const DMA_CH5_CMAR: u32 = DMA1_BASE + 0x64;
-
-// DMA CSELR (channel selection register) at DMA1_BASE + 0xA8
-const DMA_CSELR: u32 = DMA1_BASE + 0xA8;
-
-const CR1: u32 = 0x00;
-const DIER: u32 = 0x0C;
-const EGR: u32 = 0x14;
-const CCMR1: u32 = 0x18;
-const CCER: u32 = 0x20;
-const CNT: u32 = 0x24;
-const PSC: u32 = 0x28;
-const ARR: u32 = 0x2C;
-const CCR1: u32 = 0x34;
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
+const RCC_BASE: u32 = addr::RCC;
 
 pub struct L431DshotCapture {
     buffer_size: u16,
@@ -55,6 +35,9 @@ impl L431DshotCapture {
     pub fn is_output(&self) -> bool { self.out_put }
 
     pub fn init(&self) {
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
             // Enable clocks: TIM15 (APB2ENR bit 16), DMA1 (AHB1ENR bit 0), GPIOA (AHB2ENR bit 0)
             modify_reg(RCC_BASE + 0x60, |v| v | (1 << 16)); // APB2ENR: TIM15EN
@@ -62,86 +45,95 @@ impl L431DshotCapture {
             modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 0));  // AHB2ENR: GPIOAEN
 
             // PA2 as alternate function AF14 (TIM15_CH1)
-            modify_reg(GPIOA_BASE, |v| (v & !(0b11 << 4)) | (0b10 << 4));
+            gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
             // AFRL: PA2 = AF14 (bits [11:8])
-            modify_reg(GPIOA_BASE + 0x20, |v| (v & !(0xF << 8)) | (14 << 8));
+            gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
 
-            // DMA CSELR: Channel 5 request = 7 (TIM15_CH1)
-            // CH5 uses bits [19:16]
-            modify_reg(DMA_CSELR, |v| (v & !(0xF << 16)) | (7 << 16));
+            // DMA CSELR: Channel 5 request = 7 (TIM15_CH1), bits [19:16]
+            dma.cselr.modify(|r, w| w.bits((r.bits() & !(0xF << 16)) | (7 << 16)));
         }
     }
 }
 
 impl InputCapture for L431DshotCapture {
     fn receive_dshot_dma(&mut self) {
+        let tim = unsafe { &*TIM15::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
-            write_reg(DMA_CH5_CCR, 0); // disable DMA
+            dma.ccr5.write(|w| w.bits(0)); // disable DMA
 
             // Reset TIM15 (APB2RSTR bit 16)
             modify_reg(RCC_BASE + 0x20, |v| v | (1 << 16));
             modify_reg(RCC_BASE + 0x20, |v| v & !(1 << 16));
 
             // TIM15 input capture mode
-            write_reg(TIM15_BASE + CCMR1, 0x41);
-            write_reg(TIM15_BASE + CCER, 0x0A);
-            write_reg(TIM15_BASE + PSC, self.ic_prescaler as u32);
-            write_reg(TIM15_BASE + ARR, 0xFFFF);
-            write_reg(TIM15_BASE + EGR, 1);
-            write_reg(TIM15_BASE + CNT, 0);
+            tim.ccmr1_output().write(|w| unsafe { w.bits(0x41) });
+            tim.ccer.write(|w| w.bits(0x0A));
+            tim.psc.write(|w| w.bits(self.ic_prescaler as u32));
+            tim.arr.write(|w| w.bits(0xFFFF));
+            tim.egr.write(|w| w.bits(1));
+            tim.cnt.write(|w| w.bits(0));
             self.out_put = false;
 
             // DMA CH5: periph→memory, 32-bit, TCIE
-            write_reg(DMA_CH5_CMAR, DMA_BUFFER.as_ptr() as u32);
-            write_reg(DMA_CH5_CPAR, (TIM15_BASE + CCR1) as u32);
-            write_reg(DMA_CH5_CNDTR, self.buffer_size as u32);
-            write_reg(DMA_CH5_CCR, 0x98B);
+            dma.cmar5.write(|w| w.bits(DMA_BUFFER.as_ptr() as u32));
+            dma.cpar5.write(|w| w.bits(tim.ccr1.as_ptr() as u32));
+            dma.cndtr5.write(|w| w.bits(self.buffer_size as u32));
+            dma.ccr5.write(|w| w.bits(0x98B));
 
-            modify_reg(TIM15_BASE + DIER, |v| v | (1 << 9)); // CC1DE
-            modify_reg(TIM15_BASE + CCER, |v| v | 1);
-            modify_reg(TIM15_BASE + CR1, |v| v | 1);
+            tim.dier.modify(|r, w| w.bits(r.bits() | (1 << 9))); // CC1DE
+            tim.ccer.modify(|r, w| w.bits(r.bits() | 1));
+            tim.cr1.modify(|r, w| w.bits(r.bits() | 1));
         }
     }
 
     fn send_dshot_dma(&mut self) {
+        let tim = unsafe { &*TIM15::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+
         unsafe {
-            write_reg(DMA_CH5_CCR, 0);
+            dma.ccr5.write(|w| w.bits(0));
 
             modify_reg(RCC_BASE + 0x20, |v| v | (1 << 16));
             modify_reg(RCC_BASE + 0x20, |v| v & !(1 << 16));
 
-            write_reg(TIM15_BASE + CCMR1, 0x60);
-            write_reg(TIM15_BASE + CCER, 0x03);
-            write_reg(TIM15_BASE + PSC, 0);
-            write_reg(TIM15_BASE + ARR, 61);
-            write_reg(TIM15_BASE + EGR, 1);
-            modify_reg(TIM15_BASE + 0x44, |v| v | (1 << 15)); // BDTR MOE
+            tim.ccmr1_output().write(|w| unsafe { w.bits(0x60) });
+            tim.ccer.write(|w| w.bits(0x03));
+            tim.psc.write(|w| w.bits(0));
+            tim.arr.write(|w| w.bits(61));
+            tim.egr.write(|w| w.bits(1));
+            modify_reg(TIM15::ptr() as u32 + 0x44, |v| v | (1 << 15)); // BDTR MOE
             self.out_put = true;
 
-            write_reg(DMA_CH5_CMAR, GCR_BUFFER.as_ptr() as u32);
-            write_reg(DMA_CH5_CPAR, (TIM15_BASE + CCR1) as u32);
-            write_reg(DMA_CH5_CNDTR, 23 + self.buffer_size as u32 / 4);
-            write_reg(DMA_CH5_CCR, 0x99B);
+            dma.cmar5.write(|w| w.bits(GCR_BUFFER.as_ptr() as u32));
+            dma.cpar5.write(|w| w.bits(tim.ccr1.as_ptr() as u32));
+            dma.cndtr5.write(|w| w.bits(23 + self.buffer_size as u32 / 4));
+            dma.ccr5.write(|w| w.bits(0x99B));
 
-            modify_reg(TIM15_BASE + DIER, |v| v | (1 << 9));
-            modify_reg(TIM15_BASE + CCER, |v| v | 1);
-            modify_reg(TIM15_BASE + CR1, |v| v | 1);
+            tim.dier.modify(|r, w| w.bits(r.bits() | (1 << 9)));
+            tim.ccer.modify(|r, w| w.bits(r.bits() | 1));
+            tim.cr1.modify(|r, w| w.bits(r.bits() | 1));
         }
     }
 
     fn input_pin_state(&self) -> bool {
-        (unsafe { read_reg(GPIOA_BASE + 0x10) }) & (1 << 2) != 0
+        let gpioa_idr = addr::GPIOA + 0x10;
+        (unsafe { read_reg(gpioa_idr) }) & (1 << 2) != 0
     }
 
     fn set_pull_up(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| (v & !(0b11 << 4)) | (0b01 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
     }
 
     fn set_pull_down(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| (v & !(0b11 << 4)) | (0b10 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b10) });
     }
 
     fn set_pull_none(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| v & !(0b11 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b00) });
     }
 }

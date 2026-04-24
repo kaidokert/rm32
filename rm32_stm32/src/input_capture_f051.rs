@@ -32,31 +32,11 @@ pub unsafe fn gcr_buffer() -> &'static mut [u32; 37] {
     &mut GCR_BUFFER
 }
 
-// F051 register base addresses
-const RCC_BASE: u32 = 0x4002_1000;
-const DMA1_BASE: u32 = 0x4002_0000;
-const TIM15_BASE: u32 = 0x4001_4000;
-const GPIOA_BASE: u32 = 0x4800_0000;
+use crate::periph_addr as addr;
+use crate::pac::{DMA1, TIM15, GPIOA};
+use crate::regs::modify as modify_reg;
 
-// DMA1 Channel 5 register offsets (CH5 = base + 0x44 + n*0x14 where n=4)
-const DMA_CH5_CCR: u32 = DMA1_BASE + 0x58;
-const DMA_CH5_CNDTR: u32 = DMA1_BASE + 0x5C;
-const DMA_CH5_CPAR: u32 = DMA1_BASE + 0x60;
-const DMA_CH5_CMAR: u32 = DMA1_BASE + 0x64;
-
-// Timer register offsets
-const CR1: u32 = 0x00;
-const DIER: u32 = 0x0C;
-const SR: u32 = 0x10;
-const EGR: u32 = 0x14;
-const CCMR1: u32 = 0x18;
-const CCER: u32 = 0x20;
-const CNT: u32 = 0x24;
-const PSC: u32 = 0x28;
-const ARR: u32 = 0x2C;
-const CCR1: u32 = 0x34;
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
+const RCC_BASE: u32 = addr::RCC;
 
 pub struct F051DshotCapture {
     buffer_size: u16,
@@ -87,47 +67,50 @@ impl F051DshotCapture {
             let ahbenr = (RCC_BASE + 0x14) as *mut u32;
             ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0) | (1 << 17)); // DMA1EN, GPIOAEN
 
-            // PA2 as alternate function (AF0 = TIM15_CH1)
-            let moder = GPIOA_BASE as *mut u32;
-            modify_reg(moder as u32, |v| (v & !(0b11 << 4)) | (0b10 << 4)); // PA2 = AF
+            // PA2 as alternate function (AF0 = TIM15_CH1) via PAC
+            let gpioa = &*GPIOA::ptr();
+            gpioa.moder.modify(|_, w| w.moder2().alternate());
 
-            // AFRL: PA2 = AF0 (bits [11:8])
-            let afrl = (GPIOA_BASE + 0x20) as *mut u32;
-            modify_reg(afrl as u32, |v| v & !(0xF << 8)); // AF0 = 0
+            // AFRL: PA2 = AF0 (bits [11:8]) — AF0 is zero so just clear the field
+            gpioa.afrl.modify(|_, w| w.afrl2().bits(0)); // AF0 = 0
         }
     }
 
     fn receive_impl(&mut self) {
         unsafe {
-            // Disable DMA channel first
-            write_reg(DMA_CH5_CCR, 0);
+            let dma = &*DMA1::ptr();
+            dma.ch5.cr.write(|w| w.en().disabled());
 
             // Reset TIM15 via APB2RSTR bit 16
             let apb2rstr = (RCC_BASE + 0x0C) as *mut u32;
             modify_reg(apb2rstr as u32, |v| v | (1 << 16));
             modify_reg(apb2rstr as u32, |v| v & !(1 << 16));
 
-            // TIM15 input capture mode
-            write_reg(TIM15_BASE + CCMR1, 0x41); // IC1 mapped to TI1, filter=4
-            write_reg(TIM15_BASE + CCER, 0x0A);  // Capture on both edges
-            write_reg(TIM15_BASE + PSC, self.ic_prescaler as u32);
-            write_reg(TIM15_BASE + ARR, 0xFFFF);
-            write_reg(TIM15_BASE + EGR, 1); // UG
-            write_reg(TIM15_BASE + CNT, 0);
+            let tim = &*TIM15::ptr();
 
+            tim.ccmr1_input().write(|w| w.bits(0x41));
+            tim.ccer.write(|w| w.bits(0x0A));
+            tim.psc.write(|w| w.bits(self.ic_prescaler as u32));
+            tim.arr.write(|w| w.bits(0xFFFF));
+            tim.egr.write(|w| w.ug().set_bit());
+            tim.cnt.write(|w| w.bits(0));
             self.out_put = false;
 
-            // DMA1 CH5: periph→memory, 32-bit, memory increment, TC interrupt
-            write_reg(DMA_CH5_CMAR, DMA_BUFFER.as_ptr() as u32);
-            write_reg(DMA_CH5_CPAR, (TIM15_BASE + CCR1) as u32);
-            write_reg(DMA_CH5_CNDTR, self.buffer_size as u32);
-            // 0x98B: TCIE | MINC | PSIZE=32 | MSIZE=32 | DIR=0 (periph→mem) | EN
-            write_reg(DMA_CH5_CCR, 0x98B);
+            // DMA1 CH5: periph→memory, 32-bit, TC interrupt
+            dma.ch5.mar.write(|w| w.bits(DMA_BUFFER.as_ptr() as u32));
+            dma.ch5.par.write(|w| w.bits(&tim.ccr1 as *const _ as u32));
+            dma.ch5.ndtr.write(|w| w.bits(self.buffer_size as u32));
+            dma.ch5.cr.write(|w| {
+                w.tcie().enabled()
+                 .minc().enabled()
+                 .psize().bits32()
+                 .msize().bits32()
+                 .en().enabled()
+            });
 
-            // Enable DMA request from TIM15 CC1
-            modify_reg(TIM15_BASE + DIER, |v| v | (1 << 9)); // CC1DE
-            modify_reg(TIM15_BASE + CCER, |v| v | 1); // CC1E
-            modify_reg(TIM15_BASE + CR1, |v| v | 1); // CEN
+            tim.dier.modify(|_, w| w.cc1de().set_bit());
+            tim.ccer.modify(|_, w| w.cc1e().set_bit());
+            tim.cr1.modify(|_, w| w.cen().set_bit());
         }
     }
 }
@@ -139,52 +122,61 @@ impl InputCapture for F051DshotCapture {
 
     fn send_dshot_dma(&mut self) {
         unsafe {
-            // Disable DMA
-            write_reg(DMA_CH5_CCR, 0);
+            let dma = &*DMA1::ptr();
+            dma.ch5.cr.write(|w| w.en().disabled());
 
             // Reset TIM15
             let apb2rstr = (RCC_BASE + 0x0C) as *mut u32;
             modify_reg(apb2rstr as u32, |v| v | (1 << 16));
             modify_reg(apb2rstr as u32, |v| v & !(1 << 16));
 
-            // PWM output mode
-            write_reg(TIM15_BASE + CCMR1, 0x60); // PWM mode 1
-            write_reg(TIM15_BASE + CCER, 0x03);  // Output enable
-            write_reg(TIM15_BASE + PSC, 0);
-            write_reg(TIM15_BASE + ARR, 61); // Bit period
-            write_reg(TIM15_BASE + EGR, 1);
-            // Enable MOE (main output enable) for TIM15 — BDTR at offset 0x44
-            modify_reg(TIM15_BASE + 0x44, |v| v | (1 << 15));
+            let tim = &*TIM15::ptr();
+
+            tim.ccmr1_output().write(|w| w.bits(0x60));
+            tim.ccer.write(|w| w.bits(0x03));
+            tim.psc.write(|w| w.bits(0));
+            tim.arr.write(|w| w.bits(61));
+            tim.egr.write(|w| w.ug().set_bit());
+            tim.bdtr.modify(|_, w| w.moe().set_bit());
             self.out_put = true;
 
             // DMA: memory→periph, GCR buffer → CCR1
-            write_reg(DMA_CH5_CMAR, GCR_BUFFER.as_ptr() as u32);
-            write_reg(DMA_CH5_CPAR, (TIM15_BASE + CCR1) as u32);
-            write_reg(DMA_CH5_CNDTR, 23 + self.buffer_size as u32 / 4);
-            // 0x99B: DIR=1 (mem→periph) | MINC | PSIZE=32 | MSIZE=32 | TCIE | EN
-            write_reg(DMA_CH5_CCR, 0x99B);
+            dma.ch5.mar.write(|w| w.bits(GCR_BUFFER.as_ptr() as u32));
+            dma.ch5.par.write(|w| w.bits(&tim.ccr1 as *const _ as u32));
+            dma.ch5.ndtr.write(|w| w.bits(23 + self.buffer_size as u32 / 4));
+            dma.ch5.cr.write(|w| {
+                w.dir().from_memory()
+                 .tcie().enabled()
+                 .minc().enabled()
+                 .psize().bits32()
+                 .msize().bits32()
+                 .en().enabled()
+            });
 
-            // Enable DMA request, output, start
-            modify_reg(TIM15_BASE + DIER, |v| v | (1 << 9)); // CC1DE
-            modify_reg(TIM15_BASE + CCER, |v| v | 1); // CC1E
-            modify_reg(TIM15_BASE + CR1, |v| v | 1); // CEN
+            tim.dier.modify(|_, w| w.cc1de().set_bit());
+            tim.ccer.modify(|_, w| w.cc1e().set_bit());
+            tim.cr1.modify(|_, w| w.cen().set_bit());
         }
     }
 
     fn input_pin_state(&self) -> bool {
-        // PA2 IDR
-        (unsafe { read_reg(GPIOA_BASE + 0x10) }) & (1 << 2) != 0
+        // PA2 IDR via PAC
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.idr.read().idr2().bit()
     }
 
     fn set_pull_up(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| (v & !(0b11 << 4)) | (0b01 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
     }
 
     fn set_pull_down(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| (v & !(0b11 << 4)) | (0b10 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b10) });
     }
 
     fn set_pull_none(&mut self) {
-        unsafe { modify_reg(GPIOA_BASE + 0x0C, |v| v & !(0b11 << 4)); }
+        let gpioa = unsafe { &*GPIOA::ptr() };
+        gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b00) });
     }
 }

@@ -12,11 +12,12 @@ use crate::functions::map;
 use crate::hal;
 use crate::shared_comm::SharedComm;
 
-/// Counters owned exclusively by the ISR tick.
+/// Counters and config owned exclusively by the ISR tick.
 pub struct TickCounters {
     pub ten_khz_counter: u32,
     pub one_khz_loop_counter: u16,
     pub armed_timeout_count: u32,
+    pub tim1_arr: u16,
 }
 
 /// 20kHz control loop tick.
@@ -60,7 +61,7 @@ pub fn ten_khz_tick(
             // Active brake mode 2: hold motor in comStep(2) at fixed power
             if config.brake_on_stop == 2 {
                 phase.com_step(2);
-                let brake_duty = (config.active_brake_power as u32 * TIM1_DEFAULT_ARR as u32 / DUTY_SCALE_MAX as u32) * 10;
+                let brake_duty = (config.active_brake_power as u32 * counters.tim1_arr as u32 / DUTY_SCALE_MAX as u32) * 10;
                 pwm.set_duty_all(brake_duty as u16);
             }
         }
@@ -96,7 +97,7 @@ pub fn ten_khz_tick(
     ramp_limit(duty, shared);
 
     // PWM output
-    let tim1_arr = TIM1_DEFAULT_ARR;
+    let tim1_arr = counters.tim1_arr;
     if shared.armed() && shared.running() {
         let adj = ((duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
         pwm.set_duty_all(adj);

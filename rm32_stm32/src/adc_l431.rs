@@ -7,30 +7,11 @@ use rm32::hal::Adc;
 
 static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
 
-const RCC_BASE: u32 = 0x4002_1000;
-const ADC1_BASE: u32 = 0x5004_0000; // L4 ADC1 base
-const DMA1_BASE: u32 = 0x4002_0000;
-const GPIOA_BASE: u32 = 0x4800_0000;
+use crate::periph_addr as addr;
+use crate::pac::{ADC1, ADC_COMMON, DMA1, GPIOA};
+use crate::regs::modify as modify_reg;
 
-// ADC register offsets (L4)
-const ADC_ISR: u32 = ADC1_BASE + 0x00;
-const ADC_CR: u32 = ADC1_BASE + 0x08;
-const ADC_CFGR: u32 = ADC1_BASE + 0x0C;
-const ADC_SMPR1: u32 = ADC1_BASE + 0x14;
-const ADC_SMPR2: u32 = ADC1_BASE + 0x18;
-const ADC_SQR1: u32 = ADC1_BASE + 0x30;
-const ADC_SQR2: u32 = ADC1_BASE + 0x34;
-const ADC_DR: u32 = ADC1_BASE + 0x40;
-const ADC_CCR: u32 = ADC1_BASE + 0x300 + 0x08; // Common config register
-
-// DMA1 Channel 1
-const DMA_CH1_CCR: u32 = DMA1_BASE + 0x08;
-const DMA_CH1_CNDTR: u32 = DMA1_BASE + 0x0C;
-const DMA_CH1_CPAR: u32 = DMA1_BASE + 0x10;
-const DMA_CH1_CMAR: u32 = DMA1_BASE + 0x14;
-const DMA_CSELR: u32 = DMA1_BASE + 0xA8;
-
-use crate::regs::{write as write_reg, read as read_reg, modify as modify_reg};
+const RCC_BASE: u32 = addr::RCC;
 
 pub struct L431Adc { _private: () }
 
@@ -38,75 +19,76 @@ impl L431Adc {
     pub fn post_init() -> Self { Self { _private: () } }
 
     pub fn init() -> Self {
+        let adc = unsafe { &*ADC1::ptr() };
+        let adc_common = unsafe { &*ADC_COMMON::ptr() };
+        let dma = unsafe { &*DMA1::ptr() };
+        let gpioa = unsafe { &*GPIOA::ptr() };
+
         unsafe {
             // Enable clocks: ADC (AHB2ENR bit 13), DMA1 (AHB1ENR bit 0), GPIOA (AHB2ENR bit 0)
             modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 13) | (1 << 0)); // AHB2ENR
             modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0)); // AHB1ENR: DMA1EN
 
-            // ADC clock: select system clock via ADCSEL in RCC_CCIPR (bits [29:28])
-            // 0b11 = no clock (reset), 0b01 = PLLSAI1, 0b10 = PLLSAI2, 0b00 = no
-            // Use HCLK/1 synchronous clock via ADC_CCR CKMODE
-            // Actually, simplest: use ADC_CCR CKMODE = 0b01 (HCLK/1)
-            modify_reg(ADC_CCR, |v| (v & !(0b11 << 16)) | (0b01 << 16)); // CKMODE=HCLK/1
+            // ADC clock: use HCLK/1 synchronous clock via ADC_CCR CKMODE=0b01
+            adc_common.ccr.modify(|_, w| unsafe { w.ckmode().bits(0b01) });
 
-            // PA3, PA6 as analog
-            modify_reg(GPIOA_BASE, |v| v | (0b11 << 6) | (0b11 << 12));
+            // PA3, PA6 as analog (MODER bits [7:6]=0b11 for PA3, [13:12]=0b11 for PA6)
+            gpioa.moder.modify(|_, w| w.moder3().bits(0b11).moder6().bits(0b11));
 
             // Enable temperature sensor (TSEN bit 23 in CCR)
-            modify_reg(ADC_CCR, |v| v | (1 << 23));
+            adc_common.ccr.modify(|_, w| w.ch17sel().set_bit());
 
-            // DMA CSELR: Channel 1 request = 0 (ADC1)
-            modify_reg(DMA_CSELR, |v| v & !(0xF << 0));
+            // DMA CSELR: Channel 1 request = 0 (ADC1), bits [3:0]
+            dma.cselr.modify(|r, w| w.bits(r.bits() & !(0xF << 0)));
 
             // DMA1 CH1: periph→memory, 16-bit, memory increment, circular
-            write_reg(DMA_CH1_CCR, 0);
-            write_reg(DMA_CH1_CPAR, ADC_DR);
-            write_reg(DMA_CH1_CMAR, ADC_DMA_BUF.as_ptr() as u32);
-            write_reg(DMA_CH1_CNDTR, 3);
-            write_reg(DMA_CH1_CCR,
+            dma.ccr1.write(|w| w.bits(0));
+            dma.cpar1.write(|w| w.bits(adc.dr.as_ptr() as u32));
+            dma.cmar1.write(|w| w.bits(ADC_DMA_BUF.as_ptr() as u32));
+            dma.cndtr1.write(|w| w.bits(3));
+            dma.ccr1.write(|w| w.bits(
                 (1 << 5)       // CIRC
                 | (1 << 7)     // MINC
                 | (0b01 << 8)  // PSIZE = 16-bit
                 | (0b01 << 10) // MSIZE = 16-bit
-            );
-            modify_reg(DMA_CH1_CCR, |v| v | 1); // EN
+            ));
+            dma.ccr1.modify(|r, w| w.bits(r.bits() | 1)); // EN
 
             // Disable deep power down, enable internal voltage regulator
-            modify_reg(ADC_CR, |v| v & !(1 << 29)); // DEEPPWD = 0
-            modify_reg(ADC_CR, |v| v | (1 << 28));  // ADVREGEN = 1
+            adc.cr.modify(|_, w| w.deeppwd().clear_bit()); // DEEPPWD = 0
+            adc.cr.modify(|_, w| w.advregen().set_bit());   // ADVREGEN = 1
             // Wait for regulator startup (~20us at 80MHz)
             cortex_m::asm::delay(80 * 20);
 
             // Sampling time: 47.5 cycles for CH8, CH11, CH17
-            // SMPR1 handles CH0-9, SMPR2 handles CH10-18
             // CH8: SMPR1 bits [26:24] = 0b100 (47.5 cycles)
-            modify_reg(ADC_SMPR1, |v| (v & !(0b111 << 24)) | (0b100 << 24));
+            adc.smpr1.modify(|_, w| unsafe { w.smp8().bits(0b100) });
             // CH11: SMPR2 bits [5:3] = 0b100
-            modify_reg(ADC_SMPR2, |v| (v & !(0b111 << 3)) | (0b100 << 3));
+            adc.smpr2.modify(|_, w| unsafe { w.smp11().bits(0b100) });
             // CH17: SMPR2 bits [23:21] = 0b100
-            modify_reg(ADC_SMPR2, |v| (v & !(0b111 << 21)) | (0b100 << 21));
+            adc.smpr2.modify(|_, w| unsafe { w.smp17().bits(0b100) });
 
             // Sequence: 3 conversions
-            // SQR1: L[3:0] = 2 (3 conversions), SQ1[10:6] = 8 (CH8)
-            write_reg(ADC_SQR1, (2 << 0) | (8 << 6) | (11 << 12) | (17 << 18));
+            // SQR1: L[3:0] = 2 (3 conversions), SQ1=CH8, SQ2=CH11, SQ3=CH17
+            adc.sqr1.write(|w| unsafe { w.bits((2 << 0) | (8 << 6) | (11 << 12) | (17 << 18)) });
 
             // CFGR: DMA circular mode, resolution 12-bit
-            write_reg(ADC_CFGR,
+            adc.cfgr.write(|w| unsafe { w.bits(
                 (1 << 0)   // DMAEN
                 | (1 << 1) // DMACFG = circular
-            );
+            )});
 
             // Calibrate (single-ended)
-            modify_reg(ADC_CR, |v| v & !(1 << 30)); // ADCALDIF = 0 (single-ended)
-            modify_reg(ADC_CR, |v| v | (1 << 31));  // ADCAL
-            while read_reg(ADC_CR) & (1 << 31) != 0 {}
+            adc.cr.modify(|_, w| w.adcaldif().clear_bit()); // ADCALDIF = 0 (single-ended)
+            adc.cr.modify(|_, w| w.adcal().set_bit());       // ADCAL
+            while adc.cr.read().adcal().bit_is_set() {}
 
             cortex_m::asm::delay(80 * 20);
 
             // Enable ADC
-            write_reg(ADC_ISR, 1 << 0); // clear ADRDY
-            modify_reg(ADC_CR, |v| v | (1 << 0)); // ADEN
-            while read_reg(ADC_ISR) & (1 << 0) == 0 {}
+            adc.isr.write(|w| unsafe { w.bits(1 << 0) }); // clear ADRDY
+            adc.cr.modify(|_, w| w.aden().set_bit()); // ADEN
+            while adc.isr.read().adrdy().bit_is_clear() {}
         }
         Self { _private: () }
     }
@@ -114,7 +96,8 @@ impl L431Adc {
 
 impl Adc for L431Adc {
     fn start_conversion(&mut self) {
-        unsafe { modify_reg(ADC_CR, |v| v | (1 << 2)); } // ADSTART
+        let adc = unsafe { &*ADC1::ptr() };
+        adc.cr.modify(|_, w| w.adstart().set_bit());
     }
 
     fn raw_current(&self) -> u16 { unsafe { ADC_DMA_BUF[0] } }

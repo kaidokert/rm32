@@ -17,13 +17,10 @@ use rm32::hal::PhaseOutput;
 const MODER: u32 = 0x00;
 const BSRR: u32 = 0x18;
 
-const GPIOA_BASE: u32 = 0x4800_0000;
-#[cfg(feature = "stm32g071")]
-const GPIOB_BASE: u32 = 0x4800_0400;
-#[cfg(feature = "stm32f051")]
-const GPIOB_BASE: u32 = 0x4800_0400;
-#[cfg(feature = "stm32l431")]
-const GPIOB_BASE: u32 = 0x4800_0400;
+use crate::periph_addr as addr;
+
+const GPIOA_BASE: u32 = addr::GPIOA;
+const GPIOB_BASE: u32 = addr::GPIOB;
 
 /// GPIO mode values (STM32G0 MODER register: 2 bits per pin)
 const MODE_INPUT: u32 = 0b00;

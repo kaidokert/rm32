@@ -62,6 +62,7 @@ pub struct IsrState {
     pub transfer: TransferState,
     pub config: EepromConfig,
     pub forward: bool,
+    pub tim1_arr: u16,
     pub frametime_low: u16,
     pub frametime_high: u16,
     pub ten_khz_counter: u32,

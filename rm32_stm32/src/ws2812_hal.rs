@@ -8,7 +8,7 @@
 
 use rm32::ws2812::WS2812Pin;
 
-const GPIOB_BASE: u32 = 0x4800_0400;
+const GPIOB_BASE: u32 = crate::periph_addr::GPIOB;
 const BSRR: u32 = 0x18;
 const MODER: u32 = 0x00;
 const OSPEEDR: u32 = 0x08;
