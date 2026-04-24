@@ -1,16 +1,13 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
 use core::cell::Cell;
+use crate::motor_mode::MotorMode;
 use crate::shared_comm::SharedComm;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
-/// Matches the interface of the atomic-based SharedState in rm32_stm32.
 pub struct TestShared {
-    pub armed: Cell<bool>,
-    pub running: Cell<bool>,
+    pub mode: Cell<MotorMode>,
     pub input_set: Cell<bool>,
-    pub stepper_sine: Cell<bool>,
-    pub old_routine: Cell<bool>,
     pub dshot_telemetry: Cell<bool>,
     pub newinput: Cell<u16>,
     pub adjusted_input: Cell<u16>,
@@ -24,11 +21,8 @@ pub struct TestShared {
 impl TestShared {
     pub fn new() -> Self {
         Self {
-            armed: Cell::new(false),
-            running: Cell::new(false),
+            mode: Cell::new(MotorMode::Disarmed),
             input_set: Cell::new(false),
-            stepper_sine: Cell::new(false),
-            old_routine: Cell::new(true),
             dshot_telemetry: Cell::new(false),
             newinput: Cell::new(0),
             adjusted_input: Cell::new(0),
@@ -42,16 +36,11 @@ impl TestShared {
 }
 
 impl SharedComm for TestShared {
-    fn armed(&self) -> bool { self.armed.get() }
-    fn set_armed(&self, v: bool) { self.armed.set(v); }
-    fn running(&self) -> bool { self.running.get() }
-    fn set_running(&self, v: bool) { self.running.set(v); }
+    fn motor_mode(&self) -> MotorMode { self.mode.get() }
+    fn set_motor_mode(&self, mode: MotorMode) { self.mode.set(mode); }
+
     fn input_set(&self) -> bool { self.input_set.get() }
     fn set_input_set(&self, v: bool) { self.input_set.set(v); }
-    fn stepper_sine(&self) -> bool { self.stepper_sine.get() }
-    fn set_stepper_sine(&self, v: bool) { self.stepper_sine.set(v); }
-    fn old_routine(&self) -> bool { self.old_routine.get() }
-    fn set_old_routine(&self, v: bool) { self.old_routine.set(v); }
     fn dshot_telemetry(&self) -> bool { self.dshot_telemetry.get() }
 
     fn newinput(&self) -> u16 { self.newinput.get() }

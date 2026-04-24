@@ -3,7 +3,8 @@
 //! On Cortex-M0+ (single core, aligned access), atomic loads/stores
 //! compile to plain LDR/STR which are inherently atomic.
 
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
+use rm32::motor_mode::MotorMode;
 
 /// Relaxed ordering — sufficient for single-core Cortex-M0+.
 /// No reordering concerns without a cache or second core.
@@ -13,13 +14,10 @@ const ORD: Ordering = Ordering::Relaxed;
 /// All fields are atomic — no locks or critical sections needed.
 #[repr(C)]
 pub struct SharedState {
-    // Motor state machine
-    armed: AtomicBool,
-    running: AtomicBool,
+    // Motor state machine (single atomic replaces armed/running/old_routine/stepper_sine)
+    motor_mode: AtomicU8,
     input_set: AtomicBool,
     send_telemetry: AtomicBool,
-    stepper_sine: AtomicBool,
-    old_routine: AtomicBool,
     dshot: AtomicBool,
     servo_pwm: AtomicBool,
     dshot_telemetry: AtomicBool,
@@ -49,12 +47,9 @@ pub struct SharedState {
 impl SharedState {
     pub const fn new() -> Self {
         Self {
-            armed: AtomicBool::new(false),
-            running: AtomicBool::new(false),
+            motor_mode: AtomicU8::new(MotorMode::Disarmed as u8),
             input_set: AtomicBool::new(false),
             send_telemetry: AtomicBool::new(false),
-            stepper_sine: AtomicBool::new(false),
-            old_routine: AtomicBool::new(true),
             dshot: AtomicBool::new(false),
             servo_pwm: AtomicBool::new(false),
             dshot_telemetry: AtomicBool::new(false),
@@ -72,25 +67,42 @@ impl SharedState {
         }
     }
 
+    // --- Motor mode ---
+
+    pub fn motor_mode(&self) -> MotorMode { MotorMode::from_u8(self.motor_mode.load(ORD)) }
+    pub fn set_motor_mode(&self, mode: MotorMode) { self.motor_mode.store(mode as u8, ORD); }
+
+    // Convenience getters (delegate to motor_mode)
+    pub fn armed(&self) -> bool { self.motor_mode().is_armed() }
+    pub fn running(&self) -> bool { self.motor_mode().is_running() }
+    pub fn old_routine(&self) -> bool { self.motor_mode().is_old_routine() }
+    pub fn stepper_sine(&self) -> bool { self.motor_mode().is_stepper_sine() }
+
+    // Convenience setters (mode transitions)
+    pub fn set_armed(&self, v: bool) {
+        if v && !self.armed() { self.set_motor_mode(MotorMode::Armed); }
+        else if !v { self.set_motor_mode(MotorMode::Disarmed); }
+    }
+    pub fn set_running(&self, v: bool) {
+        if v && !self.running() { self.set_motor_mode(MotorMode::OldRoutine); }
+        else if !v && self.running() { self.set_motor_mode(MotorMode::Armed); }
+    }
+    pub fn set_old_routine(&self, v: bool) {
+        if v && self.running() { self.set_motor_mode(MotorMode::OldRoutine); }
+        else if !v && self.old_routine() { self.set_motor_mode(MotorMode::Running); }
+    }
+    pub fn set_stepper_sine(&self, v: bool) {
+        if v { self.set_motor_mode(MotorMode::StepperSine); }
+        else if self.stepper_sine() { self.set_motor_mode(MotorMode::Armed); }
+    }
+
     // --- Bool accessors ---
-
-    pub fn armed(&self) -> bool { self.armed.load(ORD) }
-    pub fn set_armed(&self, v: bool) { self.armed.store(v, ORD); }
-
-    pub fn running(&self) -> bool { self.running.load(ORD) }
-    pub fn set_running(&self, v: bool) { self.running.store(v, ORD); }
 
     pub fn input_set(&self) -> bool { self.input_set.load(ORD) }
     pub fn set_input_set(&self, v: bool) { self.input_set.store(v, ORD); }
 
     pub fn send_telemetry(&self) -> bool { self.send_telemetry.load(ORD) }
     pub fn set_send_telemetry(&self, v: bool) { self.send_telemetry.store(v, ORD); }
-
-    pub fn stepper_sine(&self) -> bool { self.stepper_sine.load(ORD) }
-    pub fn set_stepper_sine(&self, v: bool) { self.stepper_sine.store(v, ORD); }
-
-    pub fn old_routine(&self) -> bool { self.old_routine.load(ORD) }
-    pub fn set_old_routine(&self, v: bool) { self.old_routine.store(v, ORD); }
 
     pub fn dshot(&self) -> bool { self.dshot.load(ORD) }
     pub fn set_dshot(&self, v: bool) { self.dshot.store(v, ORD); }
@@ -156,16 +168,11 @@ impl SharedState {
 }
 
 impl rm32::shared_comm::SharedComm for SharedState {
-    fn armed(&self) -> bool { self.armed() }
-    fn set_armed(&self, v: bool) { self.set_armed(v); }
-    fn running(&self) -> bool { self.running() }
-    fn set_running(&self, v: bool) { self.set_running(v); }
+    fn motor_mode(&self) -> MotorMode { self.motor_mode() }
+    fn set_motor_mode(&self, mode: MotorMode) { self.set_motor_mode(mode); }
+
     fn input_set(&self) -> bool { self.input_set() }
     fn set_input_set(&self, v: bool) { self.set_input_set(v); }
-    fn stepper_sine(&self) -> bool { self.stepper_sine() }
-    fn set_stepper_sine(&self, v: bool) { self.set_stepper_sine(v); }
-    fn old_routine(&self) -> bool { self.old_routine() }
-    fn set_old_routine(&self, v: bool) { self.set_old_routine(v); }
     fn dshot_telemetry(&self) -> bool { self.dshot_telemetry() }
 
     fn newinput(&self) -> u16 { self.newinput() }

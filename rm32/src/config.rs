@@ -75,16 +75,32 @@ pub struct EepromConfig {
     pub can_reserved: [u8; 8],
 }
 
+// Compile-time check: struct size must match EEPROM layout exactly.
+// If a field is added/removed/resized, this fails to compile.
+const _: () = {
+    if core::mem::size_of::<EepromConfig>() != 192 {
+        panic!("EepromConfig size must be exactly 192 bytes");
+    }
+};
+
 impl EepromConfig {
     pub const SIZE: usize = 192;
 
+    /// View config as raw bytes. Sound because:
+    /// - `repr(C)` guarantees field ordering
+    /// - All fields are `u8` or `[u8; N]` — no padding, no alignment issues
+    /// - Size is compile-time verified above
     pub fn as_bytes(&self) -> &[u8; Self::SIZE] {
-        // Safe: repr(C), all fields are plain bytes
         unsafe { &*(self as *const Self as *const [u8; Self::SIZE]) }
     }
 
     pub fn as_bytes_mut(&mut self) -> &mut [u8; Self::SIZE] {
         unsafe { &mut *(self as *mut Self as *mut [u8; Self::SIZE]) }
+    }
+
+    /// Create config from raw bytes (e.g. flash read).
+    pub fn from_bytes(bytes: &[u8; Self::SIZE]) -> Self {
+        unsafe { core::ptr::read(bytes.as_ptr() as *const Self) }
     }
 
     pub fn input_type(&self) -> InputType {

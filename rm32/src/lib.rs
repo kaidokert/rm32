@@ -29,5 +29,6 @@ pub mod filter;
 pub mod edt;
 pub mod crsf;
 pub mod shared_comm;
+pub mod motor_mode;
 pub mod ws2812;
 pub mod fixed_mode;

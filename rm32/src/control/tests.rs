@@ -1037,7 +1037,7 @@ mod tests {
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
-        shared.armed.set(true);
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(1000);
 
         isr_logic::ten_khz_tick(
@@ -1062,7 +1062,7 @@ mod tests {
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
-        shared.armed.set(true);
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(0);
 
         isr_logic::ten_khz_tick(
@@ -1138,7 +1138,7 @@ mod tests {
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
-        shared.armed.set(true);
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(2047);
         duty.last = 100;
         duty.ramp_divider = 0;
