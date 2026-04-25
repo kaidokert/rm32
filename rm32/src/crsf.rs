@@ -76,6 +76,12 @@ pub struct CrsfParser {
     pub throttle_channel: u8,
 }
 
+impl Default for CrsfParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CrsfParser {
     pub const fn new() -> Self {
         Self {

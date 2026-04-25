@@ -33,10 +33,16 @@ pub struct Tim2Interval {
     _private: (),
 }
 
+impl Default for Tim2Interval {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tim2Interval {
     pub fn new() -> Self {
         // Enable TIM2 clock
-        let rcc = unsafe { &*RCC::ptr() };
+        let _rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
         rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
         #[cfg(feature = "stm32f051")]
@@ -79,10 +85,16 @@ pub struct Tim14Com {
     _private: (),
 }
 
+impl Default for Tim14Com {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Tim14Com {
     pub fn new() -> Self {
         // Enable TIM14 clock
-        let rcc = unsafe { &*RCC::ptr() };
+        let _rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
         rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN (APB2)
         #[cfg(feature = "stm32f051")]

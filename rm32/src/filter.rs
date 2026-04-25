@@ -10,6 +10,12 @@ pub struct EwmaPow2<const K: u8> {
     initialized: bool,
 }
 
+impl<const K: u8> Default for EwmaPow2<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const K: u8> EwmaPow2<K> {
     pub const fn new() -> Self {
         Self { state: 0, initialized: false }

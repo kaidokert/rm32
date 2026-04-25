@@ -2,9 +2,10 @@
 //!
 //! Single `init()` function per MCU. The binary `main()` is MCU-independent.
 
-use rm32::hal::{Comparator, IntervalTimer, ComTimer, PhaseOutput, PwmOutput, System};
+use rm32::hal::{PwmOutput, System};
 
 /// Start IWDG — shared across all MCUs (same register layout at 0x4000_3000).
+#[allow(dead_code)] // Used by F051/L431 but not G071 (which uses HAL)
 fn iwdg_start(prescaler: u8, reload: u16) {
     const IWDG: u32 = 0x4000_3000;
     unsafe {
@@ -186,7 +187,7 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
         ((TIM1_BASE+0x1C) as *mut u32).write_volatile(0x0068); // CCMR2: PWM1
         ((TIM1_BASE+0x20) as *mut u32).write_volatile(0x555);  // CCER: all channels + complementary
         ((TIM1_BASE+0x44) as *mut u32).write_volatile(dead_time as u32 | (1<<15)); // BDTR: DTG+MOE
-        ((TIM1_BASE+0x00) as *mut u32).write_volatile(1);    // CR1: CEN
+        (TIM1_BASE as *mut u32).write_volatile(1);    // CR1: CEN
     }
     let pwm = F051Pwm { _private: () };
     let phase = G0APhaseDriver::new(false); // same pins for F0_A
@@ -225,7 +226,7 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
         ((tim6+0x14) as *mut u32).write_volatile(1);    // EGR.UG
         ((tim6+0x10) as *mut u32).write_volatile(0);    // SR clear
         ((tim6+0x0C) as *mut u32).write_volatile(1);    // DIER.UIE
-        ((tim6+0x00) as *mut u32).write_volatile(1);    // CR1.CEN
+        (tim6 as *mut u32).write_volatile(1);    // CR1.CEN
     }
 
     // NVIC

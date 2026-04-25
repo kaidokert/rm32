@@ -1,8 +1,7 @@
 //! EEPROM settings loading and application.
 
-use crate::config::{EepromConfig, InputType};
+use crate::config::InputType;
 use crate::control::state::MotorState;
-use crate::functions::map;
 
 const EEPROM_VERSION: u8 = 3;
 

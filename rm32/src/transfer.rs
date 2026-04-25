@@ -10,6 +10,7 @@ use crate::servo::{ServoState, ServoResult};
 use crate::functions::get_abs_dif;
 
 /// Transfer complete processing state.
+#[derive(Default)]
 pub struct TransferState {
     pub servo: ServoState,
     // Unarmed DShot frame averaging
@@ -20,19 +21,9 @@ pub struct TransferState {
     pub last_input: u16,
 }
 
-impl Default for TransferState {
-    fn default() -> Self {
-        Self {
-            servo: ServoState::default(),
-            average_count: 0,
-            average_packet_length: 0,
-            enter_calibration_count: 0,
-            last_input: 0,
-        }
-    }
-}
 
 /// Actions the caller (ISR) should take after transfer complete.
+#[derive(Default)]
 pub struct TransferActions {
     pub newinput: Option<u16>,
     pub send_telemetry: bool,
@@ -47,23 +38,6 @@ pub struct TransferActions {
     pub frametime_low: Option<u16>,
 }
 
-impl Default for TransferActions {
-    fn default() -> Self {
-        Self {
-            newinput: None,
-            send_telemetry: false,
-            signal_timeout_reset: false,
-            input_detected: false,
-            input_is_dshot: false,
-            input_is_servo: false,
-            save_settings: false,
-            play_tone: 0,
-            dshot_command: 0,
-            frametime_high: None,
-            frametime_low: None,
-        }
-    }
-}
 
 impl TransferState {
     /// Process a DMA transfer complete event.
@@ -81,6 +55,7 @@ impl TransferState {
     /// `disable_stick_cal`: config disable_stick_calibration flag
     /// `zero_input_count`: current zero input counter
     /// `frametime_low/high`: current DShot frame timing bounds
+    #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
         dma_buffer: &[u32],
@@ -118,8 +93,8 @@ impl TransferState {
         }
 
         // --- DShot processing ---
-        if dshot_mode {
-            if dma_buffer.len() >= 32 {
+        if dshot_mode
+            && dma_buffer.len() >= 32 {
                 let buf: [u32; 32] = {
                     let mut b = [0u32; 32];
                     b.copy_from_slice(&dma_buffer[..32]);
@@ -141,7 +116,6 @@ impl TransferState {
                     _ => {} // bad CRC or timing
                 }
             }
-        }
 
         // --- Servo processing ---
         if servo_mode {

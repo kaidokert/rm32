@@ -13,6 +13,7 @@ pub struct Sounds {
 }
 
 /// A single note: prescaler value (frequency) and duration in ms.
+#[allow(dead_code)]
 struct Note {
     prescaler: u16,
     step: u8,

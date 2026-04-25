@@ -49,6 +49,12 @@ pub struct SharedState {
     degrees_celsius: AtomicU16, // stored as u16, interpreted as i16
 }
 
+impl Default for SharedState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SharedState {
     pub const fn new() -> Self {
         Self {

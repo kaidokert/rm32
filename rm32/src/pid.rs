@@ -32,7 +32,7 @@ impl Pid {
     /// Mirrors `doPidCalculations` from main.c exactly.
     pub fn calculate(&mut self, actual: i32, target: i32) -> i32 {
         self.error = actual - target;
-        self.integral = self.integral + self.error * self.ki as i32;
+        self.integral += self.error * self.ki as i32;
 
         if self.integral > self.integral_limit {
             self.integral = self.integral_limit;

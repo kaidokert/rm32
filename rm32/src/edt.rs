@@ -23,6 +23,7 @@ pub const EDT_DEINIT_FRAME: u16 = 0xEFF;
 /// EDT scheduler state.
 /// Manages the interleaving of eRPM and extended data frames.
 #[derive(Clone)]
+#[derive(Default)]
 pub struct EdtScheduler {
     /// Frame counter (increments each telemetry response)
     pub counter: u16,
@@ -36,17 +37,6 @@ pub struct EdtScheduler {
     pub send_deinit: bool,
 }
 
-impl Default for EdtScheduler {
-    fn default() -> Self {
-        Self {
-            counter: 0,
-            last_sent_extended: false,
-            active: false,
-            send_init: false,
-            send_deinit: false,
-        }
-    }
-}
 
 /// What the scheduler decided to send this frame.
 pub enum EdtFrame {
@@ -91,7 +81,7 @@ impl EdtScheduler {
         // Current: every 40 frames (~20Hz at 800Hz input)
         // Voltage: every 200 frames (~4Hz)
         // Temperature: every 200 frames, offset from voltage
-        let frame = if self.counter % 40 == 0 {
+        let frame = if self.counter.is_multiple_of(40) {
             // Current: 50mA per LSB
             let payload = ((current_ma as i32).max(0) / 50) as u8;
             (EDT_CURRENT << 8) | payload as u16

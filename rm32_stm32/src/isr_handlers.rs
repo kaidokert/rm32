@@ -5,7 +5,6 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, IsrState};
-use rm32::hal::{PwmOutput, Comparator, IntervalTimer, ComTimer, PhaseOutput};
 
 /// Single-core ISR-local cell. Safe because:
 /// - Only accessed from ISR context (same priority level, no preemption)
@@ -19,6 +18,7 @@ impl IsrCell {
     /// Get or initialize the ISR state.
     /// If never initialized, enters emergency shutdown (all FETs off).
     #[inline(always)]
+    #[allow(clippy::mut_from_ref)] // Intentional: UnsafeCell interior mutability for ISR-local state
     fn get(&self) -> &mut IsrState {
         let opt = unsafe { &mut *self.0.get() };
         opt.get_or_insert_with(|| {
@@ -35,7 +35,7 @@ impl IsrCell {
                         );
                         // Reset PB0/1 (low-side FETs off)
                         ((periph_addr::GPIOB + BSRR) as *mut u32).write_volatile(
-                            (1 << (0+16)) | (1 << (1+16))
+                            (1 << 16) | (1 << (1+16))
                         );
                     }
                     loop { cortex_m::asm::nop(); }
@@ -217,18 +217,13 @@ pub fn handle_crsf_byte(byte: u8) {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
-    if let Some(result) = state.crsf.feed(byte) {
-        match result {
-            rm32::crsf::CrsfResult::Channels(channels) => {
-                let ch = state.crsf.throttle_channel as usize;
-                let throttle = rm32::crsf::CrsfParser::channel_to_throttle(channels[ch]);
-                shared.set_newinput(throttle);
-                shared.set_signal_timeout(0);
-                if !shared.input_set() {
-                    shared.set_input_set(true);
-                }
-            }
-            _ => {} // BadCrc, OtherFrame, Incomplete — ignore
+    if let Some(rm32::crsf::CrsfResult::Channels(channels)) = state.crsf.feed(byte) {
+        let ch = state.crsf.throttle_channel as usize;
+        let throttle = rm32::crsf::CrsfParser::channel_to_throttle(channels[ch]);
+        shared.set_newinput(throttle);
+        shared.set_signal_timeout(0);
+        if !shared.input_set() {
+            shared.set_input_set(true);
         }
     }
 }

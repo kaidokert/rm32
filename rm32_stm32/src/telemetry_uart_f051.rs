@@ -16,8 +16,8 @@ impl F051TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     pub fn init() -> Result<Self, crate::regs::InitError> {
-        let rcc = unsafe { &*RCC::ptr() };
-        let gpiob = unsafe { &*GPIOB::ptr() };
+        let _rcc = unsafe { &*RCC::ptr() };
+        let _gpiob = unsafe { &*GPIOB::ptr() };
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 

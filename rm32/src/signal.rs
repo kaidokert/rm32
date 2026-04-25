@@ -10,29 +10,29 @@ pub enum SignalType {
 }
 
 /// Detect input type from DMA buffer pulse pattern.
-pub fn detect_input(dma_buffer: &[u32], cpu_mhz: u8) -> SignalType {
+pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
     let mut smallest = 20000u16;
     let mut average_pulse = 0u32;
     let mut last = dma_buffer[0];
 
-    for j in 1..31 {
-        let diff = dma_buffer[j].wrapping_sub(last);
+    for sample in &dma_buffer[1..31] {
+        let diff = sample.wrapping_sub(last);
         if diff > 0 {
             if (diff as u16) < smallest {
                 smallest = diff as u16;
             }
             average_pulse += diff;
         }
-        last = dma_buffer[j];
+        last = *sample;
     }
     average_pulse /= 32;
 
     // Check DShot600: smallest 1-4, average < 60
-    if smallest >= 1 && smallest < 4 && average_pulse < 60 {
+    if (1..4).contains(&smallest) && average_pulse < 60 {
         return SignalType::Dshot600;
     }
     // Check DShot300: smallest 4-8, average < 100
-    if smallest >= 4 && smallest <= 8 && average_pulse < 100 {
+    if (4..=8).contains(&smallest) && average_pulse < 100 {
         return SignalType::Dshot300;
     }
     // Check Servo: smallest > 200

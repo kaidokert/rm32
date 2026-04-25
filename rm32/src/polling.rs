@@ -6,7 +6,6 @@
 
 use crate::control::state::MotorState;
 use crate::control::tick::ControlHal;
-use crate::hal;
 
 impl MotorState {
     /// Polling-mode zero-cross found routine.
@@ -51,11 +50,9 @@ impl MotorState {
                 self.old_routine = false;
                 hal.enable_interrupts();
             }
-        } else {
-            if self.timing.commutation_interval < self.timing.polling_mode_changeover as u32 {
-                self.old_routine = false;
-                hal.enable_interrupts();
-            }
+        } else if self.timing.commutation_interval < self.timing.polling_mode_changeover {
+            self.old_routine = false;
+            hal.enable_interrupts();
         }
     }
 }

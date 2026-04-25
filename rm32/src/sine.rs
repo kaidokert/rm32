@@ -79,6 +79,7 @@ pub enum SineStepResult {
 /// `forward`: motor direction
 /// `motor_poles`: from EEPROM config
 /// `changeover_step`: commutation step to use when transitioning to BLDC
+#[allow(clippy::too_many_arguments)]
 pub fn sine_step(
     positions: &mut PhasePositions,
     input: u16,

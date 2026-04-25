@@ -24,6 +24,7 @@ pub struct TickCounters {
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
+#[allow(clippy::too_many_arguments)]
 pub fn ten_khz_tick(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
@@ -132,12 +133,10 @@ fn bemf_polling(
             bemf.bad_count += 1;
             if bemf.bad_count > bemf.bad_count_threshold { bemf.counter = 0; }
         }
-    } else {
-        if !current_state { bemf.counter += 1; }
-        else {
-            bemf.bad_count += 1;
-            if bemf.bad_count > bemf.bad_count_threshold { bemf.counter = 0; }
-        }
+    } else if !current_state { bemf.counter += 1; }
+    else {
+        bemf.bad_count += 1;
+        if bemf.bad_count > bemf.bad_count_threshold { bemf.counter = 0; }
     }
     let threshold = if commutation.rising { bemf.min_counts_up } else { bemf.min_counts_down };
     if !bemf.zc_found && bemf.counter > threshold {
@@ -203,7 +202,7 @@ pub fn commutation_timer_expired(
     phase.com_step(step);
     comp.set_step(step, commutation.rising);
     comp.change_input();
-    let zc_avg = ((bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1) as u32;
+    let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;
     let ci = shared.commutation_interval();
     let new_ci = (ci + zc_avg) >> 1;
     shared.set_commutation_interval(new_ci);

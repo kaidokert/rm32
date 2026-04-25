@@ -9,7 +9,7 @@ use rm32::control::state::{Measurements, ProtectionState, TelemetryState};
 use rm32::current::CurrentFilter;
 use rm32::filter::EwmaPow2;
 use rm32::pid::Pid;
-use rm32::functions::{get_abs_dif, map};
+use rm32::functions::get_abs_dif;
 use rm32::hal::{Adc, TelemetryUart};
 use rm32::telemetry;
 
@@ -107,12 +107,11 @@ impl MainState {
         }
 
         // Signal timeout
-        if shared.signal_timeout() > 10000 {
-            if shared.armed() {
+        if shared.signal_timeout() > 10000
+            && shared.armed() {
                 shared.set_armed(false);
                 shared.set_input_set(false);
             }
-        }
 
         // eRPM
         if !shared.stepper_sine() && e_com_time > 0 {
@@ -157,11 +156,10 @@ impl MainState {
         // Cell count auto-detection on arming transition
         let armed = shared.armed();
         self.just_armed = armed && !self.last_armed;
-        if self.just_armed {
-            if self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
+        if self.just_armed
+            && self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
                 self.cell_count = (self.measurements.battery_voltage / 370) as u8;
             }
-        }
         self.last_armed = armed;
 
         // Stall protection PID — boosts duty at low RPM for crawlers/RC cars

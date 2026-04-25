@@ -86,7 +86,7 @@ impl MotorState {
         hal.disable_interrupt(); // disable COM timer interrupt
         self.commutate(hal);
 
-        let zc_avg = ((self.bemf.last_zc_time as u32 + self.bemf.this_zc_time as u32) >> 1) as u32;
+        let zc_avg = (self.bemf.last_zc_time as u32 + self.bemf.this_zc_time as u32) >> 1;
         self.timing.commutation_interval =
             (self.timing.commutation_interval + zc_avg) >> 1;
 
@@ -242,11 +242,10 @@ impl MotorState {
                 if self.duty.setpoint > self.duty.maximum {
                     self.duty.setpoint = self.duty.maximum;
                 }
-                if self.pid.use_current_limit {
-                    if self.duty.setpoint > self.pid.current_limit_adjust as u16 {
+                if self.pid.use_current_limit
+                    && self.duty.setpoint > self.pid.current_limit_adjust as u16 {
                         self.duty.setpoint = self.pid.current_limit_adjust as u16;
                     }
-                }
             }
         }
     }
@@ -559,7 +558,7 @@ impl MotorState {
         // Consumed current accumulation (1s interval)
         if self.ten_khz_counter > 20000 { // LOOP_FREQUENCY_HZ
             self.measurements.consumed_current +=
-                (self.measurements.actual_current as i32) << 16 / 360;
+                self.measurements.actual_current as i32;
             self.ten_khz_counter = 0;
         }
 
@@ -657,7 +656,7 @@ impl MotorState {
         {
             let k_erpm = if self.timing.e_com_time > 0 {
                 (600000 / self.timing.e_com_time) / 10
-            } else { 0 } as i32;
+            } else { 0 };
             let low_rpm = self.motor_kv as i32 / 100 / (32 / self.config.motor_poles.max(2) as i32);
             let high_rpm = self.motor_kv as i32 / 12 / (32 / self.config.motor_poles.max(2) as i32);
             if k_erpm > 0 && high_rpm > low_rpm {

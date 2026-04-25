@@ -12,7 +12,7 @@ use rm32::commutation::Commutation;
 use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, TelemetryState};
 use rm32::config::EepromConfig;
 use rm32::pid::Pid;
-use rm32::hal::{PwmOutput, PhaseOutput, System, TelemetryUart as _};
+use rm32::hal::{PwmOutput, System, TelemetryUart as _};
 
 use rm32_stm32::isr::{self, IsrState, IsrHal};
 use rm32_stm32::flash::FlashStorage;
@@ -39,10 +39,10 @@ fn main() -> ! {
     // --- WS2812 LED: boot indicator (dim red) ---
     let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(
         BOARD.led_pin.unwrap_or(8), // PB8 default
-        config::CPU_FREQUENCY_MHZ as u32,
+        config::CPU_FREQUENCY_MHZ,
     );
     if BOARD.has_led {
-        use rm32::ws2812::{WS2812Pin as _, send_status, LedStatus};
+        use rm32::ws2812::{send_status, LedStatus};
         cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Boot));
     }
 
@@ -162,10 +162,10 @@ fn main() -> ! {
                 DEVICE_32K => 0x0800_7C00u32,
                 DEVICE_64K => 0x0800_F800u32,
                 DEVICE_128K => 0x0801_F800u32,
-                _ => config::EEPROM_START as u32,
+                _ => config::EEPROM_START,
             }
         } else {
-            config::EEPROM_START as u32
+            config::EEPROM_START
         }
     };
 
@@ -208,7 +208,7 @@ fn main() -> ! {
     let startup_max_duty = minimum_duty_cycle + 400;
 
     // KV-based threshold scaling
-    let reverse_speed_threshold = rm32::functions::map(
+    let _reverse_speed_threshold = rm32::functions::map(
         main_state.motor_kv as i32, 300, 3000, 1000, 500,
     ) as u16;
 

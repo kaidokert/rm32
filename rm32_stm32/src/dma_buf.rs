@@ -20,6 +20,12 @@ pub struct DmaBuf<T, const N: usize>(UnsafeCell<[T; N]>);
 // Safe to share across contexts: single-core, access is sequenced by DMA TC interrupt
 unsafe impl<T, const N: usize> Sync for DmaBuf<T, N> {}
 
+impl<T: Copy + Default, const N: usize> Default for DmaBuf<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Copy + Default, const N: usize> DmaBuf<T, N> {
     pub const fn new() -> Self {
         // const-init with zeros (works for u16, u32 which are Copy+Default)

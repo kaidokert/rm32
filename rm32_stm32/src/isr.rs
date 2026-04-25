@@ -9,7 +9,6 @@ use rm32::crsf::CrsfParser;
 use rm32::dshot_commands::CommandProcessor;
 use rm32::edt::EdtScheduler;
 use rm32::transfer::TransferState;
-use rm32::hal::{PwmOutput, Comparator, PhaseOutput};
 
 #[cfg(feature = "stm32g071")]
 use crate::comparator::g071::G071BemfComparator as BemfComp;

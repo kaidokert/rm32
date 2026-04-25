@@ -37,11 +37,8 @@ pub fn init_comp2() {
     //   Power mode = high speed
     comp.comp2_csr().write(|w| unsafe {
         w.bits(
-            (0b1000 << 4)   // INMSEL = IO3 (PA2)
-            | (0b10 << 8)   // INPSEL = IO3 (PA3)
-            | (0b00 << 15)  // polarity non-inverted
-            | (0b00 << 18)  // hysteresis none
-            | (0b00 << 12)  // power mode high speed
+            ((0b1000 << 4)   // INMSEL = IO3 (PA2)
+            | (0b10 << 8))  // power mode high speed
             | (1 << 0)      // EN = enable
         )
     });

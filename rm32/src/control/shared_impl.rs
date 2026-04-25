@@ -18,6 +18,12 @@ pub struct TestShared {
     pub signal_timeout: Cell<u16>,
 }
 
+impl Default for TestShared {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestShared {
     pub fn new() -> Self {
         Self {

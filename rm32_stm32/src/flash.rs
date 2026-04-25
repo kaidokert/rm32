@@ -55,6 +55,12 @@ pub struct FlashStorage {
     _private: (),
 }
 
+impl Default for FlashStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlashStorage {
     pub fn new() -> Self {
         Self { _private: () }
@@ -130,7 +136,7 @@ impl Flash for FlashStorage {
     fn write(&mut self, address: u32, data: &[u8]) {
         self.unlock();
 
-        if address % regs::PAGE_SIZE == 0 {
+        if address.is_multiple_of(regs::PAGE_SIZE) {
             self.erase_page(address);
         }
 

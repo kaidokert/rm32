@@ -31,6 +31,7 @@ impl CommandProcessor {
     /// Process a DShot command (value 1-47). Called when frame decode yields a command.
     /// `running` and `armed` indicate motor state.
     /// Returns action to take, if any.
+    #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
         cmd: u16,

@@ -27,14 +27,14 @@ impl Commutation {
                 self.step = 1;
                 self.desync_check = true;
             }
-            self.rising = self.step % 2 != 0;
+            self.rising = !self.step.is_multiple_of(2);
         } else {
             self.step -= 1;
             if self.step < 1 {
                 self.step = 6;
                 self.desync_check = true;
             }
-            self.rising = self.step % 2 == 0;
+            self.rising = self.step.is_multiple_of(2);
         }
         self.step
     }
