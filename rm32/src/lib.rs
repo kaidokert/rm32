@@ -8,6 +8,7 @@
 pub mod hal;
 pub mod config;
 pub mod constants;
+pub mod units;
 pub mod commutation;
 pub mod control;
 pub mod dshot;

@@ -87,6 +87,7 @@ impl TransferState {
         input_set: bool,
         dshot_mode: bool,
         servo_mode: bool,
+        dshot_telemetry: bool,
         armed: bool,
         input_pin_high: bool,
         adjusted_input: u16,
@@ -124,7 +125,7 @@ impl TransferState {
                     b.copy_from_slice(&dma_buffer[..32]);
                     b
                 };
-                let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, false);
+                let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
                 match frame {
                     dshot::DshotFrame::Throttle { value, telemetry } => {
                         actions.newinput = Some(value);

@@ -23,6 +23,8 @@ pub struct BoardConfig {
     pub voltage_adc_channel: u8,
     /// Stall protection target interval
     pub stall_protect_interval: u16,
+    /// Minimum BEMF filter counts for zero-cross detection (varies by target)
+    pub min_bemf_counts: u8,
     /// Whether this board has a WS2812 LED
     pub has_led: bool,
     /// WS2812 LED pin number on GPIOB (e.g. 8 for PB8)
@@ -42,6 +44,7 @@ impl BoardConfig {
         stall_protect_interval: 6500,
         has_led: false,
         led_pin: None,
+        min_bemf_counts: 2, // TARGET_MIN_BEMF_COUNTS default
     };
 }
 

@@ -1,126 +1,79 @@
-//! ADC + DMA for voltage, current, and temperature on STM32L431.
-//!
-//! ADC1 with 3-rank scan: current (PA3/CH8), voltage (PA6/CH11),
-//! temperature (internal CH17). DMA1 Channel 1 (request 0) circular.
+//! L431 ADC: CH8 current, CH11 voltage, CH17 temp. DMA1_CH1 circular.
 
-use rm32::hal::Adc;
-
-// ADC DMA buffer is intentionally kept as a static mut rather than a field on L431Adc.
-// The ADC DMA runs in circular mode: the MAR is configured once in init() and the
-// hardware continuously refills the buffer without software involvement. If the buffer
-// were a struct field, the struct (and therefore the buffer) could be moved in memory
-// after init() returns, causing DMA to write to a stale address and silently corrupt
-// memory. Keeping it static guarantees a fixed address for the lifetime of the program.
-static mut ADC_DMA_BUF: [u16; 3] = [0; 3];
-
-use crate::periph_addr as addr;
 use crate::pac::{ADC1, ADC_COMMON, DMA1, GPIOA};
-use crate::regs::modify as modify_reg;
+use crate::adc_hal::{AdcOps, TempCalibration};
+use crate::adc_generic::GenericAdc;
+use crate::dma_buf::DmaBuf;
+use crate::regs::{modify as modify_reg, InitError, wait_for};
+use crate::periph_addr as addr;
 
-const RCC_BASE: u32 = addr::RCC;
+static ADC_DMA_BUF: DmaBuf<u16, 3> = DmaBuf::new();
 
-pub struct L431Adc { _private: () }
+const TEMP_CAL: TempCalibration = TempCalibration {
+    cal1_addr: 0x1FFF_75A8, cal2_addr: 0x1FFF_75CA,
+    cal1_temp: 30, cal2_temp: 130,
+};
 
-impl L431Adc {
-    pub fn post_init() -> Self { Self { _private: () } }
+pub struct L431AdcOps;
 
-    pub fn init() -> Result<Self, crate::regs::InitError> {
+impl AdcOps for L431AdcOps {
+    fn init(&self) -> Result<(), InitError> {
+        let rcc_base = addr::RCC;
+        unsafe {
+            modify_reg(rcc_base + 0x4C, |v| v | (1 << 13) | (1 << 0));
+            modify_reg(rcc_base + 0x48, |v| v | (1 << 0));
+        }
+
         let adc = unsafe { &*ADC1::ptr() };
         let adc_common = unsafe { &*ADC_COMMON::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
         let gpioa = unsafe { &*GPIOA::ptr() };
 
-        unsafe {
-            // Enable clocks: ADC (AHB2ENR bit 13), DMA1 (AHB1ENR bit 0), GPIOA (AHB2ENR bit 0)
-            modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 13) | (1 << 0)); // AHB2ENR
-            modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0)); // AHB1ENR: DMA1EN
+        adc_common.ccr.modify(|_, w| w.ckmode().bits(0b01));
+        gpioa.moder.modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
+        adc_common.ccr.modify(|_, w| w.ch17sel().set_bit());
 
-            // ADC clock: use HCLK/1 synchronous clock via ADC_CCR CKMODE=0b01
-            adc_common.ccr.modify(|_, w| unsafe { w.ckmode().bits(0b01) });
+        dma.cselr.modify(|r, w| unsafe { w.bits(r.bits() & !(0xF << 0)) });
+        dma.ccr1.write(|w| unsafe { w.bits(0) });
+        dma.cpar1.write(|w| unsafe { w.bits(adc.dr.as_ptr() as u32) });
+        dma.cmar1.write(|w| unsafe { w.bits(ADC_DMA_BUF.as_ptr() as u32) });
+        dma.cndtr1.write(|w| unsafe { w.bits(3) });
+        dma.ccr1.write(|w| unsafe { w.bits((1<<5)|(1<<7)|(0b01<<8)|(0b01<<10)) });
+        dma.ccr1.modify(|r, w| unsafe { w.bits(r.bits() | 1) });
 
-            // PA3, PA6 as analog (MODER bits [7:6]=0b11 for PA3, [13:12]=0b11 for PA6)
-            gpioa.moder.modify(|_, w| w.moder3().bits(0b11).moder6().bits(0b11));
+        adc.cr.modify(|_, w| w.deeppwd().clear_bit());
+        adc.cr.modify(|_, w| w.advregen().set_bit());
+        cortex_m::asm::delay(80 * 20);
 
-            // Enable temperature sensor (TSEN bit 23 in CCR)
-            adc_common.ccr.modify(|_, w| w.ch17sel().set_bit());
+        adc.smpr1.modify(|_, w| unsafe { w.smp8().bits(0b100) });
+        adc.smpr2.modify(|_, w| unsafe { w.smp11().bits(0b100) });
+        adc.smpr2.modify(|_, w| unsafe { w.smp17().bits(0b100) });
+        adc.sqr1.write(|w| unsafe { w.l().bits(2).sq1().bits(8).sq2().bits(11).sq3().bits(17) });
+        adc.cfgr.write(|w| unsafe { w.bits((1<<0)|(1<<1)) });
 
-            // DMA CSELR: Channel 1 request = 0 (ADC1), bits [3:0]
-            dma.cselr.modify(|r, w| w.bits(r.bits() & !(0xF << 0)));
+        adc.cr.modify(|_, w| w.adcaldif().clear_bit());
+        adc.cr.modify(|_, w| w.adcal().set_bit());
+        wait_for(|| !adc.cr.read().adcal().bit_is_set(), 100_000, "ADC cal")?;
+        cortex_m::asm::delay(80 * 20);
 
-            // DMA1 CH1: periph→memory, 16-bit, memory increment, circular
-            dma.ccr1.write(|w| w.bits(0));
-            dma.cpar1.write(|w| w.bits(adc.dr.as_ptr() as u32));
-            dma.cmar1.write(|w| w.bits(ADC_DMA_BUF.as_ptr() as u32));
-            dma.cndtr1.write(|w| w.bits(3));
-            dma.ccr1.write(|w| w.bits(
-                (1 << 5)       // CIRC
-                | (1 << 7)     // MINC
-                | (0b01 << 8)  // PSIZE = 16-bit
-                | (0b01 << 10) // MSIZE = 16-bit
-            ));
-            dma.ccr1.modify(|r, w| w.bits(r.bits() | 1)); // EN
-
-            // Disable deep power down, enable internal voltage regulator
-            adc.cr.modify(|_, w| w.deeppwd().clear_bit()); // DEEPPWD = 0
-            adc.cr.modify(|_, w| w.advregen().set_bit());   // ADVREGEN = 1
-            // Wait for regulator startup (~20us at 80MHz)
-            cortex_m::asm::delay(80 * 20);
-
-            // Sampling time: 47.5 cycles for CH8, CH11, CH17
-            // CH8: SMPR1 bits [26:24] = 0b100 (47.5 cycles)
-            adc.smpr1.modify(|_, w| unsafe { w.smp8().bits(0b100) });
-            // CH11: SMPR2 bits [5:3] = 0b100
-            adc.smpr2.modify(|_, w| unsafe { w.smp11().bits(0b100) });
-            // CH17: SMPR2 bits [23:21] = 0b100
-            adc.smpr2.modify(|_, w| unsafe { w.smp17().bits(0b100) });
-
-            // Sequence: 3 conversions
-            // SQR1: L[3:0] = 2 (3 conversions), SQ1=CH8, SQ2=CH11, SQ3=CH17
-            adc.sqr1.write(|w| unsafe {
-                w.l().bits(2)     // 3 conversions (L = N-1)
-                 .sq1().bits(8)   // CH8 = current
-                 .sq2().bits(11)  // CH11 = voltage
-                 .sq3().bits(17)  // CH17 = temperature
-            });
-
-            // CFGR: DMA circular mode, resolution 12-bit
-            adc.cfgr.write(|w| unsafe { w.bits(
-                (1 << 0)   // DMAEN
-                | (1 << 1) // DMACFG = circular
-            )});
-
-            // Calibrate (single-ended)
-            adc.cr.modify(|_, w| w.adcaldif().clear_bit()); // ADCALDIF = 0 (single-ended)
-            adc.cr.modify(|_, w| w.adcal().set_bit());       // ADCAL
-            crate::regs::wait_for(|| !adc.cr.read().adcal().bit_is_set(), 100_000, "ADC calibration")?;
-
-            cortex_m::asm::delay(80 * 20);
-
-            // Enable ADC
-            adc.isr.write(|w| unsafe { w.bits(1 << 0) }); // clear ADRDY
-            adc.cr.modify(|_, w| w.aden().set_bit()); // ADEN
-            crate::regs::wait_for(|| adc.isr.read().adrdy().bit_is_set(), 100_000, "ADC ready")?;
-        }
-        Ok(Self { _private: () })
+        adc.isr.write(|w| unsafe { w.bits(1 << 0) });
+        adc.cr.modify(|_, w| w.aden().set_bit());
+        wait_for(|| adc.isr.read().adrdy().bit_is_set(), 100_000, "ADC ready")?;
+        Ok(())
     }
-}
 
-impl Adc for L431Adc {
-    fn start_conversion(&mut self) {
+    fn start_conversion(&self) {
         let adc = unsafe { &*ADC1::ptr() };
         adc.cr.modify(|_, w| w.adstart().set_bit());
     }
+}
 
-    fn raw_current(&self) -> u16 { unsafe { ADC_DMA_BUF[0] } }
-    fn raw_voltage(&self) -> u16 { unsafe { ADC_DMA_BUF[1] } }
-    fn raw_temperature(&self) -> u16 { unsafe { ADC_DMA_BUF[2] } }
+pub type L431Adc = GenericAdc<L431AdcOps>;
 
-    fn calc_temperature(&self, raw: u16) -> i16 {
-        // L431 temp calibration: TS_CAL1 at 0x1FFF75A8 (30C), TS_CAL2 at 0x1FFF75CA (130C)
-        let ts_cal1 = unsafe { *(0x1FFF_75A8 as *const u16) } as i32;
-        let ts_cal2 = unsafe { *(0x1FFF_75CA as *const u16) } as i32;
-        if ts_cal2 == ts_cal1 { return 25; }
-        let temp = (130 - 30) * (raw as i32 - ts_cal1) / (ts_cal2 - ts_cal1) + 30;
-        temp as i16
-    }
+pub fn new_adc() -> L431Adc {
+    GenericAdc::new(L431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
+}
+
+pub fn post_init() -> L431Adc {
+    GenericAdc::post_init(L431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
 }

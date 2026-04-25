@@ -40,6 +40,9 @@ pub struct MainState {
     pub current_offset: i16,
     pub stall_protection_adjust: i32,
     pub stall_protect_target_interval: u16,
+    pub use_speed_control_loop: bool,
+    pub speed_input_override: i32,
+    pub target_e_com_time: u32,
     pub desync_check: bool,
     pub current_filter: CurrentFilter,
     pub voltage_filter: EwmaPow2<3>,
@@ -137,22 +140,13 @@ impl MainState {
             }
         }
 
-        // ADC measurements
-        let raw_v = adc.raw_voltage();
-        let raw_c = adc.raw_current();
-        let raw_t = adc.raw_temperature();
-        let smoothed_v = self.voltage_filter.update(raw_v);
-        self.measurements.battery_voltage =
-            (smoothed_v as u32 * 3300 / 4095 * self.voltage_divider as u32 / 100) as u16;
-        // C formula: actual_current = ((smoothed * 3300/41) - (CURRENT_OFFSET * 100)) / MILLIVOLT_PER_AMP
-        let smoothed_c = self.current_filter.update(raw_c);
-        let current_mv = (smoothed_c as i32) * 3300 / 41 - (self.current_offset as i32) * 100;
-        self.measurements.actual_current = if self.millivolt_per_amp > 0 {
-            (current_mv / self.millivolt_per_amp as i32) as i16
-        } else {
-            0
-        };
-        self.measurements.degrees_celsius = adc.calc_temperature(raw_t);
+        // ADC measurements — typed conversions via AdcCount
+        use rm32::units::AdcCount;
+        let smoothed_v = AdcCount(self.voltage_filter.update(adc.raw_voltage()));
+        let smoothed_c = AdcCount(self.current_filter.update(adc.raw_current()));
+        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider).0;
+        self.measurements.actual_current = smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp).0;
+        self.measurements.degrees_celsius = adc.calc_temperature(adc.raw_temperature()).0;
         adc.start_conversion();
 
         // Publish measurements to shared state (ISR reads for EDT)
@@ -176,6 +170,21 @@ impl MainState {
             let target = self.stall_protect_target_interval as i32;
             self.stall_protection_adjust += self.stall_pid.calculate(ci, target);
             self.stall_protection_adjust = self.stall_protection_adjust.clamp(0, 150 * 10000);
+            // Publish to ISR via shared state (ISR adds to duty)
+            shared.set_stall_protection_adjust((self.stall_protection_adjust / 10000) as u16);
+        }
+
+        // Speed control PID — closed-loop RPM control
+        if self.use_speed_control_loop && shared.running() {
+            let e_com = shared.e_com_time();
+            self.speed_input_override += self.speed_pid.calculate(e_com, self.target_e_com_time as i32);
+            self.speed_input_override = self.speed_input_override.clamp(0, 2047 * 10000);
+            if shared.zero_crosses() < 100 {
+                self.speed_pid.integral = 0;
+            }
+            // Override throttle input with PID output
+            let override_input = (self.speed_input_override / 10000) as u16;
+            shared.set_newinput(override_input.clamp(48, 2047));
         }
 
         // Telemetry send

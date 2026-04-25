@@ -79,24 +79,21 @@ fn main() -> ! {
             phase,
             #[cfg(feature = "stm32g071")]
             input: {
-                let mut ic = rm32_stm32::input_capture::DshotCapture::new();
-                ic.init();
+                let mut ic = rm32_stm32::input_capture::new_capture();
                 use rm32::hal::InputCapture;
                 ic.receive_dshot_dma();
                 ic
             },
             #[cfg(feature = "stm32f051")]
             input: {
-                let mut ic = rm32_stm32::input_capture_f051::F051DshotCapture::new();
-                ic.init();
+                let mut ic = rm32_stm32::input_capture_f051::new_capture();
                 use rm32::hal::InputCapture;
                 ic.receive_dshot_dma();
                 ic
             },
             #[cfg(feature = "stm32l431")]
             input: {
-                let mut ic = rm32_stm32::input_capture_l431::L431DshotCapture::new();
-                ic.init();
+                let mut ic = rm32_stm32::input_capture_l431::new_capture();
                 use rm32::hal::InputCapture;
                 ic.receive_dshot_dma();
                 ic
@@ -108,6 +105,7 @@ fn main() -> ! {
         transfer: rm32::transfer::TransferState::default(),
         config: EepromConfig::default(),
         forward: true,
+        edt_armed: false,
         tim1_arr: config::TIM1_AUTORELOAD,
         frametime_low: 400,
         frametime_high: 600,
@@ -138,6 +136,9 @@ fn main() -> ! {
         current_offset: BOARD.current_offset,
         stall_protection_adjust: 0,
         stall_protect_target_interval: BOARD.stall_protect_interval,
+        use_speed_control_loop: false,
+        speed_input_override: 0,
+        target_e_com_time: 0,
         desync_check: false,
         current_filter: rm32::current::CurrentFilter::new(),
         voltage_filter: rm32::filter::EwmaPow2::new(),
@@ -201,6 +202,9 @@ fn main() -> ! {
             minimum_duty_cycle
         }
     };
+    // Scale startup duty by PWM frequency (C: min_startup_duty += 200 + pwm_freq*100/24)
+    let pf = main_state.config.pwm_frequency;
+    let min_startup_duty = min_startup_duty + 200 + (pf as u16 * 100 / 24);
     let startup_max_duty = minimum_duty_cycle + 400;
 
     // KV-based threshold scaling
@@ -241,6 +245,14 @@ fn main() -> ! {
         isr.duty.minimum = minimum_duty_cycle;
         isr.duty.min_startup = min_startup_duty;
         isr.duty.startup_max = startup_max_duty;
+        // Apply servo EEPROM calibration to transfer state
+        if isr.config.eeprom_version > 0 {
+            let cfg = &isr.config;
+            isr.transfer.servo.low_threshold = (cfg.servo_low_threshold as u16) * 2 + 750;
+            isr.transfer.servo.high_threshold = (cfg.servo_high_threshold as u16) * 2 + 1750;
+            isr.transfer.servo.neutral = cfg.servo_neutral as u16 + 1374;
+            isr.transfer.servo.dead_band = cfg.servo_dead_band;
+        }
         // Apply dead-time override to duty thresholds
         if dead_time_override > 0 {
             isr.duty.min_startup += dead_time_override;
@@ -249,28 +261,27 @@ fn main() -> ! {
         }
     });
 
-    // Apply dead-time override to TIM1 BDTR register
+    // Apply dead-time override via PwmOutput trait
     if dead_time_override > 0 {
-        use rm32_stm32::periph_addr;
-        unsafe {
-            rm32_stm32::regs::modify(periph_addr::TIM1 + 0x44, |v| v | dead_time_override as u32);
-        }
+        isr::with_isr_state(|isr| {
+            isr.hal.pwm.set_dead_time_override(dead_time_override);
+        });
     }
 
     // --- ADC + Telemetry (already initialized by init(), create handles) ---
     #[cfg(feature = "stm32g071")]
     let (mut adc, mut telem) = (
-        rm32_stm32::adc::AdcReader::post_init(),
+        rm32_stm32::adc::post_init(),
         rm32_stm32::telemetry_uart::TelemUart::post_init(),
     );
     #[cfg(feature = "stm32f051")]
     let (mut adc, mut telem) = (
-        rm32_stm32::adc_f051::F051Adc::post_init(),
+        rm32_stm32::adc_f051::post_init(),
         rm32_stm32::telemetry_uart_f051::F051TelemUart::post_init(),
     );
     #[cfg(feature = "stm32l431")]
     let (mut adc, mut telem) = (
-        rm32_stm32::adc_l431::L431Adc::post_init(),
+        rm32_stm32::adc_l431::post_init(),
         rm32_stm32::telemetry_uart_l431::L431TelemUart::post_init(),
     );
 
@@ -320,12 +331,30 @@ fn main() -> ! {
 
         main_state.tick(shared, &mut adc, &mut telem);
 
-        // WS2812 LED status updates
-        if BOARD.has_led {
-            if main_state.just_armed {
+        // Arming feedback: cell count beeps + LED
+        if main_state.just_armed {
+            // Play motor beeps for cell count (or single beep if no LVC)
+            isr::with_isr_state(|isr| {
+                let sounds = rm32::sounds::Sounds::new(config::TIM1_AUTORELOAD);
+                if main_state.cell_count > 0 {
+                    for _ in 0..main_state.cell_count {
+                        sounds.play_input(&mut isr.hal.pwm, &mut isr.hal.phase, &mut sys);
+                        sys.delay_millis(100);
+                        sys.reload_watchdog();
+                    }
+                } else {
+                    sounds.play_input(&mut isr.hal.pwm, &mut isr.hal.phase, &mut sys);
+                }
+            });
+
+            if BOARD.has_led {
                 use rm32::ws2812::{send_status, LedStatus};
                 cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
             }
+        }
+
+        // WS2812 LED error indicator
+        if BOARD.has_led {
             // Error LED on BEMF timeout (stuck rotor)
             if main_state.protection.bemf_timeout_happened > main_state.protection.bemf_timeout
                 && main_state.config.stuck_rotor_protection != 0 {

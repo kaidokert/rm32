@@ -103,6 +103,20 @@ impl EepromConfig {
         unsafe { core::ptr::read(bytes.as_ptr() as *const Self) }
     }
 
+    // --- Typed accessors for boolean-like fields ---
+
+    pub fn is_dir_reversed(&self) -> bool { self.dir_reversed != 0 }
+    pub fn is_bidirectional(&self) -> bool { self.bi_direction != 0 }
+    pub fn use_sine_start(&self) -> bool { self.use_sine_start != 0 }
+    pub fn use_comp_pwm(&self) -> bool { self.comp_pwm != 0 }
+    pub fn has_stuck_rotor_protection(&self) -> bool { self.stuck_rotor_protection != 0 }
+    pub fn has_stall_protection(&self) -> bool { self.stall_protection != 0 }
+    pub fn has_low_voltage_cutoff(&self) -> bool { self.low_voltage_cut_off != 0 }
+    pub fn is_lvc_per_cell(&self) -> bool { self.low_voltage_cut_off == 1 }
+    pub fn is_lvc_absolute(&self) -> bool { self.low_voltage_cut_off == 2 }
+    pub fn disable_stick_cal(&self) -> bool { self.disable_stick_calibration != 0 }
+    pub fn is_rc_car_reverse(&self) -> bool { self.rc_car_reverse != 0 }
+
     pub fn input_type(&self) -> InputType {
         match self.input_type {
             0 => InputType::Auto,

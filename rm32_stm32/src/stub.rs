@@ -9,7 +9,7 @@ impl Adc for StubAdc {
     fn raw_voltage(&self) -> u16 { 0 }
     fn raw_current(&self) -> u16 { 0 }
     fn raw_temperature(&self) -> u16 { 0 }
-    fn calc_temperature(&self, _raw: u16) -> i16 { 25 }
+    fn calc_temperature(&self, _raw: u16) -> rm32::units::DegreesCelsius { rm32::units::DegreesCelsius(25) }
 }
 
 pub struct StubTelem;

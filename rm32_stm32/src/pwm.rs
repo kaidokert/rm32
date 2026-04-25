@@ -93,8 +93,12 @@ impl PwmOutput for Tim1Pwm {
     }
 
     fn generate_update_event(&mut self) {
-        // Force update event — not in HAL
         let tim = unsafe { &*TIM1::ptr() };
         tim.egr().write(|w| w.ug().set_bit());
+    }
+
+    fn set_dead_time_override(&mut self, dtg: u16) {
+        let tim = unsafe { &*TIM1::ptr() };
+        tim.bdtr().modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
     }
 }

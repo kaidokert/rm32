@@ -40,6 +40,9 @@ pub struct SharedState {
     // Telemetry (main computes, ISR reads for speed PID)
     e_com_time: AtomicU32, // stored as u32, interpreted as i32
 
+    // Stall protection (main computes, ISR applies to duty)
+    stall_protection_adjust: AtomicU16,
+
     // Measurements (main writes, ISR reads for EDT)
     actual_current: AtomicU16, // mA, stored as u16
     battery_voltage: AtomicU16, // mV
@@ -65,6 +68,7 @@ impl SharedState {
             signal_timeout: AtomicU16::new(0),
             zero_input_count: AtomicU16::new(0),
             e_com_time: AtomicU32::new(0),
+            stall_protection_adjust: AtomicU16::new(0),
             actual_current: AtomicU16::new(0),
             battery_voltage: AtomicU16::new(0),
             degrees_celsius: AtomicU16::new(0),
@@ -167,6 +171,9 @@ impl SharedState {
 
     // --- Measurement accessors (main writes, ISR reads for EDT) ---
 
+    pub fn stall_protection_adjust(&self) -> u16 { self.stall_protection_adjust.load(ORD) }
+    pub fn set_stall_protection_adjust(&self, v: u16) { self.stall_protection_adjust.store(v, ORD); }
+
     pub fn actual_current(&self) -> i16 { self.actual_current.load(ORD) as i16 }
     pub fn set_actual_current(&self, v: i16) { self.actual_current.store(v as u16, ORD); }
 
@@ -201,4 +208,7 @@ impl rm32::shared_comm::SharedComm for SharedState {
 
     fn signal_timeout(&self) -> u16 { self.signal_timeout() }
     fn increment_signal_timeout(&self) { self.increment_signal_timeout(); }
+
+    fn stall_protection_adjust(&self) -> u16 { self.stall_protection_adjust() }
+    fn set_stall_protection_adjust(&self, v: u16) { self.set_stall_protection_adjust(v); }
 }

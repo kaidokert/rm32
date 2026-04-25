@@ -21,6 +21,8 @@ pub trait PwmOutput {
     fn set_compare2(&mut self, val: u16);
     fn set_compare3(&mut self, val: u16);
     fn generate_update_event(&mut self);
+    /// Override dead-time in TIM1 BDTR register (OR'd with existing DTG value).
+    fn set_dead_time_override(&mut self, dtg: u16);
 }
 
 /// Comparator (BEMF sensing) interface
@@ -76,7 +78,7 @@ pub trait Adc {
     fn raw_voltage(&self) -> u16;
     fn raw_current(&self) -> u16;
     fn raw_temperature(&self) -> u16;
-    fn calc_temperature(&self, raw: u16) -> i16;
+    fn calc_temperature(&self, raw: u16) -> crate::units::DegreesCelsius;
 }
 
 /// Flash storage for persistent settings

@@ -43,6 +43,7 @@ mod tests {
         fn set_compare2(&mut self, _val: u16) {}
         fn set_compare3(&mut self, _val: u16) {}
         fn generate_update_event(&mut self) {}
+        fn set_dead_time_override(&mut self, _dtg: u16) {}
     }
 
     impl hal::Comparator for MockHal {
@@ -996,6 +997,7 @@ mod tests {
         fn set_compare2(&mut self, _: u16) {}
         fn set_compare3(&mut self, _: u16) {}
         fn generate_update_event(&mut self) {}
+        fn set_dead_time_override(&mut self, _dtg: u16) {}
     }
     struct MockComp { level: bool, mask_called: bool }
     impl hal::Comparator for MockComp {

@@ -17,14 +17,19 @@ fn iwdg_start(prescaler: u8, reload: u16) {
     }
 }
 
-use crate::comparator::BemfComparator;
+#[cfg(feature = "stm32g071")]
+use crate::comparator::g071::G071BemfComparator as BemfComp;
+#[cfg(feature = "stm32f051")]
+use crate::comparator::f051::F051BemfComparator as BemfComp;
+#[cfg(feature = "stm32l431")]
+use crate::comparator::l431::L431BemfComparator as BemfComp;
 use crate::timer::{Tim2Interval, Tim14Com};
 use crate::phase::G0APhaseDriver;
 
 /// Result of MCU initialization.
 pub struct InitResult<PWM: PwmOutput, SYS: System> {
     pub pwm: PWM,
-    pub comp: BemfComparator,
+    pub comp: BemfComp,
     pub interval: Tim2Interval,
     pub com_timer: Tim14Com,
     pub phase: G0APhaseDriver,
@@ -55,19 +60,21 @@ pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
     let phase = G0APhaseDriver::new(false);
     let sys = crate::system::SystemControl::new(dp.IWDG);
     crate::comp_init::init_comp2();
-    let comp = BemfComparator::new();
+    let comp = crate::comparator::g071::new_comparator();
     let interval = Tim2Interval::new();
     let com_timer = Tim14Com::new();
 
     // DShot input capture
     {
-        let mut input = crate::input_capture::DshotCapture::new();
-        input.init();
+        crate::input_capture::init_g071();
+        let mut input = crate::input_capture::new_capture();
+        // Hardware init done by init_*() above
         use rm32::hal::InputCapture;
         input.receive_dshot_dma();
     }
-    let _ = crate::adc::AdcReader::init();
-    let _telem = crate::telemetry_uart::TelemUart::init();
+    let adc = crate::adc::new_adc();
+    let _ = adc.init();
+    let _ = crate::telemetry_uart::TelemUart::init();
 
     // TIM6: 20kHz
     {
@@ -120,6 +127,9 @@ impl PwmOutput for F051Pwm {
     fn set_compare2(&mut self, v: u16) { unsafe { ((TIM1_BASE+0x38) as *mut u32).write_volatile(v as u32); } }
     fn set_compare3(&mut self, v: u16) { unsafe { ((TIM1_BASE+0x3C) as *mut u32).write_volatile(v as u32); } }
     fn generate_update_event(&mut self) { unsafe { ((TIM1_BASE+0x14) as *mut u32).write_volatile(1); } }
+    fn set_dead_time_override(&mut self, dtg: u16) {
+        unsafe { crate::regs::modify(TIM1_BASE + 0x44, |v| v | dtg as u32); }
+    }
 }
 
 #[cfg(feature = "stm32f051")]
@@ -131,7 +141,7 @@ impl System for F051System {
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
-    fn reload_watchdog(&mut self) { unsafe { (0x4000_3000 as *mut u32).write_volatile(0xAAAA); } }
+    fn reload_watchdog(&mut self) { unsafe { crate::regs::write(0x4000_3000, 0xAAAA); } }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 48); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
 }
@@ -157,8 +167,8 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
 
         // PA8/9/10 as AF2 (TIM1_CH1/2/3)
-        let gpioa_moder = 0x4800_0000 as *mut u32;
-        let gpioa_afrh = 0x4800_0024 as *mut u32;
+        let gpioa_moder = crate::periph_addr::GPIOA as *mut u32;
+        let gpioa_afrh = (crate::periph_addr::GPIOA + 0x24) as *mut u32;
         let m = gpioa_moder.read_volatile();
         gpioa_moder.write_volatile(
             (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
@@ -183,7 +193,7 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
 
     // COMP1 init
     crate::comp_init_f051::init_comp1();
-    let comp = BemfComparator::new();
+    let comp = crate::comparator::f051::new_comparator();
 
     // Timers
     let interval = Tim2Interval::new();
@@ -191,17 +201,19 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
 
     // Input capture (TIM15 + DMA1_CH5)
     {
-        let mut input = crate::input_capture_f051::F051DshotCapture::new();
-        input.init();
+        crate::input_capture_f051::init_f051();
+        let mut input = crate::input_capture_f051::new_capture();
+        // Hardware init done by init_*() above
         use rm32::hal::InputCapture;
         input.receive_dshot_dma();
     }
 
     // ADC
-    let _ = crate::adc_f051::F051Adc::init(); // Result ignored — ADC failure is non-fatal
+    let adc = crate::adc_f051::new_adc();
+    let _ = adc.init();
 
     // UART telemetry
-    let _telem = crate::telemetry_uart_f051::F051TelemUart::init();
+    let _ = crate::telemetry_uart_f051::F051TelemUart::init();
 
     // TIM6: 48MHz/2400 = 20kHz
     unsafe {
@@ -261,6 +273,9 @@ impl PwmOutput for L431Pwm {
     fn set_compare2(&mut self, v: u16) { unsafe { ((TIM1_BASE_L4+0x38) as *mut u32).write_volatile(v as u32); } }
     fn set_compare3(&mut self, v: u16) { unsafe { ((TIM1_BASE_L4+0x3C) as *mut u32).write_volatile(v as u32); } }
     fn generate_update_event(&mut self) { unsafe { ((TIM1_BASE_L4+0x14) as *mut u32).write_volatile(1); } }
+    fn set_dead_time_override(&mut self, dtg: u16) {
+        unsafe { crate::regs::modify(TIM1_BASE_L4 + 0x44, |v| v | dtg as u32); }
+    }
 }
 
 #[cfg(feature = "stm32l431")]
@@ -272,7 +287,7 @@ impl System for L431System {
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
-    fn reload_watchdog(&mut self) { unsafe { (0x4000_3000 as *mut u32).write_volatile(0xAAAA); } }
+    fn reload_watchdog(&mut self) { unsafe { crate::regs::write(0x4000_3000, 0xAAAA); } }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 80); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
 }
@@ -302,8 +317,8 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
 
         // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2)
-        let gpioa_moder = 0x4800_0000 as *mut u32;
-        let gpioa_afrh = 0x4800_0024 as *mut u32;
+        let gpioa_moder = crate::periph_addr::GPIOA as *mut u32;
+        let gpioa_afrh = (crate::periph_addr::GPIOA + 0x24) as *mut u32;
         let m = gpioa_moder.read_volatile();
         gpioa_moder.write_volatile(
             (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
@@ -328,23 +343,25 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
 
     // COMP2 init
     crate::comp_init_l431::init_comp2();
-    let comp = BemfComparator::new();
+    let comp = crate::comparator::l431::new_comparator();
     let interval = Tim2Interval::new();
     let com_timer = Tim14Com::new(); // L431 uses TIM16, but TIM14 struct works (same register layout)
 
     // Input capture (TIM15 + DMA1_CH5)
     {
-        let mut input = crate::input_capture_l431::L431DshotCapture::new();
-        input.init();
+        crate::input_capture_l431::init_l431();
+        let mut input = crate::input_capture_l431::new_capture();
+        // Hardware init done by init_*() above
         use rm32::hal::InputCapture;
         input.receive_dshot_dma();
     }
 
     // ADC
-    let _ = crate::adc_l431::L431Adc::init();
+    let adc = crate::adc_l431::new_adc();
+    let _ = adc.init();
 
     // UART telemetry
-    let _telem = crate::telemetry_uart_l431::L431TelemUart::init();
+    let _ = crate::telemetry_uart_l431::L431TelemUart::init();
 
     // TIM6: 80MHz / 4000 = 20kHz
     unsafe {

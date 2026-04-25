@@ -653,6 +653,20 @@ impl MotorState {
             }
         }
 
+        // eRPM-based throttle restriction (protects motor/ESC at extreme RPMs)
+        {
+            let k_erpm = if self.timing.e_com_time > 0 {
+                (600000 / self.timing.e_com_time) / 10
+            } else { 0 } as i32;
+            let low_rpm = self.motor_kv as i32 / 100 / (32 / self.config.motor_poles.max(2) as i32);
+            let high_rpm = self.motor_kv as i32 / 12 / (32 / self.config.motor_poles.max(2) as i32);
+            if k_erpm > 0 && high_rpm > low_rpm {
+                self.duty.maximum = map(k_erpm, low_rpm, high_rpm, 600, 2000) as u16;
+            } else {
+                self.duty.maximum = 2000;
+            }
+        }
+
         // Temperature limiting
         if self.measurements.degrees_celsius > self.config.temperature_limit as i16 {
             self.duty.maximum = map(

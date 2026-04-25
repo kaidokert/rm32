@@ -71,7 +71,12 @@ impl FlashStorage {
     }
 
     fn wait_bsy(&self) {
-        while unsafe { Self::read_reg(regs::SR) } & regs::BSY_BIT != 0 {}
+        // Timeout after ~50ms at 64MHz (flash erase is typically <40ms)
+        let mut timeout = 500_000u32;
+        while unsafe { Self::read_reg(regs::SR) } & regs::BSY_BIT != 0 {
+            timeout -= 1;
+            if timeout == 0 { break; } // prevent infinite hang on flash failure
+        }
     }
 
     fn unlock(&self) {

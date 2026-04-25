@@ -16,7 +16,7 @@ pub struct L431TelemUart { tx_buf: [u8; 49] }
 impl L431TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         let gpiob = unsafe { &*GPIOB::ptr() };
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
@@ -44,8 +44,8 @@ impl L431TelemUart {
             usart.cr1.write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
 
             // Wait TEACK + REACK
-            while !usart.isr.read().teack().bit_is_set() {}
-            while !usart.isr.read().reack().bit_is_set() {}
+            crate::regs::wait_for(|| usart.isr.read().teack().bit_is_set(), 100_000, "USART TEACK")?;
+            crate::regs::wait_for(|| usart.isr.read().reack().bit_is_set(), 100_000, "USART REACK")?;
 
             // DMA CSELR: CH4 request = 2 (USART1_TX), bits [15:12]
             dma.cselr.modify(|r, w| w.bits((r.bits() & !(0xF << 12)) | (2 << 12)));
@@ -61,7 +61,7 @@ impl L431TelemUart {
                 | (1 << 7) // MINC
             ));
         }
-        Self { tx_buf: [0; 49] }
+        Ok(Self { tx_buf: [0; 49] })
     }
 }
 

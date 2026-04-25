@@ -1,189 +1,229 @@
-//! BEMF comparator — MCU-specific.
-//!
-//! G071: COMP2 on EXTI18
-//! F051: COMP1 on EXTI21
+//! Generic BEMF comparator — MCU details via CompOps + ExtiOps traits.
 
-use crate::pac::{COMP, EXTI};
 use rm32::hal::Comparator as CompTrait;
+use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
 
-const EXTI_LINE: u32 = 1 << crate::config::COMP_EXTI_LINE;
-
-#[cfg(feature = "stm32g071")]
-mod inmsel {
-    pub const PHASE_A: u32 = 0b0110;
-    pub const PHASE_B: u32 = 0b0111;
-    pub const PHASE_C: u32 = 0b1000;
-    pub const INP: u32 = 0b10;
-}
-
-#[cfg(feature = "stm32l431")]
-mod inmsel {
-    // COMP2 INMSEL for L431
-    pub const PHASE_A: u32 = 0b0101; // IO2 = PB7  (INM5)
-    pub const PHASE_B: u32 = 0b0100; // IO5 = PA5  (INM4)
-    pub const PHASE_C: u32 = 0b0011; // IO4 = PA4  (INM3)
-    pub const INP: u32 = 0b00;       // IO1
-}
-
-#[cfg(feature = "stm32f051")]
-mod inmsel {
-    pub const PHASE_A: u32 = 0b1010001; // PA5
-    pub const PHASE_B: u32 = 0b1000001; // PA4
-    pub const PHASE_C: u32 = 0b1100001; // PA0
-}
-
-pub struct BemfComparator {
+/// Generic BEMF comparator. Zero cfg blocks — MCU differences in trait impls.
+pub struct BemfComparator<C: CompOps, E: ExtiOps> {
     step: u8,
     rising: bool,
+    comp: C,
+    exti: E,
+    inmsel: InmselMap,
 }
 
-impl BemfComparator {
-    pub fn new() -> Self {
-        Self { step: 1, rising: true }
-    }
-
-    pub fn set_step(&mut self, step: u8, rising: bool) {
-        self.step = step;
-        self.rising = rising;
+impl<C: CompOps, E: ExtiOps> BemfComparator<C, E> {
+    pub fn new(comp: C, exti: E, inmsel: InmselMap) -> Self {
+        Self { step: 1, rising: true, comp, exti, inmsel }
     }
 }
 
-impl CompTrait for BemfComparator {
+impl<C: CompOps, E: ExtiOps> CompTrait for BemfComparator<C, E> {
     fn set_step(&mut self, step: u8, rising: bool) {
         self.step = step;
         self.rising = rising;
     }
 
     fn output_level(&self) -> bool {
-        let comp = unsafe { &*COMP::ptr() };
-        #[cfg(feature = "stm32g071")]
-        { return comp.comp2_csr().read().bits() & (1 << 30) != 0; }
-        #[cfg(feature = "stm32f051")]
-        {
-            let csr = unsafe { *((COMP::ptr() as u32 + 0x1C) as *const u32) };
-            return csr & (1 << 30) != 0;
-        }
-        #[cfg(feature = "stm32l431")]
-        {
-            // COMP2_CSR at 0x4001_0204 on L4
-            let csr = unsafe { *(0x4001_0204 as *const u32) };
-            return csr & (1 << 30) != 0;
-        }
+        self.comp.output()
     }
 
     fn change_input(&mut self) {
-        let comp = unsafe { &*COMP::ptr() };
-        let _exti = unsafe { &*EXTI::ptr() };
-
         let phase = match self.step {
-            1 | 4 => inmsel::PHASE_C,
-            2 | 5 => inmsel::PHASE_A,
-            3 | 6 => inmsel::PHASE_B,
-            _ => inmsel::PHASE_C,
+            1 | 4 => self.inmsel.phase_c,
+            2 | 5 => self.inmsel.phase_a,
+            3 | 6 => self.inmsel.phase_b,
+            _ => self.inmsel.phase_c,
         };
+        self.comp.set_inmsel(phase);
 
-        #[cfg(feature = "stm32g071")]
-        comp.comp2_csr().modify(|r, w| unsafe {
-            let cleared = r.bits() & !(0xF << 4 | 0x3 << 8);
-            w.bits(cleared | (phase << 4) | (inmsel::INP << 8))
-        });
-
-        #[cfg(feature = "stm32l431")]
-        unsafe {
-            let csr = 0x4001_0204 as *mut u32; // COMP2_CSR on L4
-            let v = csr.read_volatile();
-            csr.write_volatile((v & !(0xF << 4 | 0x3 << 8)) | (phase << 4) | (inmsel::INP << 8));
-        }
-
-        #[cfg(feature = "stm32f051")]
-        unsafe {
-            let csr = (COMP::ptr() as u32 + 0x1C) as *mut u32;
-            csr.write_volatile(phase);
-        }
-
-        // EXTI edge trigger
-        #[cfg(feature = "stm32g071")]
-        {
-            let exti = unsafe { &*EXTI::ptr() };
-            if self.rising {
-                exti.rtsr1().modify(|r, w| unsafe { w.bits(r.bits() & !EXTI_LINE) });
-                exti.ftsr1().modify(|r, w| unsafe { w.bits(r.bits() | EXTI_LINE) });
-            } else {
-                exti.rtsr1().modify(|r, w| unsafe { w.bits(r.bits() | EXTI_LINE) });
-                exti.ftsr1().modify(|r, w| unsafe { w.bits(r.bits() & !EXTI_LINE) });
-            }
-        }
-        #[cfg(feature = "stm32l431")]
-        unsafe {
-            // L4 EXTI: IMR1=0x00, EMR1=0x04, RTSR1=0x08, FTSR1=0x0C
-            let rtsr1 = 0x4001_0408 as *mut u32;
-            let ftsr1 = 0x4001_040C as *mut u32;
-            if self.rising {
-                rtsr1.write_volatile(rtsr1.read_volatile() & !EXTI_LINE);
-                ftsr1.write_volatile(ftsr1.read_volatile() | EXTI_LINE);
-            } else {
-                rtsr1.write_volatile(rtsr1.read_volatile() | EXTI_LINE);
-                ftsr1.write_volatile(ftsr1.read_volatile() & !EXTI_LINE);
-            }
-        }
-        #[cfg(feature = "stm32f051")]
-        unsafe {
-            // EXTI RTSR at offset 0x08, FTSR at 0x0C from EXTI base (0x40010400)
-            let rtsr = 0x4001_0408 as *mut u32;
-            let ftsr = 0x4001_040C as *mut u32;
-            if self.rising {
-                rtsr.write_volatile(rtsr.read_volatile() & !EXTI_LINE);
-                ftsr.write_volatile(ftsr.read_volatile() | EXTI_LINE);
-            } else {
-                rtsr.write_volatile(rtsr.read_volatile() | EXTI_LINE);
-                ftsr.write_volatile(ftsr.read_volatile() & !EXTI_LINE);
-            }
+        if self.rising {
+            self.exti.set_falling_edge();
+        } else {
+            self.exti.set_rising_edge();
         }
     }
 
     fn enable_interrupts(&mut self) {
-        #[cfg(feature = "stm32g071")]
-        {
-            let exti = unsafe { &*EXTI::ptr() };
-            exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() | EXTI_LINE) });
-        }
-        #[cfg(feature = "stm32l431")]
-        unsafe {
-            // IMR1 at EXTI base + 0x00 on L4 is actually at 0x4001_0400 + offset
-            // L4 EXTI IMR1 is at offset 0x00 from EXTI base
-            let imr1 = (EXTI::ptr() as u32) as *mut u32;
-            imr1.write_volatile(imr1.read_volatile() | EXTI_LINE);
-        }
-        #[cfg(feature = "stm32f051")]
-        unsafe {
-            let imr = 0x4001_0400 as *mut u32;
-            imr.write_volatile(imr.read_volatile() | EXTI_LINE);
-        }
+        self.exti.enable_interrupt();
     }
 
     fn mask_interrupts(&mut self) {
-        #[cfg(feature = "stm32g071")]
-        {
+        self.exti.mask_and_clear();
+    }
+}
+
+// ============================================================
+// G071: COMP2 on EXTI18
+// ============================================================
+#[cfg(feature = "stm32g071")]
+pub mod g071 {
+    use super::*;
+    use crate::pac::{COMP, EXTI};
+
+    pub struct G071Comp;
+    impl CompOps for G071Comp {
+        fn output(&self) -> bool {
+            let comp = unsafe { &*COMP::ptr() };
+            comp.comp2_csr().read().bits() & (1 << 30) != 0
+        }
+        fn set_inmsel(&self, phase: u32) {
+            let comp = unsafe { &*COMP::ptr() };
+            comp.comp2_csr().modify(|r, w| unsafe {
+                let cleared = r.bits() & !(0xF << 4 | 0x3 << 8);
+                w.bits(cleared | (phase << 4) | (0b10 << 8)) // INP = IO3
+            });
+        }
+    }
+
+    pub struct G071Exti;
+    const LINE: u32 = 1 << 18;
+    impl ExtiOps for G071Exti {
+        fn set_rising_edge(&self) {
             let exti = unsafe { &*EXTI::ptr() };
-            exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() & !EXTI_LINE) });
-            exti.rpr1().write(|w| unsafe { w.bits(EXTI_LINE) });
-            exti.fpr1().write(|w| unsafe { w.bits(EXTI_LINE) });
+            exti.rtsr1().modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+            exti.ftsr1().modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
         }
-        #[cfg(feature = "stm32l431")]
-        unsafe {
-            let exti_base = EXTI::ptr() as u32;
-            let imr1 = exti_base as *mut u32;
-            imr1.write_volatile(imr1.read_volatile() & !EXTI_LINE);
-            // L4 PR1 at offset 0x14
-            let pr1 = (exti_base + 0x14) as *mut u32;
-            pr1.write_volatile(EXTI_LINE);
+        fn set_falling_edge(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.rtsr1().modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            exti.ftsr1().modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
         }
-        #[cfg(feature = "stm32f051")]
-        unsafe {
-            let imr = 0x4001_0400 as *mut u32;
-            let pr = 0x4001_0414 as *mut u32;
-            imr.write_volatile(imr.read_volatile() & !EXTI_LINE);
-            pr.write_volatile(EXTI_LINE);
+        fn enable_interrupt(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
         }
+        fn mask_and_clear(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            exti.rpr1().write(|w| unsafe { w.bits(LINE) });
+            exti.fpr1().write(|w| unsafe { w.bits(LINE) });
+        }
+    }
+
+    pub const INMSEL: InmselMap = InmselMap {
+        phase_a: 0b0110, phase_b: 0b0111, phase_c: 0b1000,
+    };
+
+    pub type G071BemfComparator = BemfComparator<G071Comp, G071Exti>;
+
+    pub fn new_comparator() -> G071BemfComparator {
+        BemfComparator::new(G071Comp, G071Exti, INMSEL)
+    }
+}
+
+// ============================================================
+// F051: COMP1 on EXTI21
+// ============================================================
+#[cfg(feature = "stm32f051")]
+pub mod f051 {
+    use super::*;
+    use crate::pac::{COMP, EXTI};
+
+    pub struct F051Comp;
+    impl CompOps for F051Comp {
+        fn output(&self) -> bool {
+            let comp = unsafe { &*COMP::ptr() };
+            comp.csr.read().bits() & (1 << 30) != 0
+        }
+        fn set_inmsel(&self, phase: u32) {
+            // F051 COMP1: whole CSR lower 16 bits = phase value
+            let comp = unsafe { &*COMP::ptr() };
+            let upper = comp.csr.read().bits() & 0xFFFF_0000;
+            comp.csr.write(|w| unsafe { w.bits(upper | phase) });
+        }
+    }
+
+    pub struct F051Exti;
+    const LINE: u32 = 1 << 21;
+    impl ExtiOps for F051Exti {
+        fn set_rising_edge(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.rtsr.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+            exti.ftsr.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+        }
+        fn set_falling_edge(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.rtsr.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            exti.ftsr.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+        }
+        fn enable_interrupt(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+        }
+        fn mask_and_clear(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            exti.pr.write(|w| unsafe { w.bits(LINE) });
+        }
+    }
+
+    pub const INMSEL: InmselMap = InmselMap {
+        phase_a: 0b1010001, phase_b: 0b1000001, phase_c: 0b1100001,
+    };
+
+    pub type F051BemfComparator = BemfComparator<F051Comp, F051Exti>;
+
+    pub fn new_comparator() -> F051BemfComparator {
+        BemfComparator::new(F051Comp, F051Exti, INMSEL)
+    }
+}
+
+// ============================================================
+// L431: COMP2 on EXTI22
+// ============================================================
+#[cfg(feature = "stm32l431")]
+pub mod l431 {
+    use super::*;
+    use crate::pac::{COMP, EXTI};
+
+    pub struct L431Comp;
+    impl CompOps for L431Comp {
+        fn output(&self) -> bool {
+            let comp = unsafe { &*COMP::ptr() };
+            comp.comp2_csr.read().bits() & (1 << 30) != 0
+        }
+        fn set_inmsel(&self, phase: u32) {
+            let comp = unsafe { &*COMP::ptr() };
+            let v = comp.comp2_csr.read().bits();
+            comp.comp2_csr.write(|w| unsafe {
+                w.bits((v & !(0xF << 4 | 0x3 << 8)) | (phase << 4))
+            });
+        }
+    }
+
+    pub struct L431Exti;
+    const LINE: u32 = 1 << 22;
+    impl ExtiOps for L431Exti {
+        fn set_rising_edge(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.rtsr1.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+            exti.ftsr1.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+        }
+        fn set_falling_edge(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.rtsr1.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            exti.ftsr1.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+        }
+        fn enable_interrupt(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr1.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
+        }
+        fn mask_and_clear(&self) {
+            let exti = unsafe { &*EXTI::ptr() };
+            exti.imr1.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+            // L4: PR1 at offset 0x14
+            exti.pr1.write(|w| unsafe { w.bits(LINE) });
+        }
+    }
+
+    pub const INMSEL: InmselMap = InmselMap {
+        phase_a: 0b0101, phase_b: 0b0100, phase_c: 0b0011,
+    };
+
+    pub type L431BemfComparator = BemfComparator<L431Comp, L431Exti>;
+
+    pub fn new_comparator() -> L431BemfComparator {
+        BemfComparator::new(L431Comp, L431Exti, INMSEL)
     }
 }

@@ -96,6 +96,12 @@ pub fn ten_khz_tick(
     // Ramp rate limiting
     ramp_limit(duty, shared);
 
+    // Apply stall protection boost (crawler/RC car low-RPM boost)
+    let stall_boost = shared.stall_protection_adjust();
+    if stall_boost > 0 && shared.running() {
+        duty.cycle = duty.cycle.saturating_add(stall_boost);
+    }
+
     // PWM output
     let tim1_arr = counters.tim1_arr;
     if shared.armed() && shared.running() {

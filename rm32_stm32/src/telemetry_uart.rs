@@ -18,7 +18,7 @@ impl TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     /// Initialize USART1 + DMA3 for half-duplex telemetry TX.
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         let rcc = unsafe { &*RCC::ptr() };
         let gpiob = unsafe { &*GPIOB::ptr() };
         let usart = unsafe { &*USART1::ptr() };
@@ -58,14 +58,14 @@ impl TelemUart {
         usart.cr1().write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
 
         // Wait for TEACK + REACK
-        while !usart.isr().read().teack().bit_is_set() {}
-        while !usart.isr().read().reack().bit_is_set() {}
+        crate::regs::wait_for(|| usart.isr().read().teack().bit_is_set(), 100_000, "USART TEACK")?;
+        crate::regs::wait_for(|| usart.isr().read().reack().bit_is_set(), 100_000, "USART REACK")?;
 
         // DMA1 Channel 3: USART1_TX
         // DMAMUX channel 2 (0-indexed) → USART1_TX request
-        let dmamux_base = 0x4002_0800u32;
-        let dmamux_c2cr = unsafe { &*((dmamux_base + 8) as *const crate::input_capture::VolatileCell<u32>) };
-        dmamux_c2cr.modify(|v| (v & !0x3F) | 51); // USART1_TX = request 51
+        // DMAMUX: Channel 2 → USART1_TX (request 51)
+        let dmamux = unsafe { &*crate::pac::DMAMUX::ptr() };
+        dmamux.ccr(2).modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 51) });
 
         // Configure DMA channel 3 (index 2)
         // MAR is set to 0 here; send_dma() sets the actual buffer address before each transfer.
@@ -83,7 +83,7 @@ impl TelemUart {
             )
         });
 
-        Self { tx_buf: [0; 49] }
+        Ok(Self { tx_buf: [0; 49] })
     }
 }
 

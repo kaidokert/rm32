@@ -15,7 +15,7 @@ pub struct F051TelemUart {
 impl F051TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, crate::regs::InitError> {
         let rcc = unsafe { &*RCC::ptr() };
         let gpiob = unsafe { &*GPIOB::ptr() };
         let usart = unsafe { &*USART1::ptr() };
@@ -46,8 +46,8 @@ impl F051TelemUart {
         usart.cr1.write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
 
         // Wait for TEACK + REACK
-        while !usart.isr.read().teack().bit_is_set() {}
-        while !usart.isr.read().reack().bit_is_set() {}
+        crate::regs::wait_for(|| usart.isr.read().teack().bit_is_set(), 100_000, "USART TEACK")?;
+        crate::regs::wait_for(|| usart.isr.read().reack().bit_is_set(), 100_000, "USART REACK")?;
 
         // DMA1 Channel 2: USART1_TX (fixed on F0)
         dma.ch2.par.write(|w| unsafe { w.bits(usart.tdr.as_ptr() as u32) });
@@ -59,7 +59,7 @@ impl F051TelemUart {
              .minc().enabled()
         });
 
-        Self { tx_buf: [0; 49] }
+        Ok(Self { tx_buf: [0; 49] })
     }
 }
 

@@ -1,0 +1,39 @@
+//! Safe wrapper for DMA buffers that must be `'static`.
+//!
+//! DMA hardware writes to a fixed memory address. The buffer must:
+//! 1. Have a stable `'static` address (no moving after DMA is configured)
+//! 2. Not be accessed while DMA is active
+//!
+//! This wrapper provides safe `as_ptr()` for DMA configuration and
+//! safe read access after DMA completes.
+
+use core::cell::UnsafeCell;
+
+/// A DMA-safe static buffer. Wraps a fixed-size array with interior mutability.
+///
+/// # Safety contract
+/// - DMA hardware writes to this buffer via the raw pointer from `as_ptr()`
+/// - Software reads via `as_slice()` only when DMA is not active (between transfers)
+/// - This is safe on single-core Cortex-M where ISR and main don't overlap
+pub struct DmaBuf<T, const N: usize>(UnsafeCell<[T; N]>);
+
+// Safe to share across contexts: single-core, access is sequenced by DMA TC interrupt
+unsafe impl<T, const N: usize> Sync for DmaBuf<T, N> {}
+
+impl<T: Copy + Default, const N: usize> DmaBuf<T, N> {
+    pub const fn new() -> Self {
+        // const-init with zeros (works for u16, u32 which are Copy+Default)
+        // Using a manual zero array since Default isn't const
+        Self(UnsafeCell::new(unsafe { core::mem::zeroed() }))
+    }
+
+    /// Raw pointer for DMA peripheral MAR register.
+    pub fn as_ptr(&self) -> *const T {
+        self.0.get() as *const T
+    }
+
+    /// Read buffer contents. Only call when DMA is not actively writing.
+    pub fn read(&self) -> &[T; N] {
+        unsafe { &*self.0.get() }
+    }
+}

@@ -7,37 +7,46 @@
 use crate::isr::{self, IsrState};
 use rm32::hal::{PwmOutput, Comparator, IntervalTimer, ComTimer, PhaseOutput};
 
-/// ISR-local state. Taken from global on first ISR entry.
-static mut ISR_LOCAL: Option<IsrState> = None;
+/// Single-core ISR-local cell. Safe because:
+/// - Only accessed from ISR context (same priority level, no preemption)
+/// - Single-core Cortex-M guarantees no concurrent access
+struct IsrCell(core::cell::UnsafeCell<Option<IsrState>>);
+unsafe impl Sync for IsrCell {}
 
-/// Get or initialize the ISR-local state.
-/// If state was never initialized, enters emergency shutdown (all FETs off, infinite loop).
-/// # Safety
-/// Only call from ISR context (single-core, same-priority).
-#[inline(always)]
-pub unsafe fn isr_state() -> &'static mut IsrState {
-    ISR_LOCAL.get_or_insert_with(|| {
-        match isr::take_isr_state() {
-            Some(s) => s,
-            None => {
-                // Emergency: all FETs off via raw GPIO (can't use HAL without state)
-                // GPIOA BSRR: set PA7/8/9/10 low (high-side off)
-                (0x4800_0018 as *mut u32).write_volatile(
-                    (1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16))
-                );
-                // GPIOB BSRR: set PB0/1 low (low-side off)
-                (0x4800_0418 as *mut u32).write_volatile(
-                    (1 << (0 + 16)) | (1 << (1 + 16))
-                );
-                loop { cortex_m::asm::nop(); }
+impl IsrCell {
+    const fn new() -> Self { Self(core::cell::UnsafeCell::new(None)) }
+
+    /// Get or initialize the ISR state.
+    /// If never initialized, enters emergency shutdown (all FETs off).
+    #[inline(always)]
+    fn get(&self) -> &mut IsrState {
+        let opt = unsafe { &mut *self.0.get() };
+        opt.get_or_insert_with(|| {
+            match isr::take_isr_state() {
+                Some(s) => s,
+                None => {
+                    // Emergency: all FETs off via GPIO BSRR (no HAL needed)
+                    use crate::periph_addr;
+                    unsafe {
+                        ((periph_addr::GPIOA + 0x18) as *mut u32).write_volatile(
+                            (1 << (7+16)) | (1 << (8+16)) | (1 << (9+16)) | (1 << (10+16))
+                        );
+                        ((periph_addr::GPIOB + 0x18) as *mut u32).write_volatile(
+                            (1 << (0+16)) | (1 << (1+16))
+                        );
+                    }
+                    loop { cortex_m::asm::nop(); }
+                }
             }
-        }
-    })
+        })
+    }
 }
+
+static ISR_LOCAL: IsrCell = IsrCell::new();
 
 /// 20kHz control loop tick (TIM6 ISR body).
 pub fn handle_tim6() {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     let shared = isr::shared();
     let mut counters = rm32::control::isr_logic::TickCounters {
         ten_khz_counter: state.ten_khz_counter,
@@ -65,7 +74,7 @@ pub fn handle_tim6() {
 
 /// Commutation timer expired (TIM14 ISR body).
 pub fn handle_tim14() {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     let shared = isr::shared();
     rm32::control::isr_logic::commutation_timer_expired(
         &mut state.commutation,
@@ -79,7 +88,7 @@ pub fn handle_tim14() {
 
 /// BEMF zero-cross detected (COMP ISR body).
 pub fn handle_comp() {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     rm32::control::isr_logic::bemf_zero_cross(
         &state.commutation,
         &mut state.bemf,
@@ -91,7 +100,7 @@ pub fn handle_comp() {
 
 /// DMA transfer complete (input capture ISR body).
 pub fn handle_dma_tc() {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
     if shared.armed() && shared.dshot_telemetry() {
@@ -128,7 +137,7 @@ pub fn handle_dma_tc() {
 
 /// Software-triggered frame processing (EXTI ISR body).
 pub fn handle_exti_frame() {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
     #[cfg(feature = "stm32g071")]
@@ -138,16 +147,15 @@ pub fn handle_exti_frame() {
     #[cfg(feature = "stm32l431")]
     let buf = state.hal.input.dma_buffer();
 
-    #[cfg(feature = "stm32g071")]
-    let pin_high = unsafe { (0x4800_0410 as *const u32).read_volatile() } & (1 << 4) != 0; // GPIOB IDR, PB4
-    #[cfg(feature = "stm32f051")]
-    let pin_high = unsafe { (0x4800_0010 as *const u32).read_volatile() } & (1 << 2) != 0; // GPIOA IDR, PA2
-    #[cfg(feature = "stm32l431")]
-    let pin_high = unsafe { (0x4800_0010 as *const u32).read_volatile() } & (1 << 15) != 0; // GPIOA IDR, PA15
+    let pin_high = {
+        use rm32::hal::InputCapture;
+        state.hal.input.input_pin_state()
+    };
 
     let mut zic = shared.zero_input_count();
     let actions = state.transfer.process(
         buf, shared.input_set(), shared.dshot(), shared.servo_pwm(),
+        shared.dshot_telemetry(),
         shared.armed(), pin_high, shared.adjusted_input(), shared.newinput(),
         state.config.bi_direction != 0, state.config.disable_stick_calibration != 0,
         &mut zic, state.frametime_low, state.frametime_high,
@@ -167,14 +175,13 @@ pub fn handle_exti_frame() {
 
     // DShot command dispatch
     if actions.dshot_command > 0 {
-        let mut edt_armed = false;
         let result = state.cmd.process(
             actions.dshot_command,
             shared.armed(),
             shared.running(),
             &mut state.config,
             &mut state.forward,
-            &mut edt_armed,
+            &mut state.edt_armed,
             state.cmd.extended_telemetry,
         );
         match result {
@@ -204,7 +211,7 @@ pub fn handle_exti_frame() {
 
 /// CRSF UART RX byte handler. Call from UART RX interrupt with each received byte.
 pub fn handle_crsf_byte(byte: u8) {
-    let state = unsafe { isr_state() };
+    let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
     if let Some(result) = state.crsf.feed(byte) {

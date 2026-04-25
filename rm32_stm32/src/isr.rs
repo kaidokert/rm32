@@ -11,7 +11,12 @@ use rm32::edt::EdtScheduler;
 use rm32::transfer::TransferState;
 use rm32::hal::{PwmOutput, Comparator, PhaseOutput};
 
-use crate::comparator::BemfComparator;
+#[cfg(feature = "stm32g071")]
+use crate::comparator::g071::G071BemfComparator as BemfComp;
+#[cfg(feature = "stm32f051")]
+use crate::comparator::f051::F051BemfComparator as BemfComp;
+#[cfg(feature = "stm32l431")]
+use crate::comparator::l431::L431BemfComparator as BemfComp;
 use crate::timer::{Tim2Interval, Tim14Com};
 use crate::phase::G0APhaseDriver;
 use crate::shared::SharedState;
@@ -35,7 +40,7 @@ pub struct IsrHal {
     #[cfg(feature = "stm32l431")]
     pub pwm: L431Pwm,
 
-    pub comp: BemfComparator,
+    pub comp: BemfComp,
     pub interval: Tim2Interval,
     pub com_timer: Tim14Com,
     pub phase: G0APhaseDriver,
@@ -62,6 +67,7 @@ pub struct IsrState {
     pub transfer: TransferState,
     pub config: EepromConfig,
     pub forward: bool,
+    pub edt_armed: bool,
     pub tim1_arr: u16,
     pub frametime_low: u16,
     pub frametime_high: u16,

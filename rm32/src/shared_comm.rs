@@ -68,4 +68,7 @@ pub trait SharedComm {
 
     fn signal_timeout(&self) -> u16;
     fn increment_signal_timeout(&self);
+
+    fn stall_protection_adjust(&self) -> u16 { 0 }
+    fn set_stall_protection_adjust(&self, _v: u16) {}
 }
