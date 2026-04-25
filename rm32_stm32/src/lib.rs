@@ -17,6 +17,7 @@ pub mod main_loop;
 pub mod flash;
 pub mod regs;
 pub mod periph_addr;
+pub mod gpio_pin;
 pub mod isr;
 pub mod isr_handlers;
 pub mod init;

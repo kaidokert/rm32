@@ -76,7 +76,12 @@ impl L431Adc {
 
             // Sequence: 3 conversions
             // SQR1: L[3:0] = 2 (3 conversions), SQ1=CH8, SQ2=CH11, SQ3=CH17
-            adc.sqr1.write(|w| unsafe { w.bits((2 << 0) | (8 << 6) | (11 << 12) | (17 << 18)) });
+            adc.sqr1.write(|w| unsafe {
+                w.l().bits(2)     // 3 conversions (L = N-1)
+                 .sq1().bits(8)   // CH8 = current
+                 .sq2().bits(11)  // CH11 = voltage
+                 .sq3().bits(17)  // CH17 = temperature
+            });
 
             // CFGR: DMA circular mode, resolution 12-bit
             adc.cfgr.write(|w| unsafe { w.bits(

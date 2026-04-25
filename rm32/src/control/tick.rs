@@ -33,7 +33,7 @@ impl MotorState {
     pub fn start_motor(&mut self, hal: &mut impl ControlHal) {
         if !self.running {
             self.commutate(hal);
-            self.timing.commutation_interval = 10000;
+            self.timing.commutation_interval = crate::constants::INITIAL_COMMUTATION_INTERVAL;
             hal.set_count(5000);
             self.running = true;
         }

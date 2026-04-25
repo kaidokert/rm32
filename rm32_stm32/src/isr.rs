@@ -13,7 +13,7 @@ use rm32::hal::{PwmOutput, Comparator, PhaseOutput};
 
 use crate::comparator::BemfComparator;
 use crate::timer::{Tim2Interval, Tim14Com};
-use crate::phase::PhaseDriver;
+use crate::phase::G0APhaseDriver;
 use crate::shared::SharedState;
 
 #[cfg(feature = "stm32g071")]
@@ -38,7 +38,7 @@ pub struct IsrHal {
     pub comp: BemfComparator,
     pub interval: Tim2Interval,
     pub com_timer: Tim14Com,
-    pub phase: PhaseDriver,
+    pub phase: G0APhaseDriver,
 
     #[cfg(feature = "stm32g071")]
     pub input: DshotCapture,

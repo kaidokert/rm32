@@ -4,9 +4,22 @@
 
 use rm32::hal::{Comparator, IntervalTimer, ComTimer, PhaseOutput, PwmOutput, System};
 
+/// Start IWDG — shared across all MCUs (same register layout at 0x4000_3000).
+fn iwdg_start(prescaler: u8, reload: u16) {
+    const IWDG: u32 = 0x4000_3000;
+    unsafe {
+        (IWDG as *mut u32).write_volatile(0x5555);
+        ((IWDG + 4) as *mut u32).write_volatile(prescaler as u32);
+        ((IWDG + 8) as *mut u32).write_volatile(reload as u32);
+        while ((IWDG + 0x0C) as *const u32).read_volatile() & 0x03 != 0 {}
+        (IWDG as *mut u32).write_volatile(0xCCCC);
+        (IWDG as *mut u32).write_volatile(0xAAAA);
+    }
+}
+
 use crate::comparator::BemfComparator;
 use crate::timer::{Tim2Interval, Tim14Com};
-use crate::phase::PhaseDriver;
+use crate::phase::G0APhaseDriver;
 
 /// Result of MCU initialization.
 pub struct InitResult<PWM: PwmOutput, SYS: System> {
@@ -14,7 +27,7 @@ pub struct InitResult<PWM: PwmOutput, SYS: System> {
     pub comp: BemfComparator,
     pub interval: Tim2Interval,
     pub com_timer: Tim14Com,
-    pub phase: PhaseDriver,
+    pub phase: G0APhaseDriver,
     pub sys: SYS,
 }
 
@@ -39,7 +52,7 @@ pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
         Hertz::from_raw(24_000), &mut rcc,
         rm32::board::BoardConfig::DEFAULT.dead_time,
     );
-    let phase = PhaseDriver::new_g0_a(false);
+    let phase = G0APhaseDriver::new(false);
     let sys = crate::system::SystemControl::new(dp.IWDG);
     crate::comp_init::init_comp2();
     let comp = BemfComparator::new();
@@ -117,6 +130,7 @@ impl System for F051System {
     fn reset(&mut self) -> ! { cortex_m::peripheral::SCB::sys_reset() }
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
+    fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
     fn reload_watchdog(&mut self) { unsafe { (0x4000_3000 as *mut u32).write_volatile(0xAAAA); } }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 48); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
@@ -165,7 +179,7 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
         ((TIM1_BASE+0x00) as *mut u32).write_volatile(1);    // CR1: CEN
     }
     let pwm = F051Pwm { _private: () };
-    let phase = PhaseDriver::new_g0_a(false); // same pins for F0_A
+    let phase = G0APhaseDriver::new(false); // same pins for F0_A
 
     // COMP1 init
     crate::comp_init_f051::init_comp1();
@@ -257,6 +271,7 @@ impl System for L431System {
     fn reset(&mut self) -> ! { cortex_m::peripheral::SCB::sys_reset() }
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
+    fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
     fn reload_watchdog(&mut self) { unsafe { (0x4000_3000 as *mut u32).write_volatile(0xAAAA); } }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 80); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
@@ -309,7 +324,7 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
         ((TIM1_BASE_L4+0x00) as *mut u32).write_volatile(1);
     }
     let pwm = L431Pwm { _private: () };
-    let phase = PhaseDriver::new_g0_a(false); // same pins for L4_N
+    let phase = G0APhaseDriver::new(false); // same pins for L4_N
 
     // COMP2 init
     crate::comp_init_l431::init_comp2();

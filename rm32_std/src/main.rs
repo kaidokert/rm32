@@ -78,6 +78,7 @@ impl hal::System for StdHal {
     fn reset(&mut self) -> ! { std::process::exit(0) }
     fn enable_irq(&mut self) {}
     fn disable_irq(&mut self) {}
+    fn start_watchdog(&mut self, _prescaler: u8, _reload: u16) {}
     fn reload_watchdog(&mut self) {}
     fn delay_micros(&mut self, _us: u32) {}
     fn delay_millis(&mut self, _ms: u32) {}

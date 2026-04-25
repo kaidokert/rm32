@@ -57,32 +57,14 @@ fn main() -> ! {
     }
 
     // --- Start IWDG watchdog (after startup tune, matching C sequencing) ---
-    {
-        const IWDG_BASE: u32 = 0x4000_3000;
-        const KR: u32 = IWDG_BASE;       // Key register
-        const PR: u32 = IWDG_BASE + 0x04; // Prescaler
-        const RLR: u32 = IWDG_BASE + 0x08; // Reload
-        const SR: u32 = IWDG_BASE + 0x0C; // Status
+    #[cfg(feature = "stm32g071")]
+    sys.start_watchdog(0, 4095);   // prescaler /4, reload 4095 → ~410ms
 
-        #[cfg(feature = "stm32g071")]
-        const IWDG_CONFIG: (u32, u32) = (0, 4095);   // prescaler /4, reload 4095 → ~410ms
+    #[cfg(feature = "stm32f051")]
+    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
 
-        #[cfg(feature = "stm32f051")]
-        const IWDG_CONFIG: (u32, u32) = (2, 4000);   // prescaler /16, reload 4000 → ~1600ms
-
-        #[cfg(feature = "stm32l431")]
-        const IWDG_CONFIG: (u32, u32) = (2, 4000);   // prescaler /16, reload 4000 → ~1600ms
-
-        unsafe {
-            (KR as *mut u32).write_volatile(0x5555);  // Unlock PR/RLR
-            (PR as *mut u32).write_volatile(IWDG_CONFIG.0);
-            (RLR as *mut u32).write_volatile(IWDG_CONFIG.1);
-            // Wait for registers to update (PVU + RVU bits in SR)
-            while (SR as *const u32).read_volatile() & 0x03 != 0 {}
-            (KR as *mut u32).write_volatile(0xCCCC);  // Start IWDG
-            (KR as *mut u32).write_volatile(0xAAAA);  // Initial reload
-        }
-    }
+    #[cfg(feature = "stm32l431")]
+    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
 
     // --- Build ISR state and move to global ---
     let isr_state = IsrState {
@@ -171,11 +153,14 @@ fn main() -> ! {
         let magic1 = unsafe { (DEVINFO_ADDR as *const u32).read_volatile() };
         let magic2 = unsafe { ((DEVINFO_ADDR + 4) as *const u32).read_volatile() };
         if magic1 == DEVINFO_MAGIC1 && magic2 == DEVINFO_MAGIC2 {
+            const DEVICE_32K: u8 = 0x1F;  // 32KB flash (F051)
+            const DEVICE_64K: u8 = 0x35;  // 64KB flash (G071)
+            const DEVICE_128K: u8 = 0x2B; // 128KB flash (L431)
             let device_code = unsafe { *((DEVINFO_ADDR + 8 + 4) as *const u8) };
             match device_code {
-                0x1F => 0x0800_7C00u32,
-                0x35 => 0x0800_F800u32,
-                0x2B => 0x0801_F800u32,
+                DEVICE_32K => 0x0800_7C00u32,
+                DEVICE_64K => 0x0800_F800u32,
+                DEVICE_128K => 0x0801_F800u32,
                 _ => config::EEPROM_START as u32,
             }
         } else {
@@ -266,10 +251,9 @@ fn main() -> ! {
 
     // Apply dead-time override to TIM1 BDTR register
     if dead_time_override > 0 {
-        const TIM1_BDTR: u32 = 0x4001_2C44; // TIM1 base + 0x44
+        use rm32_stm32::periph_addr;
         unsafe {
-            let bdtr = TIM1_BDTR as *mut u32;
-            bdtr.write_volatile(bdtr.read_volatile() | dead_time_override as u32);
+            rm32_stm32::regs::modify(periph_addr::TIM1 + 0x44, |v| v | dead_time_override as u32);
         }
     }
 
@@ -313,13 +297,12 @@ fn main() -> ! {
                 config::TIM1_AUTORELOAD,
                 main_state.config.sine_mode_power,
             );
-            // Apply PWM — need raw register writes since PWM is in ISR state
-            unsafe {
-                let tim1 = 0x4001_2C00u32;
-                ((tim1 + 0x34) as *mut u32).write_volatile(ch1 as u32);
-                ((tim1 + 0x38) as *mut u32).write_volatile(ch2 as u32);
-                ((tim1 + 0x3C) as *mut u32).write_volatile(ch3 as u32);
-            }
+            // Apply PWM via PwmOutput trait (through ISR state)
+            isr::with_isr_state(|isr| {
+                isr.hal.pwm.set_compare1(ch1);
+                isr.hal.pwm.set_compare2(ch2);
+                isr.hal.pwm.set_compare3(ch3);
+            });
             match result {
                 SineStepResult::Continue(delay_us) => {
                     sys.delay_micros(delay_us as u32);
