@@ -25,13 +25,16 @@ impl IsrCell {
             match isr::take_isr_state() {
                 Some(s) => s,
                 None => {
-                    // Emergency: all FETs off via GPIO BSRR (no HAL needed)
+                    // Emergency: all FETs off via GPIO BSRR (no HAL — state is missing)
                     use crate::periph_addr;
+                    const BSRR: u32 = 0x18; // GPIO Bit Set/Reset Register offset
                     unsafe {
-                        ((periph_addr::GPIOA + 0x18) as *mut u32).write_volatile(
+                        // Reset PA7/8/9/10 (high-side FETs off)
+                        ((periph_addr::GPIOA + BSRR) as *mut u32).write_volatile(
                             (1 << (7+16)) | (1 << (8+16)) | (1 << (9+16)) | (1 << (10+16))
                         );
-                        ((periph_addr::GPIOB + 0x18) as *mut u32).write_volatile(
+                        // Reset PB0/1 (low-side FETs off)
+                        ((periph_addr::GPIOB + BSRR) as *mut u32).write_volatile(
                             (1 << (0+16)) | (1 << (1+16))
                         );
                     }

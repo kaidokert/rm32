@@ -142,28 +142,44 @@ impl EepromConfig {
     }
 
     /// Apply defaults for fields added in newer EEPROM versions.
-    /// Matches C's loadEEpromSettings() version migration.
+    /// Uses VERSION_DEFAULTS as the reference — changing a default in one place
+    /// automatically propagates to the migration logic.
     pub fn apply_version_defaults(&mut self) {
         if self.eeprom_version < EEPROM_VERSION {
-            self.max_ramp = 160;
-            self.minimum_duty_cycle = 1;
-            self.disable_stick_calibration = 0;
-            self.absolute_voltage_cutoff = 10;
-            self.current_p = 100;
-            self.current_i = 0;
-            self.current_d = 100;
-            self.active_brake_power = 0;
-            self.reserved_eeprom_3 = [0; 4];
+            let d = &VERSION_DEFAULTS;
+            self.max_ramp = d.max_ramp;
+            self.minimum_duty_cycle = d.minimum_duty_cycle;
+            self.disable_stick_calibration = d.disable_stick_calibration;
+            self.absolute_voltage_cutoff = d.absolute_voltage_cutoff;
+            self.current_p = d.current_p;
+            self.current_i = d.current_i;
+            self.current_d = d.current_d;
+            self.active_brake_power = d.active_brake_power;
+            self.reserved_eeprom_3 = d.reserved_eeprom_3;
         }
         self.eeprom_version = EEPROM_VERSION;
     }
 }
 
+/// Canonical defaults for version-migrated fields.
+/// Single source of truth — used by both apply_version_defaults and tests.
+const VERSION_DEFAULTS: EepromConfig = {
+    let mut c = EepromConfig::ZEROED;
+    c.max_ramp = 160;
+    c.minimum_duty_cycle = 1;
+    c.absolute_voltage_cutoff = 10;
+    c.current_p = 100;
+    c.current_d = 100;
+    c
+};
+
+impl EepromConfig {
+    /// Const zero-init (used by VERSION_DEFAULTS and Default).
+    const ZEROED: Self = unsafe { core::mem::zeroed() };
+}
+
 impl Default for EepromConfig {
-    fn default() -> Self {
-        // Zero-init matches C behavior for fresh EEPROM
-        unsafe { core::mem::zeroed() }
-    }
+    fn default() -> Self { Self::ZEROED }
 }
 
 #[cfg(test)]
