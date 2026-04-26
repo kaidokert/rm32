@@ -16,6 +16,7 @@ pub mod shared;
 pub mod main_loop;
 pub mod flash;
 pub mod regs;
+pub mod emergency;
 pub mod periph_addr;
 pub mod gpio_pin;
 pub mod dma_buf;

@@ -70,8 +70,7 @@ pub enum CrsfResult {
 
 /// CRSF frame parser with internal byte buffer.
 pub struct CrsfParser {
-    buf: [u8; 64],
-    pos: usize,
+    buf: heapless::Vec<u8, 64>,
     /// Which channel index to use as throttle (default: 2)
     pub throttle_channel: u8,
 }
@@ -83,10 +82,9 @@ impl Default for CrsfParser {
 }
 
 impl CrsfParser {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            buf: [0; 64],
-            pos: 0,
+            buf: heapless::Vec::new(),
             throttle_channel: 2,
         }
     }
@@ -94,57 +92,55 @@ impl CrsfParser {
     /// Feed a byte into the parser. Returns Some(result) when a complete frame is available.
     pub fn feed(&mut self, byte: u8) -> Option<CrsfResult> {
         // Looking for sync byte
-        if self.pos == 0 {
+        if self.buf.is_empty() {
             if byte == CRSF_SYNC {
-                self.buf[0] = byte;
-                self.pos = 1;
+                let _ = self.buf.push(byte);
             }
             return None;
         }
 
-        self.buf[self.pos] = byte;
-        self.pos += 1;
-
-        // Have sync + length?
-        if self.pos < 3 {
-            return None;
-        }
-
-        let frame_len = self.buf[1] as usize; // length includes type + payload + crc
-        let total_len = 2 + frame_len; // sync + length byte + frame_len
-
-        // Sanity check
-        if frame_len < 2 || total_len > 64 {
-            self.pos = 0;
+        if self.buf.push(byte).is_err() {
+            self.buf.clear();
             return Some(CrsfResult::Incomplete);
         }
 
-        // Wait for complete frame
-        if self.pos < total_len {
+        // Need sync + length (3 bytes minimum)
+        if self.buf.len() < 3 {
             return None;
         }
 
-        // Frame complete — validate CRC
-        // CRC covers type + payload (bytes 2..total_len-1)
+        let frame_len = self.buf[1] as usize;
+        let total_len = 2 + frame_len;
+
+        if frame_len < 2 || total_len > 64 {
+            self.buf.clear();
+            return Some(CrsfResult::Incomplete);
+        }
+
+        if self.buf.len() < total_len {
+            return None;
+        }
+
+        // Frame complete — extract data, then clear
         let crc_idx = total_len - 1;
         let computed_crc = crc8_dvb_s2(&self.buf[2..crc_idx]);
         let received_crc = self.buf[crc_idx];
 
-        self.pos = 0; // reset for next frame
-
         if computed_crc != received_crc {
+            self.buf.clear();
             return Some(CrsfResult::BadCrc);
         }
 
         let frame_type = self.buf[2];
-        if frame_type != CRSF_FRAMETYPE_RC_CHANNELS {
-            return Some(CrsfResult::OtherFrame(frame_type));
-        }
+        let result = if frame_type == CRSF_FRAMETYPE_RC_CHANNELS {
+            let channels = unpack_channels(&self.buf[3..3 + 22]);
+            CrsfResult::Channels(channels)
+        } else {
+            CrsfResult::OtherFrame(frame_type)
+        };
 
-        // Parse 16 × 11-bit channels from 22 bytes (payload starts at byte 3)
-        let payload = &self.buf[3..3 + 22];
-        let channels = unpack_channels(payload);
-        Some(CrsfResult::Channels(channels))
+        self.buf.clear();
+        Some(result)
     }
 
     /// Map a CRSF channel value (172-1811) to ESC throttle (0-2047).

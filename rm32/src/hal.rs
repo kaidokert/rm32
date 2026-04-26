@@ -93,6 +93,13 @@ pub trait SerialInput {
     fn read_available(&mut self, buf: &mut [u8]) -> usize;
 }
 
+/// Emergency hardware safety — all FETs off, no state needed.
+/// Used when ISR state is missing or unrecoverable error occurs.
+pub trait EmergencyOff {
+    /// Force all motor FETs off via direct GPIO writes. Does not require HAL state.
+    fn emergency_off();
+}
+
 /// System control (IRQ, watchdog, reset)
 pub trait System {
     fn reset(&mut self) -> !;

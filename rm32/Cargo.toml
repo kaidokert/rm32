@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 embedded-hal = "1.0"
 bytemuck = { version = "1", default-features = false, features = ["derive"] }
+heapless = "0.8"
 dronecan = { path = "../ref/dronecan-rust", default-features = false, optional = true }
 
 [[bin]]
