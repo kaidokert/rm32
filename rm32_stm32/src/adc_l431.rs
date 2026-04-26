@@ -30,7 +30,7 @@ impl AdcOps for L431AdcOps {
         let gpioa = unsafe { &*GPIOA::ptr() };
 
         adc_common.ccr.modify(|_, w| w.ckmode().bits(0b01));
-        gpioa.moder.modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
+        gpioa.moder.modify(|_, w| w.moder3().bits(0b11).moder6().bits(0b11));
         adc_common.ccr.modify(|_, w| w.ch17sel().set_bit());
 
         dma.cselr.modify(|r, w| unsafe { w.bits(r.bits() & !(0xF << 0)) });

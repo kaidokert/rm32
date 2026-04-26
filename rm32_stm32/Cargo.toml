@@ -8,6 +8,7 @@ rm32 = { path = "../rm32" }
 cortex-m = "0.7"
 cortex-m-rt = "0.7"
 embedded-hal = "1.0"
+panic-halt = "1.0"
 
 # MCU-specific HAL crates (only one active at a time)
 stm32g0xx-hal = { git = "https://github.com/stm32-rs/stm32g0xx-hal", features = ["stm32g071"], optional = true }

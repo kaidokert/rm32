@@ -14,8 +14,9 @@ pub enum InputType {
     DroneCan = 5,
 }
 
-/// Persistent ESC settings (192 bytes, matches C EEPROM layout)
-#[derive(Clone)]
+/// Persistent ESC settings (192 bytes, matches C EEPROM layout).
+/// `Pod` + `Zeroable` derived via bytemuck — guarantees safe byte-level access.
+#[derive(Clone, bytemuck::Pod, bytemuck::Zeroable, Copy)]
 #[repr(C)]
 pub struct EepromConfig {
     pub reserved_0: u8,
@@ -86,21 +87,19 @@ const _: () = {
 impl EepromConfig {
     pub const SIZE: usize = 192;
 
-    /// View config as raw bytes. Sound because:
-    /// - `repr(C)` guarantees field ordering
-    /// - All fields are `u8` or `[u8; N]` — no padding, no alignment issues
-    /// - Size is compile-time verified above
-    pub fn as_bytes(&self) -> &[u8; Self::SIZE] {
-        unsafe { &*(self as *const Self as *const [u8; Self::SIZE]) }
+    /// View config as raw bytes. Safe via bytemuck::Pod — no unsafe needed.
+    pub fn as_bytes(&self) -> &[u8] {
+        bytemuck::bytes_of(self)
     }
 
-    pub fn as_bytes_mut(&mut self) -> &mut [u8; Self::SIZE] {
-        unsafe { &mut *(self as *mut Self as *mut [u8; Self::SIZE]) }
+    /// View config as mutable raw bytes.
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        bytemuck::bytes_of_mut(self)
     }
 
     /// Create config from raw bytes (e.g. flash read).
     pub fn from_bytes(bytes: &[u8; Self::SIZE]) -> Self {
-        unsafe { core::ptr::read(bytes.as_ptr() as *const Self) }
+        *bytemuck::from_bytes(bytes)
     }
 
     // --- Typed accessors for boolean-like fields ---
@@ -174,7 +173,7 @@ const VERSION_DEFAULTS: EepromConfig = {
 };
 
 impl EepromConfig {
-    /// Const zero-init (used by VERSION_DEFAULTS and Default).
+    /// Const zero-init. Safe: bytemuck::Zeroable guarantees all-zeros is valid.
     const ZEROED: Self = unsafe { core::mem::zeroed() };
 }
 

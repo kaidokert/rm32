@@ -42,7 +42,8 @@ impl Default for Tim2Interval {
 impl Tim2Interval {
     pub fn new() -> Self {
         // Enable TIM2 clock
-        let _rcc = unsafe { &*RCC::ptr() };
+        #[allow(unused_variables)] // Used on G071 via PAC, others use raw addresses
+        let rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
         rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
         #[cfg(feature = "stm32f051")]
@@ -94,7 +95,8 @@ impl Default for Tim14Com {
 impl Tim14Com {
     pub fn new() -> Self {
         // Enable TIM14 clock
-        let _rcc = unsafe { &*RCC::ptr() };
+        #[allow(unused_variables)] // Used on G071 via PAC, others use raw addresses
+        let rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
         rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN (APB2)
         #[cfg(feature = "stm32f051")]

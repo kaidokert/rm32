@@ -5,7 +5,6 @@
 
 use std::io::{self, BufRead, Write};
 use rm32::control::state::MotorState;
-use rm32::control::tick::ControlHal;
 use rm32::dshot;
 use rm32::hal;
 use rm32::signal;
@@ -224,7 +223,7 @@ impl Harness {
 
     fn print_state(&self) {
         let s = &self.state;
-        print!(
+        println!(
             "tick={} armed={} running={} step={} forward={} \
              duty_cycle={} duty_cycle_setpoint={} adjusted_duty_cycle={} \
              commutation_interval={} average_interval={} \
@@ -238,7 +237,7 @@ impl Harness {
              inputSet={} dshot={} servoPwm={} \
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} \
-             send_telemetry={} send_esc_info_flag={}\n",
+             send_telemetry={} send_esc_info_flag={}",
             self.tick_count,
             s.armed as i32, s.running as i32,
             s.commutation.step, s.commutation.forward as i32,
@@ -278,9 +277,8 @@ impl Harness {
             }
             "interval_timer" => self.hal.timer_count = v as u32,
             k if k.starts_with("dma_") => {
-                if let Ok(idx) = k[4..].parse::<usize>() {
-                    if idx < 64 { self.dma_buffer[idx] = v as u32; }
-                }
+                if let Ok(idx) = k[4..].parse::<usize>()
+                    && idx < 64 { self.dma_buffer[idx] = v as u32; }
             }
             "armed" => self.state.armed = v != 0,
             "running" => self.state.running = v != 0,
@@ -389,8 +387,7 @@ fn main() {
             harness.parse_kvs(&line[7..]);
             println!("ok");
             io::stdout().flush().unwrap();
-        } else if line.starts_with("ticks ") {
-            let rest = &line[6..];
+        } else if let Some(rest) = line.strip_prefix("ticks ") {
             let (n_str, kvs) = rest.split_once(' ').unwrap_or((rest, ""));
             let n: u32 = n_str.parse().unwrap_or(1);
             if !kvs.is_empty() {

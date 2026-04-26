@@ -26,10 +26,7 @@ const BOARD: rm32::board::BoardConfig = rm32::board::SISKIN_F051;
 #[cfg(feature = "stm32l431")]
 const BOARD: rm32::board::BoardConfig = rm32::board::NEUTRON_L431;
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    loop { cortex_m::asm::bkpt(); }
-}
+use panic_halt as _; // Standard panic handler: halts the CPU
 
 #[entry]
 fn main() -> ! {
@@ -237,7 +234,7 @@ fn main() -> ! {
 
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {
-        isr.config = main_state.config.clone();
+        isr.config = main_state.config;
         isr.forward = main_state.config.dir_reversed == 0;
         // Apply timer1_max_arr from pwm_frequency config
         isr.tim1_arr = timer1_max_arr;
@@ -396,7 +393,7 @@ fn main() -> ! {
             shared.set_save_settings_flag(false);
             // Copy ISR config back and write to flash
             isr::with_isr_state(|isr| {
-                main_state.config = isr.config.clone();
+                main_state.config = isr.config;
             });
             let mut flash = FlashStorage::new();
             use rm32::hal::Flash as _;

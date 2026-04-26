@@ -69,8 +69,7 @@ pub struct L431Pin;
 
 impl InputPinOps for L431Pin {
     fn read(&self) -> bool {
-        let gpioa = unsafe { &*GPIOA::ptr() };
-        (unsafe { core::ptr::read_volatile((GPIOA::ptr() as u32 + 0x10) as *const u32) }) & (1 << 2) != 0
+        unsafe { core::ptr::read_volatile((GPIOA::ptr() as u32 + 0x10) as *const u32) & (1 << 2) != 0 }
     }
     fn set_pull_up(&self) {
         unsafe { &*GPIOA::ptr() }.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
@@ -93,8 +92,8 @@ pub fn init_l431() {
         modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0));
         modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 0));
     }
-    gpioa.moder.modify(|_, w| unsafe { w.moder2().bits(0b10) });
-    gpioa.afrl.modify(|_, w| unsafe { w.afrl2().bits(14) });
+    gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
+    gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
     dma.cselr.modify(|r, w| unsafe { w.bits((r.bits() & !(0xF << 16)) | (7 << 16)) });
 }
 

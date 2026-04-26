@@ -1,5 +1,5 @@
 [workspace]
-members = ["rm32", "rm32_std"]
+members = ["rm32"]
 resolver = "2"
 
 # rm32_stm32 is excluded from default build - it requires ARM target
