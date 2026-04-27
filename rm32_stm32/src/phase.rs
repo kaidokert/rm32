@@ -22,6 +22,11 @@ const MODE_ALTERNATE: u32 = 0b10;
 /// After monomorphization, all port/pin constants are inlined — zero overhead.
 pub struct PhaseDriver<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin> {
     comp_pwm: bool,
+    /// PWM/enable bridge mode: low-side pins are enable (output high/low)
+    /// instead of complementary PWM (alternate mode).
+    bridge_enable: bool,
+    /// RPM pulse output: (port_base, pin_bit_mask) for ODR XOR toggle.
+    pulse_pin: Option<(u32, u32)>,
     _pins: PhantomData<(AH, AL, BH, BL, CH, CL)>,
 }
 
@@ -29,13 +34,33 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
     pub fn new(comp_pwm: bool) -> Self {
-        Self { comp_pwm, _pins: PhantomData }
+        Self { comp_pwm, bridge_enable: false, pulse_pin: None, _pins: PhantomData }
     }
 
-    /// Phase PWM: high-side alternate, low-side alternate (comp_pwm) or off.
+    pub fn new_bridge(comp_pwm: bool) -> Self {
+        Self { comp_pwm, bridge_enable: true, pulse_pin: None, _pins: PhantomData }
+    }
+
+    /// Enable RPM pulse output on the given pin.
+    /// The pin's GPIO port ODR is XORed with the pin mask on steps 1 and 4.
+    pub fn enable_pulse_output<P: GpioPin>(&mut self) {
+        P::set_mode(MODE_OUTPUT);
+        P::set_low();
+        self.pulse_pin = Some((P::PORT, P::BSRR_SET));
+    }
+
+    /// Phase PWM: high-side alternate (TIM1), low-side depends on mode.
+    ///
+    /// Normal: low-side alternate (comp_pwm) or output LOW.
+    /// Bridge: enable pin output HIGH (comp_pwm) or no-op.
     #[inline(always)]
     fn phase_pwm<H: GpioPin, L: GpioPin>(&self) {
-        if !self.comp_pwm {
+        if self.bridge_enable {
+            if self.comp_pwm {
+                L::set_mode(MODE_OUTPUT);
+                L::set_high(); // enable on
+            }
+        } else if !self.comp_pwm {
             L::set_mode(MODE_OUTPUT);
             L::set_low();
         } else {
@@ -44,7 +69,7 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
         H::set_mode(MODE_ALTERNATE);
     }
 
-    /// Phase LOW: low-side on, high-side off.
+    /// Phase LOW: low-side/enable on, high-side/PWM off.
     #[inline(always)]
     fn phase_low<H: GpioPin, L: GpioPin>() {
         L::set_mode(MODE_OUTPUT);
@@ -53,7 +78,7 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
         H::set_low();
     }
 
-    /// Phase FLOAT: both FETs off.
+    /// Phase FLOAT: both FETs off / enable off.
     #[inline(always)]
     fn phase_float<H: GpioPin, L: GpioPin>() {
         L::set_mode(MODE_OUTPUT);
@@ -97,12 +122,27 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     }
 
     fn proportional_brake(&mut self) {
+        if self.bridge_enable {
+            return; // not supported on PWM/enable bridge boards
+        }
         AH::set_mode(MODE_OUTPUT); AH::set_low();
         BH::set_mode(MODE_OUTPUT); BH::set_low();
         CH::set_mode(MODE_OUTPUT); CH::set_low();
         AL::set_mode(MODE_ALTERNATE);
         BL::set_mode(MODE_ALTERNATE);
         CL::set_mode(MODE_ALTERNATE);
+    }
+
+    fn pulse_toggle(&mut self, step: u8) {
+        if let Some((port, mask)) = self.pulse_pin {
+            if step == 1 || step == 4 {
+                // Toggle via ODR XOR (ODR at offset 0x14)
+                let odr = (port + 0x14) as *mut u32;
+                unsafe {
+                    odr.write_volatile(odr.read_volatile() ^ mask);
+                }
+            }
+        }
     }
 }
 

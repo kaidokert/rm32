@@ -45,8 +45,7 @@ pub fn handle_tim6() {
         one_khz_loop_counter: state.one_khz_loop_counter,
         armed_timeout_count: state.armed_timeout_count,
         tim1_arr: state.tim1_arr,
-        voltage_based_ramp: false, // Set from BOARD config at init
-        pulse_output: false,
+        voltage_based_ramp: state.voltage_based_ramp,
     };
     rm32::control::isr_logic::ten_khz_tick(
         &mut state.commutation,
@@ -108,6 +107,8 @@ pub fn handle_dma_tc() {
             let gcr = state.hal.input.gcr_buffer();
             #[cfg(feature = "stm32l431")]
             let gcr = state.hal.input.gcr_buffer();
+            #[cfg(feature = "stm32g431")]
+            let gcr = state.hal.input.gcr_buffer();
 
             // EDT: decide whether to send eRPM or extended data frame
             let value_12bit = match state.edt.next_frame(
@@ -139,6 +140,8 @@ pub fn handle_exti_frame() {
     #[cfg(feature = "stm32f051")]
     let buf = state.hal.input.dma_buffer();
     #[cfg(feature = "stm32l431")]
+    let buf = state.hal.input.dma_buffer();
+    #[cfg(feature = "stm32g431")]
     let buf = state.hal.input.dma_buffer();
 
     let pin_high = {

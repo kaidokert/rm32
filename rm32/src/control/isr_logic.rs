@@ -19,7 +19,6 @@ pub struct TickCounters {
     pub armed_timeout_count: u32,
     pub tim1_arr: u16,
     pub voltage_based_ramp: bool,
-    pub pulse_output: bool,
 }
 
 /// 20kHz control loop tick.
@@ -171,6 +170,7 @@ fn bemf_polling(
         }
         let step = commutation.advance();
         phase.com_step(step);
+        phase.pulse_toggle(step);
         comp.set_step(step, commutation.rising);
         comp.change_input();
         bemf.counter = 0;
@@ -232,6 +232,7 @@ pub fn commutation_timer_expired(
     com_timer.disable_interrupt();
     let step = commutation.advance();
     phase.com_step(step);
+    phase.pulse_toggle(step);
     comp.set_step(step, commutation.rising);
     comp.change_input();
     let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;

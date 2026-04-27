@@ -49,6 +49,11 @@ pub struct MainState {
     pub last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
+    /// Use external NTC thermistor instead of internal temp sensor
+    pub use_ntc: bool,
+    /// Custom LED: blink rate based on throttle
+    pub custom_led: bool,
+    pub led_counter: u16,
 }
 
 impl MainState {
@@ -145,7 +150,11 @@ impl MainState {
         let smoothed_c = AdcCount(self.current_filter.update(adc.raw_current()));
         self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider).0;
         self.measurements.actual_current = smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp).0;
-        self.measurements.degrees_celsius = adc.calc_temperature(adc.raw_temperature()).0;
+        self.measurements.degrees_celsius = if self.use_ntc {
+            rm32::ntc::ntc_degrees(adc.raw_temperature()).0
+        } else {
+            adc.calc_temperature(adc.raw_temperature()).0
+        };
         adc.start_conversion();
 
         // Publish measurements to shared state (ISR reads for EDT)
@@ -200,6 +209,28 @@ impl MainState {
             );
             telem.send_dma(&pkt);
             shared.set_send_telemetry(false);
+        }
+
+        // Custom LED on PB3: blink with throttle, solid when high
+        if self.custom_led {
+            let input = shared.adjusted_input();
+            self.led_counter = self.led_counter.wrapping_add(1);
+            const PB3_BSRR: u32 = 0x4800_0418; // GPIOB BSRR
+            if input >= 47 && input < 1947 {
+                let on = self.led_counter > 2000;
+                unsafe {
+                    if on {
+                        (PB3_BSRR as *mut u32).write_volatile(1 << 3);
+                    } else {
+                        (PB3_BSRR as *mut u32).write_volatile(1 << (3 + 16));
+                    }
+                }
+                if self.led_counter > 4000 { self.led_counter = 0; }
+            } else if input > 1947 {
+                unsafe { (PB3_BSRR as *mut u32).write_volatile(1 << 3); }
+            } else {
+                unsafe { (PB3_BSRR as *mut u32).write_volatile(1 << (3 + 16)); }
+            }
         }
     }
 }

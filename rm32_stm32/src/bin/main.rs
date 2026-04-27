@@ -25,6 +25,8 @@ const BOARD: rm32::board::BoardConfig = rm32::board::GEN_64K_G071;
 const BOARD: rm32::board::BoardConfig = rm32::board::SISKIN_F051;
 #[cfg(feature = "stm32l431")]
 const BOARD: rm32::board::BoardConfig = rm32::board::NEUTRON_L431;
+#[cfg(feature = "stm32g431")]
+const BOARD: rm32::board::BoardConfig = rm32::board::PROTONDRIVE_G431;
 
 use panic_halt as _; // Standard panic handler: halts the CPU
 
@@ -45,12 +47,21 @@ fn main() -> ! {
 
     // --- Startup tune (before peripherals move to ISR) ---
     let mut pwm = p.pwm;
-    let mut phase = p.phase;
+    let mut phase = if BOARD.bridge_enable {
+        rm32_stm32::phase::G0APhaseDriver::new_bridge(false)
+    } else {
+        p.phase
+    };
     let mut sys = p.sys;
     {
         use rm32::sounds::Sounds;
         let sounds = Sounds::new(config::TIM1_AUTORELOAD);
         sounds.play_startup(&mut pwm, &mut phase, &mut sys);
+    }
+
+    // --- RPM pulse output (debug): configure GPIO before phase moves to ISR ---
+    if BOARD.pulse_output {
+        phase.enable_pulse_output::<rm32_stm32::gpio_pin::PB10>();
     }
 
     // --- Start IWDG watchdog (after startup tune, matching C sequencing) ---
@@ -61,6 +72,9 @@ fn main() -> ! {
     sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
 
     #[cfg(feature = "stm32l431")]
+    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
+
+    #[cfg(feature = "stm32g431")]
     sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
 
     // --- Build ISR state and move to global ---
@@ -78,6 +92,7 @@ fn main() -> ! {
             input: {
                 let mut ic = rm32_stm32::input_capture::new_capture();
                 use rm32::hal::InputCapture;
+                ic.set_inverted(BOARD.inverted_input);
                 ic.receive_dshot_dma();
                 ic
             },
@@ -85,6 +100,7 @@ fn main() -> ! {
             input: {
                 let mut ic = rm32_stm32::input_capture_f051::new_capture();
                 use rm32::hal::InputCapture;
+                ic.set_inverted(BOARD.inverted_input);
                 ic.receive_dshot_dma();
                 ic
             },
@@ -92,6 +108,15 @@ fn main() -> ! {
             input: {
                 let mut ic = rm32_stm32::input_capture_l431::new_capture();
                 use rm32::hal::InputCapture;
+                ic.set_inverted(BOARD.inverted_input);
+                ic.receive_dshot_dma();
+                ic
+            },
+            #[cfg(feature = "stm32g431")]
+            input: {
+                let mut ic = rm32_stm32::input_capture_g431::new_capture();
+                use rm32::hal::InputCapture;
+                ic.set_inverted(BOARD.inverted_input);
                 ic.receive_dshot_dma();
                 ic
             },
@@ -109,6 +134,7 @@ fn main() -> ! {
         ten_khz_counter: 0,
         one_khz_loop_counter: 0,
         armed_timeout_count: 0,
+        voltage_based_ramp: BOARD.voltage_based_ramp,
     };
     isr::init_isr_state(isr_state);
 
@@ -141,6 +167,9 @@ fn main() -> ! {
         voltage_filter: rm32::filter::EwmaPow2::new(),
         last_armed: false,
         just_armed: false,
+        use_ntc: BOARD.use_ntc,
+        custom_led: BOARD.custom_led,
+        led_counter: 0,
     };
 
     // --- Check bootloader device info for dynamic EEPROM address ---
@@ -287,6 +316,11 @@ fn main() -> ! {
     let (mut adc, mut telem) = (
         rm32_stm32::adc_l431::post_init(),
         rm32_stm32::telemetry_uart_l431::L431TelemUart::post_init(),
+    );
+    #[cfg(feature = "stm32g431")]
+    let (mut adc, mut telem) = (
+        rm32_stm32::adc_g431::post_init(),
+        rm32_stm32::telemetry_uart_g431::G431TelemUart::post_init(),
     );
 
     // --- Sine mode state ---

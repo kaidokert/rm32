@@ -22,8 +22,8 @@ const TIM2_BASE: u32 = addr::TIM2;
 
 #[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
 const TIM14_BASE: u32 = addr::TIM14;
-// L431 uses TIM16 in place of TIM14 (same register layout)
-#[cfg(feature = "stm32l431")]
+// L431/G431 use TIM16 in place of TIM14 (same register layout)
+#[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
 const TIM14_BASE: u32 = addr::TIM16;
 
 use crate::regs::{write_off as write_reg, read_off as read_reg, modify_off as modify_reg};

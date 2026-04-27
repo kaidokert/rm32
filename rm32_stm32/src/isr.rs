@@ -16,6 +16,8 @@ use crate::comparator::g071::G071BemfComparator as BemfComp;
 use crate::comparator::f051::F051BemfComparator as BemfComp;
 #[cfg(feature = "stm32l431")]
 use crate::comparator::l431::L431BemfComparator as BemfComp;
+#[cfg(feature = "stm32g431")]
+use crate::comparator::g431::G431BemfComparator as BemfComp;
 use crate::timer::{Tim2Interval, Tim14Com};
 use crate::phase::G0APhaseDriver;
 use crate::shared::SharedState;
@@ -29,6 +31,8 @@ use crate::pwm::Tim1Pwm;
 use crate::init::F051Pwm;
 #[cfg(feature = "stm32l431")]
 use crate::init::L431Pwm;
+#[cfg(feature = "stm32g431")]
+use crate::init::G431Pwm;
 
 /// ISR-exclusive hardware — MCU-generic via cfg.
 pub struct IsrHal {
@@ -38,6 +42,8 @@ pub struct IsrHal {
     pub pwm: F051Pwm,
     #[cfg(feature = "stm32l431")]
     pub pwm: L431Pwm,
+    #[cfg(feature = "stm32g431")]
+    pub pwm: G431Pwm,
 
     pub comp: BemfComp,
     pub interval: Tim2Interval,
@@ -52,6 +58,9 @@ pub struct IsrHal {
 
     #[cfg(feature = "stm32l431")]
     pub input: crate::input_capture_l431::L431DshotCapture,
+
+    #[cfg(feature = "stm32g431")]
+    pub input: crate::input_capture_g431::G431DshotCapture,
 }
 
 /// ISR-exclusive state.
@@ -73,6 +82,7 @@ pub struct IsrState {
     pub ten_khz_counter: u32,
     pub one_khz_loop_counter: u16,
     pub armed_timeout_count: u32,
+    pub voltage_based_ramp: bool,
 }
 
 static ISR_STATE: Mutex<RefCell<Option<IsrState>>> = Mutex::new(RefCell::new(None));

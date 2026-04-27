@@ -72,3 +72,15 @@ pub mod comp_init_l431;
 pub mod telemetry_uart_l431;
 #[cfg(feature = "stm32l431")]
 pub mod adc_l431;
+
+// G431-specific peripheral modules
+#[cfg(feature = "stm32g431")]
+pub mod input_capture_g431;
+#[cfg(feature = "stm32g431")]
+pub mod comp_init_g431;
+#[cfg(feature = "stm32g431")]
+pub mod telemetry_uart_g431;
+#[cfg(feature = "stm32g431")]
+pub mod adc_g431;
+#[cfg(feature = "stm32g431")]
+pub mod interrupts_g431;

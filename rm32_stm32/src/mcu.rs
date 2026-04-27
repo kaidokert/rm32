@@ -42,6 +42,24 @@ pub mod config {
     pub const TIM1_AUTORELOAD: u16 = ((CPU_FREQUENCY_MHZ * 1_000_000 / 24_000) - 1) as u16;
 }
 
+// --- STM32G431 ---
+#[cfg(feature = "stm32g431")]
+pub use stm32g4::stm32g431 as pac;
+
+#[cfg(feature = "stm32g431")]
+pub mod config {
+    pub const CPU_FREQUENCY_MHZ: u32 = 170;
+    pub const EEPROM_START: u32 = 0x0800_F800;
+    pub const FLASH_PAGE_SIZE: u32 = 0x800; // 2KB
+    pub const TIMER_PSC: u16 = 84; // 170MHz / 85 = 2MHz
+    pub const GCR_SHIFT: u8 = 7;
+    pub const COMP_EXTI_LINE: u32 = 21; // COMP1 on EXTI21
+    pub const INPUT_DMA_CHANNEL: usize = 0; // DMA1_CH1
+    pub const ADC_CURRENT_CHANNEL: u8 = 5;  // PA4
+    pub const ADC_VOLTAGE_CHANNEL: u8 = 13; // PA5
+    pub const TIM1_AUTORELOAD: u16 = ((CPU_FREQUENCY_MHZ * 1_000_000 / 24_000) - 1) as u16;
+}
+
 // --- STM32F051 ---
 #[cfg(feature = "stm32f051")]
 pub use stm32f0xx_hal::pac;

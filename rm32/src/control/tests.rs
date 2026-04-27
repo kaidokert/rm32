@@ -1010,7 +1010,6 @@ mod tests {
             armed_timeout_count: 0,
             tim1_arr: 1999,
             voltage_based_ramp: false,
-            pulse_output: false,
         }
     }
 

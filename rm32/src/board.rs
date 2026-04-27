@@ -43,6 +43,10 @@ pub struct BoardConfig {
     pub pulse_output: bool,
     /// Enable dual ADC conversion triggering
     pub dual_adc: bool,
+    /// PWM/enable bridge mode (low-side pins are enable, not complementary PWM)
+    pub bridge_enable: bool,
+    /// Custom LED on PB3: blinks with throttle position, solid when armed
+    pub custom_led: bool,
 }
 
 impl BoardConfig {
@@ -66,6 +70,8 @@ impl BoardConfig {
         voltage_based_ramp: false,
         pulse_output: false,
         dual_adc: false,
+        bridge_enable: false,
+        custom_led: false,
     };
 }
 
@@ -112,6 +118,32 @@ pub const IFLIGHT_12S_G071: BoardConfig = BoardConfig {
     dead_time: 80,
     voltage_divider: 210,
     millivolt_per_amp: 25,
+    ..BoardConfig::DEFAULT
+};
+
+// --- G431 boards ---
+
+pub const PROTONDRIVE_G431: BoardConfig = BoardConfig {
+    name: "ProtonDrive",
+    dead_time: 80,
+    current_adc_channel: 5,  // PA4
+    voltage_adc_channel: 13, // PA5
+    ..BoardConfig::DEFAULT
+};
+
+pub const SEQURE_G431: BoardConfig = BoardConfig {
+    name: "SEQURE G431",
+    dead_time: 80,
+    current_adc_channel: 5,
+    voltage_adc_channel: 13,
+    dual_adc: true,
+    ..BoardConfig::DEFAULT
+};
+
+pub const PWM_ENABLE_G071: BoardConfig = BoardConfig {
+    name: "G071 PWM_EN",
+    dead_time: 60,
+    bridge_enable: true,
     ..BoardConfig::DEFAULT
 };
 

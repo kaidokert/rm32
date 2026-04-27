@@ -20,7 +20,7 @@ pub const TIM2: u32 = 0x4000_0000;
 
 #[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
 pub const TIM14: u32 = 0x4000_2000;
-#[cfg(feature = "stm32l431")]
+#[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
 pub const TIM16: u32 = 0x4001_4400;
 
 #[cfg(any(feature = "stm32f051", feature = "stm32l431"))]

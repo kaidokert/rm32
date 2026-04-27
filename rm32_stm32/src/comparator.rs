@@ -54,6 +54,108 @@ impl<C: CompOps, E: ExtiOps> CompTrait for BemfComparator<C, E> {
 }
 
 // ============================================================
+// G431: Dual COMP1 (EXTI21) + COMP2 (EXTI22), switched per step
+// ============================================================
+#[cfg(feature = "stm32g431")]
+pub mod g431 {
+    use super::*;
+
+    const COMP1_CSR: u32 = 0x4001_0200;
+    const COMP2_CSR: u32 = 0x4001_0204;
+    const EXTI: u32 = 0x4000_0400;
+    const LINE_21: u32 = 1 << 21;
+    const LINE_22: u32 = 1 << 22;
+
+    // ISR-local shared state: which COMP and EXTI line are active.
+    // Safe because all access is from the same ISR priority level (single-core Cortex-M).
+    static mut ACTIVE_CSR: u32 = COMP2_CSR;
+    static mut ACTIVE_LINE: u32 = LINE_22;
+
+    /// G431 dual-comparator. Tracks active comp per commutation step.
+    pub struct G431Comp;
+    impl G431Comp { pub fn new() -> Self { Self } }
+
+    impl CompOps for G431Comp {
+        fn output(&self) -> bool {
+            unsafe {
+                let csr = ACTIVE_CSR as *const u32;
+                csr.read_volatile() & (1 << 30) != 0
+            }
+        }
+        fn set_inmsel(&self, phase: u32) {
+            // phase encodes: [31:16]=INM/INP config bits, [15:0]=COMP CSR address
+            let comp_base = phase & 0xFFFF;
+            let config = phase >> 16;
+            unsafe {
+                ACTIVE_CSR = comp_base;
+                ACTIVE_LINE = if comp_base == COMP1_CSR { LINE_21 } else { LINE_22 };
+                let csr = comp_base as *mut u32;
+                let v = csr.read_volatile();
+                let cleared = v & !(0b111 << 4 | 0b11 << 2);
+                csr.write_volatile(cleared | config | (1 << 0));
+            }
+        }
+    }
+
+    /// G431 EXTI — manages both lines 21 and 22.
+    pub struct G431Exti;
+    impl G431Exti { pub fn new() -> Self { Self } }
+
+    impl ExtiOps for G431Exti {
+        fn set_rising_edge(&self) {
+            unsafe {
+                let line = ACTIVE_LINE;
+                crate::regs::modify(EXTI + 0x08, |v| v & !(LINE_21 | LINE_22));
+                crate::regs::modify(EXTI + 0x0C, |v| v | line);
+            }
+        }
+        fn set_falling_edge(&self) {
+            unsafe {
+                let line = ACTIVE_LINE;
+                crate::regs::modify(EXTI + 0x08, |v| v | line);
+                crate::regs::modify(EXTI + 0x0C, |v| v & !(LINE_21 | LINE_22));
+            }
+        }
+        fn enable_interrupt(&self) {
+            unsafe { crate::regs::modify(EXTI + 0x00, |v| v | ACTIVE_LINE); }
+        }
+        fn mask_and_clear(&self) {
+            unsafe {
+                crate::regs::modify(EXTI + 0x00, |v| v & !(LINE_21 | LINE_22));
+                ((EXTI + 0x14) as *mut u32).write_volatile(LINE_21 | LINE_22);
+            }
+        }
+    }
+
+    // Phase mapping for G4_B (PROTONDRIVE):
+    // Each value encodes [31:16]=INMSEL+INPSEL bits, [15:0]=COMP base address.
+    // Steps 1,4 (phase C): COMP1, INM=PA0(IO2=0b001), INP=PA1(IO1=0b00)
+    // Steps 2,5 (phase A): COMP2, INM=PA4(IO1=0b000), INP=PA3(IO2=0b01)
+    // Steps 3,6 (phase B): COMP1, INM=PA5(IO1=0b000), INP=PA1(IO1=0b00)
+    //
+    // But the generic BemfComparator calls change_input() which calls set_inmsel()
+    // with the phase value, then calls exti edge set. We need the EXTI to know
+    // which line is active. We'll handle this by storing the EXTI line in the
+    // phase value and using a custom wrapper.
+
+    // Simplified: encode comp_addr in lower 16 bits
+    pub const INMSEL: InmselMap = InmselMap {
+        // phase_a: COMP1, INM=PA4(000), INP=PA1(00) → config = 0b000_00 << 2 = 0
+        phase_a: ((0b000 << 4 | 0b00 << 2) << 16) as u32 | COMP1_CSR,
+        // phase_b: COMP2, INM=PA4(000), INP=PA3(01) → config = 0b000_01 << 2
+        phase_b: ((0b000 << 4 | 0b01 << 2) << 16) as u32 | COMP2_CSR,
+        // phase_c: COMP1, INM=PA0(001), INP=PA1(00) → config = 0b001_00 << 2
+        phase_c: ((0b001 << 4 | 0b00 << 2) << 16) as u32 | COMP1_CSR,
+    };
+
+    pub type G431BemfComparator = BemfComparator<G431Comp, G431Exti>;
+
+    pub fn new_comparator() -> G431BemfComparator {
+        BemfComparator::new(G431Comp::new(), G431Exti::new(), INMSEL)
+    }
+}
+
+// ============================================================
 // G071: COMP2 on EXTI18
 // ============================================================
 #[cfg(feature = "stm32g071")]

@@ -37,7 +37,7 @@ mod regs {
     pub const PAGE_SIZE: u32 = 0x400; // 1KB for F051
 }
 
-#[cfg(feature = "stm32l431")]
+#[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
 mod regs {
     pub const BASE: u32 = 0x4002_2000;
     pub const KEYR: u32 = BASE + 0x08;
@@ -48,7 +48,7 @@ mod regs {
     pub const PER_BIT: u32 = 1 << 1;
     pub const PG_BIT: u32 = 1 << 0;
     pub const STRT_BIT: u32 = 1 << 16;
-    pub const PAGE_SIZE: u32 = 0x800; // 2KB for L431
+    pub const PAGE_SIZE: u32 = 0x800; // 2KB for L431/G431
 }
 
 pub struct FlashStorage {

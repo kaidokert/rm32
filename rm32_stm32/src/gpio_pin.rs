@@ -67,3 +67,6 @@ impl GpioPin for PB0 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 0; 
 
 pub struct PB1;
 impl GpioPin for PB1 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 1; }
+
+pub struct PB10;
+impl GpioPin for PB10 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 10; }
