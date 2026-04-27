@@ -5,11 +5,7 @@
 
 use rm32::hal::TelemetryUart;
 
-use crate::periph_addr as addr;
-use crate::pac::{DMA1, GPIOB, USART1};
-use crate::regs::modify as modify_reg;
-
-fn rcc_base() -> u32 { addr::rcc() }
+use crate::pac::{DMA1, GPIOB, RCC, USART1};
 
 pub struct L431TelemUart { tx_buf: [u8; 49] }
 
@@ -17,15 +13,16 @@ impl L431TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     pub fn init() -> Result<Self, crate::regs::InitError> {
+        let rcc = unsafe { &*RCC::ptr() };
         let gpiob = unsafe { &*GPIOB::ptr() };
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
         unsafe {
             // Enable clocks: USART1 (APB2ENR bit 14), GPIOB (AHB2ENR bit 1), DMA1 (AHB1ENR bit 0)
-            modify_reg(rcc_base() + 0x60, |v| v | (1 << 14)); // APB2ENR
-            modify_reg(rcc_base() + 0x4C, |v| v | (1 << 1));  // AHB2ENR GPIOBEN
-            modify_reg(rcc_base() + 0x48, |v| v | (1 << 0));  // AHB1ENR DMA1EN
+            rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
+            rcc.ahb2enr.modify(|_, w| w.gpioben().set_bit());
+            rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
 
             // PB6: AF7 (USART1_TX), open-drain, pull-up
             gpiob.moder.modify(|_, w| w.moder6().bits(0b10)); // AF mode

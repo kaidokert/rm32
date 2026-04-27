@@ -873,7 +873,7 @@ mod tests {
         state.one_khz_loop_counter = 21;
         state.pid.use_current_limit = true;
         state.running = true;
-        state.measurements.actual_current = 5000;
+        state.measurements.actual_current = crate::units::MilliAmps(5000);
         state.config.current_limit = 10;
         state.pid.current.kp = 100;
         state.pid.current.output_limit = 50000;
@@ -919,7 +919,7 @@ mod tests {
     fn main_loop_consumed_current() {
         let mut state = MotorState::default();
         state.ten_khz_counter = 20001;
-        state.measurements.actual_current = 1000;
+        state.measurements.actual_current = crate::units::MilliAmps(1000);
         state.measurements.consumed_current = 0;
         state.main_loop_tick();
         assert!(state.measurements.consumed_current > 0);
@@ -948,7 +948,7 @@ mod tests {
         let mut state = MotorState::default();
         state.running = true;
         state.config.temperature_limit = 80;
-        state.measurements.degrees_celsius = 85;
+        state.measurements.degrees_celsius = crate::units::DegreesCelsius(85);
         state.timing.commutation_intervals = [333; 6];
         state.main_loop_tick();
         assert!(state.duty.maximum < 2000);
@@ -1090,19 +1090,19 @@ mod tests {
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(1000);
 
-        isr_logic::ten_khz_tick(
-            &mut comm,
-            &mut bemf,
-            &mut duty,
-            &config,
-            &mut counters,
-            &shared,
-            &mut pwm,
-            &mut comp,
-            &mut phase,
-            &mut interval,
-            &mut com_timer,
-        );
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            counters: &mut counters,
+            shared: &shared,
+            pwm: &mut pwm,
+            comp: &mut comp,
+            phase: &mut phase,
+            interval: &mut interval,
+            com_timer: &mut com_timer,
+        });
 
         assert!(shared.duty_cycle_setpoint() > 0);
         assert_eq!(shared.adjusted_input(), 1000);
@@ -1128,19 +1128,19 @@ mod tests {
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(0);
 
-        isr_logic::ten_khz_tick(
-            &mut comm,
-            &mut bemf,
-            &mut duty,
-            &config,
-            &mut counters,
-            &shared,
-            &mut pwm,
-            &mut comp,
-            &mut phase,
-            &mut interval,
-            &mut com_timer,
-        );
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            counters: &mut counters,
+            shared: &shared,
+            pwm: &mut pwm,
+            comp: &mut comp,
+            phase: &mut phase,
+            interval: &mut interval,
+            com_timer: &mut com_timer,
+        });
 
         assert_eq!(shared.duty_cycle_setpoint(), 0);
     }
@@ -1166,35 +1166,35 @@ mod tests {
         shared.newinput.set(0);
 
         for _ in 0..20000 {
-            isr_logic::ten_khz_tick(
-                &mut comm,
-                &mut bemf,
-                &mut duty,
-                &config,
-                &mut counters,
-                &shared,
-                &mut pwm,
-                &mut comp,
-                &mut phase,
-                &mut interval,
-                &mut com_timer,
-            );
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                counters: &mut counters,
+                shared: &shared,
+                pwm: &mut pwm,
+                comp: &mut comp,
+                phase: &mut phase,
+                interval: &mut interval,
+                com_timer: &mut com_timer,
+            });
         }
         assert!(!shared.armed());
 
-        isr_logic::ten_khz_tick(
-            &mut comm,
-            &mut bemf,
-            &mut duty,
-            &config,
-            &mut counters,
-            &shared,
-            &mut pwm,
-            &mut comp,
-            &mut phase,
-            &mut interval,
-            &mut com_timer,
-        );
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            counters: &mut counters,
+            shared: &shared,
+            pwm: &mut pwm,
+            comp: &mut comp,
+            phase: &mut phase,
+            interval: &mut interval,
+            com_timer: &mut com_timer,
+        });
         assert!(shared.armed());
     }
 
@@ -1215,19 +1215,19 @@ mod tests {
         let mut interval = MockInterval { count: 0 };
         let mut com_timer = MockComTimer;
 
-        isr_logic::ten_khz_tick(
-            &mut comm,
-            &mut bemf,
-            &mut duty,
-            &config,
-            &mut counters,
-            &shared,
-            &mut pwm,
-            &mut comp,
-            &mut phase,
-            &mut interval,
-            &mut com_timer,
-        );
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            counters: &mut counters,
+            shared: &shared,
+            pwm: &mut pwm,
+            comp: &mut comp,
+            phase: &mut phase,
+            interval: &mut interval,
+            com_timer: &mut com_timer,
+        });
 
         assert_eq!(shared.signal_timeout(), 1);
     }
@@ -1254,19 +1254,19 @@ mod tests {
         duty.last = 100;
         duty.ramp_divider = 0;
 
-        isr_logic::ten_khz_tick(
-            &mut comm,
-            &mut bemf,
-            &mut duty,
-            &config,
-            &mut counters,
-            &shared,
-            &mut pwm,
-            &mut comp,
-            &mut phase,
-            &mut interval,
-            &mut com_timer,
-        );
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            counters: &mut counters,
+            shared: &shared,
+            pwm: &mut pwm,
+            comp: &mut comp,
+            phase: &mut phase,
+            interval: &mut interval,
+            com_timer: &mut com_timer,
+        });
 
         assert!(
             duty.cycle < 2000,

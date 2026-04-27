@@ -44,15 +44,12 @@ impl AdcOps for G071AdcOps {
         ch.cr().modify(|r, w| unsafe { w.bits(r.bits() | 1) });
 
         adc.cfgr2().write(|w| unsafe { w.bits(0b10 << 30) });
-        unsafe { crate::regs::modify(ADC::ptr() as u32 + 0x308, |v| v | (1 << 23)); }
+        adc.ccr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 23)) }); // TSEN
 
         adc.smpr().write(|w| unsafe { w.bits(0b011 | (0b111 << 4)) });
         adc.cfgr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 21)) });
-        let adc_base = ADC::ptr() as u32;
-        unsafe {
-            let chselr = (adc_base + 0x28) as *mut u32;
-            chselr.write_volatile(4 | (6 << 4) | (12 << 8) | (0xF << 12));
-        }
+        // Sequencer: CH4(current), CH6(voltage), CH12(temp), 0xF(end)
+        adc.chselr1().write(|w| unsafe { w.bits(4 | (6 << 4) | (12 << 8) | (0xF << 12)) });
         adc.cfgr1().modify(|r, w| unsafe {
             w.bits((r.bits() & !0b11) | (0b01 << 0))
         });

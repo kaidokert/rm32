@@ -45,7 +45,8 @@ fn EXTI4_15() {
     // Re-enable DMA
     let dma = unsafe { &*stm32g0xx_hal::stm32::DMA1::ptr() };
     let shared = crate::isr::shared();
-    let pin_high = unsafe { (0x4800_0410u32 as *const u32).read_volatile() } & (1<<4) != 0;
+    let gpiob = unsafe { &*stm32g0xx_hal::stm32::GPIOB::ptr() };
+    let pin_high = gpiob.idr().read().bits() & (1 << 4) != 0;
     let sz = if shared.servo_pwm() && pin_high { 3u32 } else if shared.servo_pwm() { 2 } else { 32 };
     dma.ch(0).ndtr().write(|w| unsafe { w.bits(sz) });
     dma.ch(0).cr().modify(|_, w| w.en().set_bit());

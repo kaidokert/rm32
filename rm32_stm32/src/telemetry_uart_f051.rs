@@ -4,9 +4,7 @@
 //! DMA1 Channel 2 for TX transfers (fixed assignment, no DMAMUX on F0).
 
 use rm32::hal::TelemetryUart;
-use crate::pac::{DMA1, USART1};
-use crate::regs::modify as modify_reg;
-use crate::periph_addr as addr;
+use crate::pac::{DMA1, GPIOB, RCC, USART1};
 
 pub struct F051TelemUart {
     tx_buf: [u8; 49],
@@ -16,26 +14,22 @@ impl F051TelemUart {
     pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
 
     pub fn init() -> Result<Self, crate::regs::InitError> {
+        let rcc = unsafe { &*RCC::ptr() };
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
         // Enable clocks
         unsafe {
-            let rcc_base = addr::rcc();
-            let apb2enr = (rcc_base + 0x18) as *mut u32;
-            apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 14)); // USART1EN
-            let ahbenr = (rcc_base + 0x14) as *mut u32;
-            ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0) | (1 << 18)); // DMA1EN, GPIOBEN
+            rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
+            rcc.ahbenr.modify(|_, w| w.dmaen().set_bit().iopben().set_bit());
         }
 
         // PB6: alternate function (AF0 = USART1_TX), open-drain, pull-up
-        let gpiob_base = addr::gpiob();
-        unsafe {
-            modify_reg(gpiob_base, |v| (v & !(0b11 << 12)) | (0b10 << 12));
-            modify_reg(gpiob_base + 0x04, |v| v | (1 << 6)); // open-drain
-            modify_reg(gpiob_base + 0x0C, |v| (v & !(0b11 << 12)) | (0b01 << 12)); // pull-up
-            modify_reg(gpiob_base + 0x20, |v| v & !(0xF << 24)); // AF0
-        }
+        let gpiob = unsafe { &*GPIOB::ptr() };
+        gpiob.moder.modify(|_, w| w.moder6().alternate());
+        gpiob.otyper.modify(|_, w| w.ot6().open_drain());
+        gpiob.pupdr.modify(|_, w| w.pupdr6().pull_up());
+        gpiob.afrl.modify(|_, w| w.afrl6().af0());
 
         // USART1 config via PAC accessors
         usart.cr1.write(|w| unsafe { w.bits(0) }); // disable

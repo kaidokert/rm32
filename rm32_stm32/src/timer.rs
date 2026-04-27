@@ -4,34 +4,94 @@
 //! TIM14: Commutation timer — one-shot at 2MHz
 //! PSC derived from MCU config to achieve 2MHz regardless of clock speed.
 
+use crate::pac;
 use crate::pac::RCC;
 use rm32::hal::{IntervalTimer, ComTimer};
 
-// Timer register offsets (same for all STM32 timers)
-const CR1: u32 = 0x00;
-const DIER: u32 = 0x0C;
-const SR: u32 = 0x10;
-const EGR: u32 = 0x14;
-const CNT: u32 = 0x24;
-const PSC: u32 = 0x28;
-const ARR: u32 = 0x2C;
+/// PAC-based timer register access. Bridges method vs field accessor styles.
+/// G071/G431 use method accessors: tim.cr1(), tim.sr(), etc.
+/// F051/L431 use field accessors: tim.cr1, tim.sr, etc.
 
-use crate::periph_addr as addr;
+macro_rules! define_timer_ops {
+    (method, $mod_name:ident, $pac_periph:path) => {
+        mod $mod_name {
+            use super::pac;
+            macro_rules! tim { () => { unsafe { &*<$pac_periph>::PTR } } }
+            #[inline(always)]
+            pub unsafe fn read_cr1() -> u32 { tim!().cr1().read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_cr1(v: u32) { tim!().cr1().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn modify_cr1(f: impl FnOnce(u32) -> u32) { write_cr1(f(read_cr1())); }
+            #[inline(always)]
+            pub unsafe fn read_cnt() -> u32 { tim!().cnt().read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_cnt(v: u32) { tim!().cnt().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_psc(v: u32) { tim!().psc().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_arr(v: u32) { tim!().arr().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_egr(v: u32) { tim!().egr().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_sr(v: u32) { tim!().sr().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn read_dier() -> u32 { tim!().dier().read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_dier(v: u32) { tim!().dier().write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn modify_dier(f: impl FnOnce(u32) -> u32) { write_dier(f(read_dier())); }
+        }
+    };
+    (field, $mod_name:ident, $pac_periph:path) => {
+        mod $mod_name {
+            use super::pac;
+            macro_rules! tim { () => { unsafe { &*<$pac_periph>::PTR } } }
+            #[inline(always)]
+            pub unsafe fn read_cr1() -> u32 { tim!().cr1.read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_cr1(v: u32) { tim!().cr1.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn modify_cr1(f: impl FnOnce(u32) -> u32) { write_cr1(f(read_cr1())); }
+            #[inline(always)]
+            pub unsafe fn read_cnt() -> u32 { tim!().cnt.read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_cnt(v: u32) { tim!().cnt.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_psc(v: u32) { tim!().psc.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_arr(v: u32) { tim!().arr.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_egr(v: u32) { tim!().egr.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn write_sr(v: u32) { tim!().sr.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn read_dier() -> u32 { tim!().dier.read().bits() }
+            #[inline(always)]
+            pub unsafe fn write_dier(v: u32) { tim!().dier.write(|w| w.bits(v)); }
+            #[inline(always)]
+            pub unsafe fn modify_dier(f: impl FnOnce(u32) -> u32) { write_dier(f(read_dier())); }
+        }
+    };
+}
 
-#[inline(always)]
-fn tim2_base() -> u32 { addr::tim2() }
+// TIM2: method-style on G071/G431, field-style on F051/L431
+#[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
+define_timer_ops!(method, tim2_ops, pac::TIM2);
+#[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
+define_timer_ops!(field, tim2_ops, pac::TIM2);
 
-#[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
-#[inline(always)]
-fn tim14_base() -> u32 { addr::tim14() }
+// Commutation timer: TIM14 on G071/F051, TIM16 on L431/G431
+#[cfg(feature = "stm32g071")]
+define_timer_ops!(method, com_tim_ops, pac::TIM14);
+#[cfg(feature = "stm32g431")]
+define_timer_ops!(method, com_tim_ops, pac::TIM16);
+#[cfg(feature = "stm32f051")]
+define_timer_ops!(field, com_tim_ops, pac::TIM14);
+#[cfg(feature = "stm32l431")]
+define_timer_ops!(field, com_tim_ops, pac::TIM16);
 
-#[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
-#[inline(always)]
-fn tim14_base() -> u32 { addr::tim16() }
-
-use crate::regs::{write_off as write_reg, read_off as read_reg, modify_off as modify_reg};
-
-/// TIM2 as free-running interval timer (2MHz, 0.5µs/tick).
+/// TIM2 as free-running interval timer (2MHz, 0.5us/tick).
 pub struct Tim2Interval {
     _private: (),
 }
@@ -45,30 +105,22 @@ impl Default for Tim2Interval {
 impl Tim2Interval {
     pub fn new() -> Self {
         // Enable TIM2 clock
-        #[allow(unused_variables)] // Used on G071 via PAC, others use raw addresses
+        #[allow(unused_variables)] // Used via PAC on all MCU variants
         let rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
         rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
         #[cfg(feature = "stm32f051")]
-        unsafe {
-            // APB1ENR at RCC base + 0x1C on F0
-            let apb1enr = (RCC::ptr() as u32 + 0x1C) as *mut u32;
-            apb1enr.write_volatile(apb1enr.read_volatile() | (1 << 0)); // TIM2EN
-        }
+        rcc.apb1enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
         #[cfg(feature = "stm32l431")]
-        unsafe {
-            // APB1ENR1 at RCC base + 0x58 on L4
-            let apb1enr1 = (RCC::ptr() as u32 + 0x58) as *mut u32;
-            apb1enr1.write_volatile(apb1enr1.read_volatile() | (1 << 0)); // TIM2EN
-        }
+        rcc.apb1enr1.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
 
         unsafe {
-            modify_reg(tim2_base(), CR1, |v| v & !(1 << 0)); // CEN=0
-            write_reg(tim2_base(), PSC, crate::config::TIMER_PSC as u32);
-            write_reg(tim2_base(), ARR, 0xFFFF_FFFF);
-            write_reg(tim2_base(), EGR, 1); // UG
-            write_reg(tim2_base(), CNT, 0);
-            modify_reg(tim2_base(), CR1, |v| v | (1 << 0)); // CEN=1
+            tim2_ops::modify_cr1(|v| v & !(1 << 0)); // CEN=0
+            tim2_ops::write_psc(crate::config::TIMER_PSC as u32);
+            tim2_ops::write_arr(0xFFFF_FFFF);
+            tim2_ops::write_egr(1); // UG
+            tim2_ops::write_cnt(0);
+            tim2_ops::modify_cr1(|v| v | (1 << 0)); // CEN=1
         }
         Self { _private: () }
     }
@@ -76,15 +128,15 @@ impl Tim2Interval {
 
 impl IntervalTimer for Tim2Interval {
     fn count(&self) -> u32 {
-        unsafe { read_reg(tim2_base(), CNT) }
+        unsafe { tim2_ops::read_cnt() }
     }
 
     fn set_count(&mut self, val: u32) {
-        unsafe { write_reg(tim2_base(), CNT, val); }
+        unsafe { tim2_ops::write_cnt(val); }
     }
 }
 
-/// TIM14 as one-shot commutation timer (2MHz, 0.5µs/tick).
+/// TIM14 as one-shot commutation timer (2MHz, 0.5us/tick).
 pub struct Tim14Com {
     _private: (),
 }
@@ -98,26 +150,19 @@ impl Default for Tim14Com {
 impl Tim14Com {
     pub fn new() -> Self {
         // Enable TIM14 clock
-        #[allow(unused_variables)] // Used on G071 via PAC, others use raw addresses
+        #[allow(unused_variables)] // Used via PAC on all MCU variants
         let rcc = unsafe { &*RCC::ptr() };
         #[cfg(feature = "stm32g071")]
-        rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN (APB2)
+        rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN
         #[cfg(feature = "stm32f051")]
-        unsafe {
-            let apb1enr = (RCC::ptr() as u32 + 0x1C) as *mut u32;
-            apb1enr.write_volatile(apb1enr.read_volatile() | (1 << 8)); // TIM14EN
-        }
+        rcc.apb1enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 8)) }); // TIM14EN
         #[cfg(feature = "stm32l431")]
-        unsafe {
-            // TIM16EN is bit 17 in APB2ENR (RCC base + 0x60 on L4)
-            let apb2enr = (RCC::ptr() as u32 + 0x60) as *mut u32;
-            apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 17)); // TIM16EN
-        }
+        rcc.apb2enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 17)) }); // TIM16EN
 
         unsafe {
-            write_reg(tim14_base(), PSC, crate::config::TIMER_PSC as u32);
-            write_reg(tim14_base(), ARR, 0xFFFF);
-            write_reg(tim14_base(), EGR, 1);
+            com_tim_ops::write_psc(crate::config::TIMER_PSC as u32);
+            com_tim_ops::write_arr(0xFFFF);
+            com_tim_ops::write_egr(1);
         }
         Self { _private: () }
     }
@@ -126,20 +171,20 @@ impl Tim14Com {
 impl ComTimer for Tim14Com {
     fn set_and_enable(&mut self, timeout: u16) {
         unsafe {
-            modify_reg(tim14_base(), CR1, |v| v & !(1 << 0));
-            write_reg(tim14_base(), CNT, 0);
-            write_reg(tim14_base(), ARR, timeout as u32);
-            write_reg(tim14_base(), SR, 0);
-            modify_reg(tim14_base(), DIER, |v| v | 1);
-            modify_reg(tim14_base(), CR1, |v| v | (1 << 0));
+            com_tim_ops::modify_cr1(|v| v & !(1 << 0));
+            com_tim_ops::write_cnt(0);
+            com_tim_ops::write_arr(timeout as u32);
+            com_tim_ops::write_sr(0);
+            com_tim_ops::modify_dier(|v| v | 1);
+            com_tim_ops::modify_cr1(|v| v | (1 << 0));
         }
     }
 
     fn disable_interrupt(&mut self) {
-        unsafe { modify_reg(tim14_base(), DIER, |v| v & !1); }
+        unsafe { com_tim_ops::modify_dier(|v| v & !1); }
     }
 
     fn enable_interrupt(&mut self) {
-        unsafe { modify_reg(tim14_base(), DIER, |v| v | 1); }
+        unsafe { com_tim_ops::modify_dier(|v| v | 1); }
     }
 }

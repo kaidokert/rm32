@@ -1,12 +1,8 @@
 //! L431 input capture: TIM15 CH1 (PA2/AF14) + DMA1 Channel 5 (request 7).
 
-use crate::pac::{DMA1, GPIOA, TIM15};
+use crate::pac::{DMA1, GPIOA, RCC, TIM15};
 use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
-use crate::regs::modify as modify_reg;
-use crate::periph_addr as addr;
-
-fn rcc_base() -> u32 { addr::rcc() }
 
 // --- DMA1 Channel 5 (L431, flat registers) ---
 pub struct L431Dma;
@@ -29,10 +25,9 @@ pub struct L431Timer { pub prescaler: u8 }
 
 impl TimerOps for L431Timer {
     fn reset(&self) {
-        unsafe {
-            modify_reg(rcc_base() + 0x20, |v| v | (1 << 16));
-            modify_reg(rcc_base() + 0x20, |v| v & !(1 << 16));
-        }
+        let rcc = unsafe { &*RCC::ptr() };
+        rcc.apb2rstr.modify(|_, w| w.tim15rst().set_bit());
+        rcc.apb2rstr.modify(|_, w| w.tim15rst().clear_bit());
     }
     fn configure_capture(&self, _: u8) {
         let tim = unsafe { &*TIM15::ptr() };
@@ -50,7 +45,7 @@ impl TimerOps for L431Timer {
         tim.psc.write(|w| unsafe { w.bits(0) });
         tim.arr.write(|w| unsafe { w.bits(period as u32) });
         tim.egr.write(|w| unsafe { w.bits(1) });
-        unsafe { modify_reg(TIM15::ptr() as u32 + 0x44, |v| v | (1 << 15)); } // BDTR MOE
+        tim.bdtr.modify(|_, w| w.moe().set_bit());
     }
     fn start(&self) {
         let tim = unsafe { &*TIM15::ptr() };
@@ -69,7 +64,7 @@ pub struct L431Pin;
 
 impl InputPinOps for L431Pin {
     fn read(&self) -> bool {
-        unsafe { core::ptr::read_volatile((GPIOA::ptr() as u32 + 0x10) as *const u32) & (1 << 2) != 0 }
+        unsafe { &*GPIOA::ptr() }.idr.read().idr2().bit()
     }
     fn set_pull_up(&self) {
         unsafe { &*GPIOA::ptr() }.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
@@ -85,12 +80,13 @@ impl InputPinOps for L431Pin {
 pub type L431DshotCapture = GenericCapture<L431Dma, L431Timer, L431Pin>;
 
 pub fn init_l431() {
+    let rcc = unsafe { &*RCC::ptr() };
     let dma = unsafe { &*DMA1::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
     unsafe {
-        modify_reg(rcc_base() + 0x60, |v| v | (1 << 16));
-        modify_reg(rcc_base() + 0x48, |v| v | (1 << 0));
-        modify_reg(rcc_base() + 0x4C, |v| v | (1 << 0));
+        rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
+        rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
+        rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
     }
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));

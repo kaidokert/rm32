@@ -1,12 +1,8 @@
 //! F051 input capture: TIM15 CH1 (PA2/AF0) + DMA1 Channel 5.
 
-use crate::pac::{DMA1, GPIOA, TIM15};
+use crate::pac::{DMA1, GPIOA, RCC, TIM15};
 use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
-use crate::regs::modify as modify_reg;
-use crate::periph_addr as addr;
-
-fn rcc_base() -> u32 { addr::rcc() }
 
 // --- DMA1 Channel 5 (F051, fixed assignment) ---
 pub struct F051Dma;
@@ -40,10 +36,9 @@ pub struct F051Timer { pub prescaler: u8 }
 
 impl TimerOps for F051Timer {
     fn reset(&self) {
-        unsafe {
-            modify_reg(rcc_base() + 0x0C, |v| v | (1 << 16));
-            modify_reg(rcc_base() + 0x0C, |v| v & !(1 << 16));
-        }
+        let rcc = unsafe { &*RCC::ptr() };
+        rcc.apb2rstr.modify(|_, w| w.tim15rst().set_bit());
+        rcc.apb2rstr.modify(|_, w| w.tim15rst().clear_bit());
     }
     fn configure_capture(&self, _: u8) {
         let tim = unsafe { &*TIM15::ptr() };
@@ -97,13 +92,12 @@ impl InputPinOps for F051Pin {
 pub type F051DshotCapture = GenericCapture<F051Dma, F051Timer, F051Pin>;
 
 pub fn init_f051() {
+    let rcc = unsafe { &*RCC::ptr() };
+    let gpioa = unsafe { &*GPIOA::ptr() };
     unsafe {
-        let apb2enr = (rcc_base() + 0x18) as *mut u32;
-        apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 16));
-        let ahbenr = (rcc_base() + 0x14) as *mut u32;
-        ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0) | (1 << 17));
+        rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
+        rcc.ahbenr.modify(|_, w| w.dmaen().set_bit().iopaen().set_bit());
 
-        let gpioa = &*GPIOA::ptr();
         gpioa.moder.modify(|_, w| w.moder2().alternate());
         gpioa.afrl.modify(|_, w| w.afrl2().bits(0));
     }

@@ -1,29 +1,24 @@
 //! F051 ADC: CH2 current, CH6 voltage, CH16 temp. DMA1_CH1 circular.
 
-use crate::pac::{ADC, DMA1, GPIOA};
-use crate::adc_hal::{AdcOps, TempCalibration};
-use crate::adc_generic::GenericAdc;
-use crate::dma_buf::DmaBuf;
+use crate::pac::{ADC, DMA1, GPIOA, RCC};
+use crate::adc_hal::AdcOps;
 use crate::regs::{InitError, wait_for};
-use crate::periph_addr as addr;
 
-static ADC_DMA_BUF: DmaBuf<u16, 3> = DmaBuf::new();
-
-const TEMP_CAL: TempCalibration = TempCalibration {
-    cal1_addr: 0x1FFF_F7B8, cal2_addr: 0x1FFF_F7C2,
+crate::define_adc_boilerplate!(
+    ops: F051AdcOps,
+    type_name: F051Adc,
+    cal1: 0x1FFF_F7B8, cal2: 0x1FFF_F7C2,
     cal1_temp: 30, cal2_temp: 110,
-};
+);
 
 pub struct F051AdcOps;
 
 impl AdcOps for F051AdcOps {
     fn init(&self) -> Result<(), InitError> {
-        let rcc_base = addr::rcc();
+        let rcc = unsafe { &*RCC::ptr() };
         unsafe {
-            let apb2enr = (rcc_base + 0x18) as *mut u32;
-            apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 9));
-            let ahbenr = (rcc_base + 0x14) as *mut u32;
-            ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0));
+            rcc.apb2enr.modify(|_, w| w.adcen().set_bit());
+            rcc.ahbenr.modify(|_, w| w.dmaen().set_bit());
         }
 
         let gpioa = unsafe { &*GPIOA::ptr() };
@@ -60,14 +55,4 @@ impl AdcOps for F051AdcOps {
         let adc = unsafe { &*ADC::ptr() };
         adc.cr.modify(|_, w| w.adstart().start_conversion());
     }
-}
-
-pub type F051Adc = GenericAdc<F051AdcOps>;
-
-pub fn new_adc() -> F051Adc {
-    GenericAdc::new(F051AdcOps, &ADC_DMA_BUF, TEMP_CAL)
-}
-
-pub fn post_init() -> F051Adc {
-    GenericAdc::post_init(F051AdcOps, &ADC_DMA_BUF, TEMP_CAL)
 }

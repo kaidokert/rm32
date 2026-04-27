@@ -73,19 +73,20 @@ pub fn handle_tim6() {
         tim1_arr: state.tim1_arr,
         voltage_based_ramp: state.voltage_based_ramp,
     };
-    rm32::control::isr_logic::ten_khz_tick(
-        &mut state.commutation,
-        &mut state.bemf,
-        &mut state.duty,
-        &state.config,
-        &mut counters,
+    let mut ctx = rm32::control::context::MotorContext {
+        commutation: &mut state.commutation,
+        bemf: &mut state.bemf,
+        duty: &mut state.duty,
+        config: &state.config,
+        counters: &mut counters,
         shared,
-        &mut state.hal.pwm,
-        &mut state.hal.comp,
-        &mut state.hal.phase,
-        &mut state.hal.interval,
-        &mut state.hal.com_timer,
-    );
+        pwm: &mut state.hal.pwm,
+        comp: &mut state.hal.comp,
+        phase: &mut state.hal.phase,
+        interval: &mut state.hal.interval,
+        com_timer: &mut state.hal.com_timer,
+    };
+    rm32::control::isr_logic::ten_khz_tick(&mut ctx);
     state.ten_khz_counter = counters.ten_khz_counter;
     state.one_khz_loop_counter = counters.one_khz_loop_counter;
     state.armed_timeout_count = counters.armed_timeout_count;

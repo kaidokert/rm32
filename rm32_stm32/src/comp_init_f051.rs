@@ -5,13 +5,11 @@
 //!   INM: switched per step — PA5, PA4, PA0
 //!   EXTI line 21
 
-use crate::periph_addr as addr;
-use crate::pac::{COMP, EXTI, GPIOA};
-
-fn rcc_base() -> u32 { addr::rcc() }
+use crate::pac::{COMP, EXTI, GPIOA, RCC};
 
 /// Initialize COMP1 for BEMF sensing.
 pub fn init_comp1() {
+    let rcc = unsafe { &*RCC::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
     let comp = unsafe { &*COMP::ptr() };
     let exti = unsafe { &*EXTI::ptr() };
@@ -26,8 +24,7 @@ pub fn init_comp1() {
         });
 
         // Enable SYSCFG/COMP clock (APB2ENR bit 0)
-        let apb2enr = (rcc_base() + 0x18) as *mut u32;
-        apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 0));
+        rcc.apb2enr.modify(|_, w| w.syscfgen().set_bit());
 
         // Configure COMP1: PA5 as INM (INMSEL=101), enabled, high speed
         comp.csr.modify(|r, w| {

@@ -36,10 +36,8 @@ fn main() -> ! {
     let p = rm32_stm32::init::init();
 
     // --- WS2812 LED: boot indicator (dim red) ---
-    let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(
-        BOARD.led_pin.unwrap_or(8), // PB8 default
-        config::CPU_FREQUENCY_MHZ,
-    );
+    let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
+    let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(led_pin, config::CPU_FREQUENCY_MHZ);
     if BOARD.has_led {
         use rm32::ws2812::{send_status, LedStatus};
         cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Boot));
@@ -402,27 +400,25 @@ fn main() -> ! {
         // Dynamic interrupt priority swap (L431 only — M4F has preemption)
         // Low eRPM: DShot DMA > commutation (don't drop input frames)
         // High eRPM: commutation > DShot (don't miss commutation steps)
+        // Dynamic IRQ priority: swap DShot DMA vs commutation priority based on RPM.
+        // Low eRPM: DShot DMA > commutation (don't drop input frames)
+        // High eRPM: commutation > DShot (don't miss commutation steps)
         #[cfg(feature = "stm32l431")]
         {
-            // NVIC_IPR base = 0xE000_E400, each IRQ has 1 byte
-            // STM32L4 uses top 4 bits of priority byte (0x00 = highest, 0x10 = next)
-            const NVIC_IPR: u32 = 0xE000_E400;
-            const DMA1_CH5_IRQ: u32 = 15;     // IRQ number for DMA1_CH5
-            const TIM1_UP_TIM16_IRQ: u32 = 25; // IRQ number for TIM1_UP_TIM16
-            const COMP_IRQ: u32 = 55;          // IRQ number for COMP
-
+            use stm32l4xx_hal::pac::Interrupt;
             const DSHOT_PRIORITY_THRESHOLD: u32 = 60;
-            unsafe {
-                if shared.dshot_telemetry() && shared.commutation_interval() > DSHOT_PRIORITY_THRESHOLD {
-                    // DShot DMA gets highest priority
-                    ((NVIC_IPR + DMA1_CH5_IRQ) as *mut u8).write_volatile(0x00);
-                    ((NVIC_IPR + TIM1_UP_TIM16_IRQ) as *mut u8).write_volatile(0x10);
-                    ((NVIC_IPR + COMP_IRQ) as *mut u8).write_volatile(0x10);
-                } else {
-                    // Commutation + comparator get highest priority
-                    ((NVIC_IPR + DMA1_CH5_IRQ) as *mut u8).write_volatile(0x10);
-                    ((NVIC_IPR + TIM1_UP_TIM16_IRQ) as *mut u8).write_volatile(0x00);
-                    ((NVIC_IPR + COMP_IRQ) as *mut u8).write_volatile(0x00);
+            let nvic = unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
+            if shared.dshot_telemetry() && shared.commutation_interval() > DSHOT_PRIORITY_THRESHOLD {
+                unsafe {
+                    nvic.set_priority(Interrupt::DMA1_CH5, 0);
+                    nvic.set_priority(Interrupt::TIM1_UP_TIM16, 1);
+                    nvic.set_priority(Interrupt::COMP, 1);
+                }
+            } else {
+                unsafe {
+                    nvic.set_priority(Interrupt::DMA1_CH5, 1);
+                    nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0);
+                    nvic.set_priority(Interrupt::COMP, 0);
                 }
             }
         }

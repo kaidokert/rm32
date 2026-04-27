@@ -4,17 +4,32 @@
 
 use rm32::hal::{PwmOutput, System};
 
-/// Start IWDG — shared across all MCUs (same register layout at 0x4000_3000).
-#[allow(dead_code)] // Used by F051/L431 but not G071 (which uses HAL)
+/// Start IWDG via PAC — works across all MCUs.
+#[allow(dead_code)]
 fn iwdg_start(prescaler: u8, reload: u16) {
-    const IWDG: u32 = 0x4000_3000;
+    // PAC accessor bridge: G071/G431 use methods, F051/L431 use fields.
+    #[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
+    macro_rules! iwdg { () => { unsafe { &*crate::pac::IWDG::PTR } } }
+    #[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
     unsafe {
-        (IWDG as *mut u32).write_volatile(0x5555);
-        ((IWDG + 4) as *mut u32).write_volatile(prescaler as u32);
-        ((IWDG + 8) as *mut u32).write_volatile(reload as u32);
-        while ((IWDG + 0x0C) as *const u32).read_volatile() & 0x03 != 0 {}
-        (IWDG as *mut u32).write_volatile(0xCCCC);
-        (IWDG as *mut u32).write_volatile(0xAAAA);
+        iwdg!().kr().write(|w| w.bits(0x5555)); // unlock
+        iwdg!().pr().write(|w| w.pr().bits(prescaler));
+        iwdg!().rlr().write(|w| w.rl().bits(reload as u16));
+        while iwdg!().sr().read().bits() & 0x03 != 0 {}
+        iwdg!().kr().write(|w| w.bits(0xCCCC)); // start
+        iwdg!().kr().write(|w| w.bits(0xAAAA)); // reload
+    }
+    #[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
+    {
+        let iwdg = unsafe { &*crate::pac::IWDG::ptr() };
+        unsafe {
+            iwdg.kr.write(|w| w.bits(0x5555));
+            iwdg.pr.write(|w| w.bits(prescaler as u32));
+            iwdg.rlr.write(|w| w.bits(reload as u32));
+            while iwdg.sr.read().bits() & 0x03 != 0 {}
+            iwdg.kr.write(|w| w.bits(0xCCCC));
+            iwdg.kr.write(|w| w.bits(0xAAAA));
+        }
     }
 }
 
@@ -110,28 +125,43 @@ pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
 // STM32F051
 // ============================================================
 #[cfg(feature = "stm32f051")]
-const TIM1_BASE: u32 = 0x4001_2C00;
-
-#[cfg(feature = "stm32f051")]
 pub struct F051Pwm { _private: () }
 
 #[cfg(feature = "stm32f051")]
 impl PwmOutput for F051Pwm {
     fn set_duty_all(&mut self, d: u16) {
-        unsafe {
-            ((TIM1_BASE + 0x34) as *mut u32).write_volatile(d as u32);
-            ((TIM1_BASE + 0x38) as *mut u32).write_volatile(d as u32);
-            ((TIM1_BASE + 0x3C) as *mut u32).write_volatile(d as u32);
-        }
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.ccr1.write(|w| unsafe { w.bits(d as u32) });
+        tim1.ccr2.write(|w| unsafe { w.bits(d as u32) });
+        tim1.ccr3.write(|w| unsafe { w.bits(d as u32) });
     }
-    fn set_auto_reload(&mut self, a: u16) { unsafe { ((TIM1_BASE+0x2C) as *mut u32).write_volatile(a as u32); } }
-    fn set_prescaler(&mut self, p: u16) { unsafe { ((TIM1_BASE+0x28) as *mut u32).write_volatile(p as u32); } }
-    fn set_compare1(&mut self, v: u16) { unsafe { ((TIM1_BASE+0x34) as *mut u32).write_volatile(v as u32); } }
-    fn set_compare2(&mut self, v: u16) { unsafe { ((TIM1_BASE+0x38) as *mut u32).write_volatile(v as u32); } }
-    fn set_compare3(&mut self, v: u16) { unsafe { ((TIM1_BASE+0x3C) as *mut u32).write_volatile(v as u32); } }
-    fn generate_update_event(&mut self) { unsafe { ((TIM1_BASE+0x14) as *mut u32).write_volatile(1); } }
+    fn set_auto_reload(&mut self, a: u16) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.arr.write(|w| unsafe { w.bits(a as u32) });
+    }
+    fn set_prescaler(&mut self, p: u16) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.psc.write(|w| unsafe { w.bits(p as u32) });
+    }
+    fn set_compare1(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.ccr1.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn set_compare2(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.ccr2.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn set_compare3(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.ccr3.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn generate_update_event(&mut self) {
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.egr.write(|w| w.ug().set_bit());
+    }
     fn set_dead_time_override(&mut self, dtg: u16) {
-        unsafe { crate::regs::modify(TIM1_BASE + 0x44, |v| v | dtg as u32); }
+        let tim1 = unsafe { &*stm32f0xx_hal::pac::TIM1::ptr() };
+        tim1.bdtr.modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
     }
 }
 
@@ -144,7 +174,13 @@ impl System for F051System {
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
-    fn reload_watchdog(&mut self) { unsafe { crate::regs::write(0x4000_3000, 0xAAAA); } }
+    fn reload_watchdog(&mut self) {
+        let iwdg = unsafe { &*crate::pac::IWDG::PTR };
+        #[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
+        unsafe { iwdg.kr().write(|w| w.bits(0xAAAA)); }
+        #[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
+        unsafe { iwdg.kr.write(|w| w.bits(0xAAAA)); }
+    }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 48); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
 }
@@ -160,36 +196,34 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
     // Clock: 48MHz PLL from HSI
     let _rcc = dp.RCC.configure().sysclk(48.mhz()).freeze(&mut dp.FLASH);
 
-    let rcc_base = 0x4002_1000u32;
+    let rcc_pac = unsafe { &*pac::RCC::ptr() };
     unsafe {
         // Enable GPIO A/B clocks
-        let ahbenr = (rcc_base + 0x14) as *mut u32;
-        ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 17) | (1 << 18));
+        rcc_pac.ahbenr.modify(|_, w| w.iopaen().set_bit().iopben().set_bit());
         // Enable TIM1 (APB2ENR bit 11)
-        let apb2enr = (rcc_base + 0x18) as *mut u32;
-        apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
+        rcc_pac.apb2enr.modify(|_, w| w.tim1en().set_bit());
 
         // PA8/9/10 as AF2 (TIM1_CH1/2/3)
-        let gpioa_moder = crate::periph_addr::gpioa() as *mut u32;
-        let gpioa_afrh = (crate::periph_addr::gpioa() + 0x24) as *mut u32;
-        let m = gpioa_moder.read_volatile();
-        gpioa_moder.write_volatile(
-            (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
-        );
-        let a = gpioa_afrh.read_volatile();
-        gpioa_afrh.write_volatile((a & !(0xFFF)) | (2 | 2<<4 | 2<<8));
+        let gpioa = &*pac::GPIOA::ptr();
+        gpioa.moder.modify(|r, w| {
+            w.bits((r.bits() & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20))
+        });
+        gpioa.afrh.modify(|r, w| {
+            w.bits((r.bits() & !(0xFFF)) | (2 | 2<<4 | 2<<8))
+        });
     }
 
     // TIM1 PWM: 48MHz/2000 = 24kHz
     let dead_time = rm32::board::SISKIN_F051.dead_time;
     unsafe {
-        ((TIM1_BASE+0x28) as *mut u32).write_volatile(0);    // PSC
-        ((TIM1_BASE+0x2C) as *mut u32).write_volatile(1999); // ARR
-        ((TIM1_BASE+0x18) as *mut u32).write_volatile(0x6868); // CCMR1: PWM1
-        ((TIM1_BASE+0x1C) as *mut u32).write_volatile(0x0068); // CCMR2: PWM1
-        ((TIM1_BASE+0x20) as *mut u32).write_volatile(0x555);  // CCER: all channels + complementary
-        ((TIM1_BASE+0x44) as *mut u32).write_volatile(dead_time as u32 | (1<<15)); // BDTR: DTG+MOE
-        (TIM1_BASE as *mut u32).write_volatile(1);    // CR1: CEN
+        let tim1 = &*pac::TIM1::ptr();
+        tim1.psc.write(|w| w.bits(0));
+        tim1.arr.write(|w| w.bits(1999));
+        tim1.ccmr1_output().write(|w| w.bits(0x6868));   // OC1/2 PWM mode 1
+        tim1.ccmr2_output().write(|w| w.bits(0x0068));   // OC3 PWM mode 1
+        tim1.ccer.write(|w| w.bits(0x555));               // CC1-3 + CC1N-3N enable
+        tim1.bdtr.write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
+        tim1.cr1.write(|w| w.cen().set_bit());
     }
     let pwm = F051Pwm { _private: () };
     let phase = G0APhaseDriver::new(false); // same pins for F0_A
@@ -220,15 +254,14 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
 
     // TIM6: 48MHz/2400 = 20kHz
     unsafe {
-        let apb1enr = (rcc_base + 0x1C) as *mut u32;
-        apb1enr.write_volatile(apb1enr.read_volatile() | (1 << 4)); // TIM6EN
-        let tim6 = 0x4000_1000u32;
-        ((tim6+0x28) as *mut u32).write_volatile(0);    // PSC
-        ((tim6+0x2C) as *mut u32).write_volatile(2399); // ARR
-        ((tim6+0x14) as *mut u32).write_volatile(1);    // EGR.UG
-        ((tim6+0x10) as *mut u32).write_volatile(0);    // SR clear
-        ((tim6+0x0C) as *mut u32).write_volatile(1);    // DIER.UIE
-        (tim6 as *mut u32).write_volatile(1);    // CR1.CEN
+        rcc_pac.apb1enr.modify(|_, w| w.tim6en().set_bit());
+        let tim6 = &*pac::TIM6::ptr();
+        tim6.psc.write(|w| w.bits(0));
+        tim6.arr.write(|w| w.bits(2399));
+        tim6.egr.write(|w| w.ug().set_bit());
+        tim6.sr.write(|w| w.uif().clear_bit());
+        tim6.dier.write(|w| w.uie().set_bit());
+        tim6.cr1.write(|w| w.cen().set_bit());
     }
 
     // NVIC
@@ -243,8 +276,8 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
 
     // Enable EXTI line 15 (software-triggered by DMA TC)
     unsafe {
-        let imr = 0x4001_0400 as *mut u32;
-        imr.write_volatile(imr.read_volatile() | (1 << 15));
+        let exti = &*pac::EXTI::ptr();
+        exti.imr.modify(|r, w| w.bits(r.bits() | (1 << 15)));
     }
 
     let sys = F051System { _private: () };
@@ -256,28 +289,43 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
 // STM32L431
 // ============================================================
 #[cfg(feature = "stm32l431")]
-const TIM1_BASE_L4: u32 = 0x4001_2C00;
-
-#[cfg(feature = "stm32l431")]
 pub struct L431Pwm { _private: () }
 
 #[cfg(feature = "stm32l431")]
 impl PwmOutput for L431Pwm {
     fn set_duty_all(&mut self, d: u16) {
-        unsafe {
-            ((TIM1_BASE_L4 + 0x34) as *mut u32).write_volatile(d as u32);
-            ((TIM1_BASE_L4 + 0x38) as *mut u32).write_volatile(d as u32);
-            ((TIM1_BASE_L4 + 0x3C) as *mut u32).write_volatile(d as u32);
-        }
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.ccr1.write(|w| unsafe { w.bits(d as u32) });
+        tim1.ccr2.write(|w| unsafe { w.bits(d as u32) });
+        tim1.ccr3.write(|w| unsafe { w.bits(d as u32) });
     }
-    fn set_auto_reload(&mut self, a: u16) { unsafe { ((TIM1_BASE_L4+0x2C) as *mut u32).write_volatile(a as u32); } }
-    fn set_prescaler(&mut self, p: u16) { unsafe { ((TIM1_BASE_L4+0x28) as *mut u32).write_volatile(p as u32); } }
-    fn set_compare1(&mut self, v: u16) { unsafe { ((TIM1_BASE_L4+0x34) as *mut u32).write_volatile(v as u32); } }
-    fn set_compare2(&mut self, v: u16) { unsafe { ((TIM1_BASE_L4+0x38) as *mut u32).write_volatile(v as u32); } }
-    fn set_compare3(&mut self, v: u16) { unsafe { ((TIM1_BASE_L4+0x3C) as *mut u32).write_volatile(v as u32); } }
-    fn generate_update_event(&mut self) { unsafe { ((TIM1_BASE_L4+0x14) as *mut u32).write_volatile(1); } }
+    fn set_auto_reload(&mut self, a: u16) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.arr.write(|w| unsafe { w.bits(a as u32) });
+    }
+    fn set_prescaler(&mut self, p: u16) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.psc.write(|w| unsafe { w.bits(p as u32) });
+    }
+    fn set_compare1(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.ccr1.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn set_compare2(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.ccr2.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn set_compare3(&mut self, v: u16) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.ccr3.write(|w| unsafe { w.bits(v as u32) });
+    }
+    fn generate_update_event(&mut self) {
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.egr.write(|w| w.ug().set_bit());
+    }
     fn set_dead_time_override(&mut self, dtg: u16) {
-        unsafe { crate::regs::modify(TIM1_BASE_L4 + 0x44, |v| v | dtg as u32); }
+        let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
+        tim1.bdtr.modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
     }
 }
 
@@ -290,7 +338,13 @@ impl System for L431System {
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
-    fn reload_watchdog(&mut self) { unsafe { crate::regs::write(0x4000_3000, 0xAAAA); } }
+    fn reload_watchdog(&mut self) {
+        let iwdg = unsafe { &*crate::pac::IWDG::PTR };
+        #[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
+        unsafe { iwdg.kr().write(|w| w.bits(0xAAAA)); }
+        #[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
+        unsafe { iwdg.kr.write(|w| w.bits(0xAAAA)); }
+    }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 80); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
 }
@@ -310,36 +364,34 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
     let clocks = rcc.cfgr.sysclk(80_000_000u32.Hz()).freeze(&mut flash.acr, &mut pwr);
     let _ = clocks;
 
-    let rcc_base = 0x4002_1000u32;
+    let rcc_pac = unsafe { &*pac::RCC::ptr() };
     unsafe {
         // Enable GPIOA, GPIOB (AHB2ENR bits 0, 1)
-        let ahb2enr = (rcc_base + 0x4C) as *mut u32;
-        ahb2enr.write_volatile(ahb2enr.read_volatile() | (1 << 0) | (1 << 1));
+        rcc_pac.ahb2enr.modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
         // Enable TIM1 (APB2ENR bit 11)
-        let apb2enr = (rcc_base + 0x60) as *mut u32;
-        apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
+        rcc_pac.apb2enr.modify(|_, w| w.tim1en().set_bit());
 
         // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2)
-        let gpioa_moder = crate::periph_addr::gpioa() as *mut u32;
-        let gpioa_afrh = (crate::periph_addr::gpioa() + 0x24) as *mut u32;
-        let m = gpioa_moder.read_volatile();
-        gpioa_moder.write_volatile(
-            (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
-        );
-        let a = gpioa_afrh.read_volatile();
-        gpioa_afrh.write_volatile((a & !(0xFFF)) | (1 | 1<<4 | 1<<8)); // AF1
+        let gpioa = &*pac::GPIOA::ptr();
+        gpioa.moder.modify(|r, w| {
+            w.bits((r.bits() & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20))
+        });
+        gpioa.afrh.modify(|r, w| {
+            w.bits((r.bits() & !(0xFFF)) | (1 | 1<<4 | 1<<8))  // AF1
+        });
     }
 
     // TIM1 PWM: 80MHz / (ARR+1) = 24kHz → ARR = 3332
     let dead_time = rm32::board::NEUTRON_L431.dead_time;
     unsafe {
-        ((TIM1_BASE_L4+0x28) as *mut u32).write_volatile(0);
-        ((TIM1_BASE_L4+0x2C) as *mut u32).write_volatile(crate::config::TIM1_AUTORELOAD as u32);
-        ((TIM1_BASE_L4+0x18) as *mut u32).write_volatile(0x6868);
-        ((TIM1_BASE_L4+0x1C) as *mut u32).write_volatile(0x0068);
-        ((TIM1_BASE_L4+0x20) as *mut u32).write_volatile(0x555);
-        ((TIM1_BASE_L4+0x44) as *mut u32).write_volatile(dead_time as u32 | (1<<15));
-        ((TIM1_BASE_L4+0x00) as *mut u32).write_volatile(1);
+        let tim1 = &*pac::TIM1::ptr();
+        tim1.psc.write(|w| w.bits(0));
+        tim1.arr.write(|w| w.bits(crate::config::TIM1_AUTORELOAD as u32));
+        tim1.ccmr1_output().write(|w| w.bits(0x6868));   // OC1/2 PWM mode 1
+        tim1.ccmr2_output().write(|w| w.bits(0x0068));   // OC3 PWM mode 1
+        tim1.ccer.write(|w| w.bits(0x555));               // CC1-3 + CC1N-3N enable
+        tim1.bdtr.write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
+        tim1.cr1.write(|w| w.cen().set_bit());
     }
     let pwm = L431Pwm { _private: () };
     let phase = G0APhaseDriver::new(false); // same pins for L4_N
@@ -369,15 +421,14 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
     // TIM6: 80MHz / 4000 = 20kHz
     unsafe {
         // Enable TIM6 (APB1ENR1 bit 4)
-        let apb1enr1 = (rcc_base + 0x58) as *mut u32;
-        apb1enr1.write_volatile(apb1enr1.read_volatile() | (1 << 4));
-        let tim6 = 0x4000_1000u32;
-        ((tim6+0x28) as *mut u32).write_volatile(0);
-        ((tim6+0x2C) as *mut u32).write_volatile(3999); // 80MHz/4000=20kHz
-        ((tim6+0x14) as *mut u32).write_volatile(1);
-        ((tim6+0x10) as *mut u32).write_volatile(0);
-        ((tim6+0x0C) as *mut u32).write_volatile(1);
-        ((tim6+0x00) as *mut u32).write_volatile(1);
+        rcc_pac.apb1enr1.modify(|_, w| w.tim6en().set_bit());
+        let tim6 = &*pac::TIM6::ptr();
+        tim6.psc.write(|w| w.bits(0));
+        tim6.arr.write(|w| w.bits(3999));
+        tim6.egr.write(|w| w.ug().set_bit());
+        tim6.sr.write(|w| w.uif().clear_bit());
+        tim6.dier.write(|w| w.uie().set_bit());
+        tim6.cr1.write(|w| w.cen().set_bit());
     }
 
     // NVIC
@@ -392,8 +443,8 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
 
     // Enable EXTI line 15 (software-triggered by DMA TC)
     unsafe {
-        let imr = 0x4001_0400 as *mut u32; // EXTI IMR1
-        imr.write_volatile(imr.read_volatile() | (1 << 15));
+        let exti = &*pac::EXTI::ptr();
+        exti.imr1.modify(|r, w| w.bits(r.bits() | (1 << 15)));
     }
 
     let sys = L431System { _private: () };
@@ -407,40 +458,43 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
 pub struct G431Pwm { _private: () }
 
 #[cfg(feature = "stm32g431")]
-const TIM1_BASE_G4: u32 = 0x4001_2C00;
-
-#[cfg(feature = "stm32g431")]
 impl PwmOutput for G431Pwm {
     fn set_prescaler(&mut self, psc: u16) {
-        unsafe { ((TIM1_BASE_G4+0x28) as *mut u32).write_volatile(psc as u32); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.psc().write(|w| w.bits(psc as u32)); }
     }
     fn set_auto_reload(&mut self, arr: u16) {
-        unsafe { ((TIM1_BASE_G4+0x2C) as *mut u32).write_volatile(arr as u32); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.arr().write(|w| w.bits(arr as u32)); }
     }
     fn set_duty_all(&mut self, duty: u16) {
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
         unsafe {
-            ((TIM1_BASE_G4+0x34) as *mut u32).write_volatile(duty as u32);
-            ((TIM1_BASE_G4+0x38) as *mut u32).write_volatile(duty as u32);
-            ((TIM1_BASE_G4+0x3C) as *mut u32).write_volatile(duty as u32);
+            tim1.ccr1().write(|w| w.bits(duty as u32));
+            tim1.ccr2().write(|w| w.bits(duty as u32));
+            tim1.ccr3().write(|w| w.bits(duty as u32));
         }
     }
     fn set_compare1(&mut self, val: u16) {
-        unsafe { ((TIM1_BASE_G4+0x34) as *mut u32).write_volatile(val as u32); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.ccr1().write(|w| w.bits(val as u32)); }
     }
     fn set_compare2(&mut self, val: u16) {
-        unsafe { ((TIM1_BASE_G4+0x38) as *mut u32).write_volatile(val as u32); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.ccr2().write(|w| w.bits(val as u32)); }
     }
     fn set_compare3(&mut self, val: u16) {
-        unsafe { ((TIM1_BASE_G4+0x3C) as *mut u32).write_volatile(val as u32); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.ccr3().write(|w| w.bits(val as u32)); }
     }
     fn generate_update_event(&mut self) {
-        unsafe { ((TIM1_BASE_G4+0x14) as *mut u32).write_volatile(1); }
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        unsafe { tim1.egr().write(|w| w.ug().set_bit()); }
     }
     fn set_dead_time_override(&mut self, dead_time: u16) {
+        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
         unsafe {
-            let bdtr = (TIM1_BASE_G4+0x44) as *mut u32;
-            let v = bdtr.read_volatile();
-            bdtr.write_volatile((v & !0xFF) | (dead_time as u32 & 0xFF));
+            tim1.bdtr().modify(|r, w| w.bits((r.bits() & !0xFF) | (dead_time as u32 & 0xFF)));
         }
     }
 }
@@ -454,7 +508,13 @@ impl System for G431System {
     fn enable_irq(&mut self) { unsafe { cortex_m::interrupt::enable() }; }
     fn disable_irq(&mut self) { cortex_m::interrupt::disable(); }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) { iwdg_start(prescaler, reload); }
-    fn reload_watchdog(&mut self) { unsafe { crate::regs::write(0x4000_3000, 0xAAAA); } }
+    fn reload_watchdog(&mut self) {
+        let iwdg = unsafe { &*crate::pac::IWDG::PTR };
+        #[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
+        unsafe { iwdg.kr().write(|w| w.bits(0xAAAA)); }
+        #[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
+        unsafe { iwdg.kr.write(|w| w.bits(0xAAAA)); }
+    }
     fn delay_micros(&mut self, us: u32) { cortex_m::asm::delay(us * 170); }
     fn delay_millis(&mut self, ms: u32) { for _ in 0..ms { self.delay_micros(1000); } }
 }

@@ -496,7 +496,7 @@ impl MotorState {
                 let adj = self
                     .pid
                     .current
-                    .calculate(self.measurements.actual_current as i32, target)
+                    .calculate(self.measurements.actual_current.0 as i32, target)
                     / 10000;
                 self.pid.current_limit_adjust -= adj as i16;
                 self.pid.current_limit_adjust = self
@@ -605,7 +605,7 @@ impl MotorState {
         // Consumed current accumulation (1s interval)
         if self.ten_khz_counter > 20000 {
             // LOOP_FREQUENCY_HZ
-            self.measurements.consumed_current += self.measurements.actual_current as i32;
+            self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
             self.ten_khz_counter = 0;
         }
 
@@ -685,7 +685,7 @@ impl MotorState {
             } else {
                 self.config.absolute_voltage_cutoff as u16
             };
-            if self.measurements.battery_voltage < threshold && threshold > 0 {
+            if self.measurements.battery_voltage.0 < threshold && threshold > 0 {
                 self.protection.low_voltage_count += 1;
             } else if !self.protection.low_voltage_cutoff {
                 self.protection.low_voltage_count = 0;
@@ -716,9 +716,9 @@ impl MotorState {
         }
 
         // Temperature limiting
-        if self.measurements.degrees_celsius > self.config.temperature_limit as i16 {
+        if self.measurements.degrees_celsius.0 > self.config.temperature_limit as i16 {
             self.duty.maximum = map(
-                self.measurements.degrees_celsius as i32,
+                self.measurements.degrees_celsius.0 as i32,
                 self.config.temperature_limit as i32 - 10,
                 self.config.temperature_limit as i32 + 10,
                 1000,

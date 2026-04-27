@@ -5,14 +5,11 @@
 //!   INM: switched per step — PB7 (IO2), PA5 (IO5), PA4 (IO4)
 //!   EXTI line 22
 
-use crate::periph_addr as addr;
-use crate::pac::{COMP, EXTI, GPIOA, GPIOB};
-use crate::regs::modify as modify_reg;
-
-fn rcc_base() -> u32 { addr::rcc() }
+use crate::pac::{COMP, EXTI, GPIOA, GPIOB, RCC};
 
 /// Initialize COMP2 for BEMF sensing on L431.
 pub fn init_comp2() {
+    let rcc = unsafe { &*RCC::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
     let gpiob = unsafe { &*GPIOB::ptr() };
     let comp = unsafe { &*COMP::ptr() };
@@ -20,7 +17,7 @@ pub fn init_comp2() {
 
     unsafe {
         // Enable GPIOA, GPIOB clocks (AHB2ENR bits 0, 1)
-        modify_reg(rcc_base() + 0x4C, |v| v | (1 << 0) | (1 << 1));
+        rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
 
         // PA4, PA5 as analog (INM inputs)
         gpioa.moder.modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));

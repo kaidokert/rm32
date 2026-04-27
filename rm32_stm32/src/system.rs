@@ -30,15 +30,14 @@ impl System for SystemControl {
     }
 
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) {
-        // IWDG registers are the same address on all STM32
-        const IWDG: u32 = 0x4000_3000;
+        let iwdg = unsafe { &*stm32g0xx_hal::stm32::IWDG::PTR };
         unsafe {
-            (IWDG as *mut u32).write_volatile(0x5555); // unlock
-            ((IWDG + 4) as *mut u32).write_volatile(prescaler as u32);
-            ((IWDG + 8) as *mut u32).write_volatile(reload as u32);
-            while ((IWDG + 0x0C) as *const u32).read_volatile() & 0x03 != 0 {}
-            (IWDG as *mut u32).write_volatile(0xCCCC); // start
-            (IWDG as *mut u32).write_volatile(0xAAAA); // reload
+            iwdg.kr().write(|w| w.bits(0x5555));  // unlock
+            iwdg.pr().write(|w| w.pr().bits(prescaler));
+            iwdg.rlr().write(|w| w.rl().bits(reload as u16));
+            while iwdg.sr().read().bits() & 0x03 != 0 {}
+            iwdg.kr().write(|w| w.bits(0xCCCC));  // start
+            iwdg.kr().write(|w| w.bits(0xAAAA));  // reload
         }
     }
 

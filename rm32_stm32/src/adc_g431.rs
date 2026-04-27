@@ -3,20 +3,21 @@
 //! Single mode (PROTONDRIVE): ADC1 → temp, voltage, current via DMA1_CH2.
 //! Dual mode (SEQURE): ADC1 → temp, NTC via DMA1_CH2; ADC2 → voltage, current via DMA1_CH4.
 
-use crate::adc_hal::{AdcOps, TempCalibration};
-use crate::adc_generic::GenericAdc;
+use crate::adc_hal::AdcOps;
 use crate::dma_buf::DmaBuf;
 use crate::regs::{InitError, wait_for};
 use stm32g4::stm32g431 as pac;
 
-static ADC_DMA_BUF: DmaBuf<u16, 3> = DmaBuf::new();
+crate::define_adc_boilerplate!(
+    ops: G431AdcOps,
+    type_name: G431Adc,
+    cal1: 0x1FFF_75A8, cal2: 0x1FFF_75CA,
+    cal1_temp: 30, cal2_temp: 110,
+);
+
+// Dual ADC mode buffers (SEQURE_G431)
 static ADC1_DMA_BUF: DmaBuf<u16, 2> = DmaBuf::new();
 static ADC2_DMA_BUF: DmaBuf<u16, 2> = DmaBuf::new();
-
-const TEMP_CAL: TempCalibration = TempCalibration {
-    cal1_addr: 0x1FFF_75A8, cal2_addr: 0x1FFF_75CA,
-    cal1_temp: 30, cal2_temp: 110,
-};
 
 pub struct G431AdcOps;
 
@@ -86,15 +87,6 @@ impl AdcOps for G431AdcOps {
     }
 }
 
-pub type G431Adc = GenericAdc<G431AdcOps>;
-
-pub fn new_adc() -> G431Adc {
-    GenericAdc::new(G431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
-}
-
-pub fn post_init() -> G431Adc {
-    GenericAdc::post_init(G431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
-}
 
 // ============================================================
 // Dual ADC mode (SEQURE_G431)

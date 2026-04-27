@@ -142,7 +142,7 @@ impl<LED: OutputPin> MainState<LED> {
         // Stepper sine (startup) uses fast 0.1s timeout; normal uses 10s
         if self.config.low_voltage_cut_off != 0 {
             let threshold = self.cell_count as u16 * self.low_cell_volt_cutoff;
-            if self.measurements.battery_voltage < threshold && threshold > 0 {
+            if self.measurements.battery_voltage.0 < threshold && threshold > 0 {
                 self.protection.low_voltage_count += 1;
             } else if !self.protection.low_voltage_cutoff {
                 self.protection.low_voltage_count = 0;
@@ -158,26 +158,26 @@ impl<LED: OutputPin> MainState<LED> {
         use rm32::units::AdcCount;
         let smoothed_v = AdcCount(self.voltage_filter.update(adc.raw_voltage()));
         let smoothed_c = AdcCount(self.current_filter.update(adc.raw_current()));
-        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider).0;
-        self.measurements.actual_current = smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp).0;
+        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
+        self.measurements.actual_current = smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
         self.measurements.degrees_celsius = if self.use_ntc {
-            rm32::ntc::ntc_degrees(adc.raw_temperature()).0
+            rm32::ntc::ntc_degrees(adc.raw_temperature())
         } else {
-            adc.calc_temperature(adc.raw_temperature()).0
+            adc.calc_temperature(adc.raw_temperature())
         };
         adc.start_conversion();
 
         // Publish measurements to shared state (ISR reads for EDT)
-        shared.set_actual_current(self.measurements.actual_current);
-        shared.set_battery_voltage(self.measurements.battery_voltage);
-        shared.set_degrees_celsius(self.measurements.degrees_celsius);
+        shared.set_actual_current(self.measurements.actual_current.0);
+        shared.set_battery_voltage(self.measurements.battery_voltage.0);
+        shared.set_degrees_celsius(self.measurements.degrees_celsius.0);
 
         // Cell count auto-detection on arming transition
         let armed = shared.armed();
         self.just_armed = armed && !self.last_armed;
         if self.just_armed
             && self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
-                self.cell_count = (self.measurements.battery_voltage / 370) as u8;
+                self.cell_count = (self.measurements.battery_voltage.0 / 370) as u8;
             }
         self.last_armed = armed;
 
@@ -207,11 +207,11 @@ impl<LED: OutputPin> MainState<LED> {
         // Telemetry send
         if shared.send_telemetry() {
             let mut pkt = [0u8; 10];
-            let voltage_cv = self.measurements.battery_voltage / 10; // mV → centivolts
-            let current_ca = (self.measurements.actual_current as u16) / 10; // mA → centiamps
+            let voltage_cv = self.measurements.battery_voltage.to_centivolts();
+            let current_ca = self.measurements.actual_current.to_centiamps();
             telemetry::make_telem_package(
                 &mut pkt,
-                self.measurements.degrees_celsius as i8,
+                self.measurements.degrees_celsius.to_i8(),
                 voltage_cv,
                 current_ca,
                 (self.measurements.consumed_current / 1000) as u16, // µAh → mAh

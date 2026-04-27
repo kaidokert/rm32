@@ -1,12 +1,12 @@
 //! ISR-level control logic — platform-independent, fully testable.
 //!
-//! These free functions implement the bodies of the 20kHz tick, commutation
-//! timer, and BEMF comparator ISRs. They operate on split state (individual
-//! sub-structs + SharedComm) rather than a monolithic MotorState.
+//! All functions take `MotorContext<S, P, C, Ph, I, T>` for static dispatch.
+//! No `&dyn` trait objects — the compiler monomorphizes to concrete MCU types,
+//! eliminating vtable overhead in the 20kHz ISR.
 
 use crate::commutation::Commutation;
-use crate::config::EepromConfig;
 use crate::constants::*;
+use crate::control::context::MotorContext;
 use crate::control::state::{BemfState, DutyState};
 use crate::functions::map;
 use crate::hal;
@@ -26,26 +26,17 @@ pub struct TickCounters {
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
-#[allow(clippy::too_many_arguments)]
-pub fn ten_khz_tick(
-    commutation: &mut Commutation,
-    bemf: &mut BemfState,
-    duty: &mut DutyState,
-    config: &EepromConfig,
-    counters: &mut TickCounters,
-    shared: &dyn SharedComm,
-    pwm: &mut dyn hal::PwmOutput,
-    comp: &mut dyn hal::Comparator,
-    phase: &mut dyn hal::PhaseOutput,
-    interval: &mut dyn hal::IntervalTimer,
-    com_timer: &mut dyn hal::ComTimer,
-) {
+pub fn ten_khz_tick<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
+where
+    S: SharedComm, P: hal::PwmOutput, C: hal::Comparator,
+    Ph: hal::PhaseOutput, I: hal::IntervalTimer, T: hal::ComTimer,
+{
     // Throttle → setpoint
-    let newinput = shared.newinput();
-    shared.set_adjusted_input(newinput);
-    if shared.armed() && !shared.stepper_sine() {
+    let newinput = ctx.shared.newinput();
+    ctx.shared.set_adjusted_input(newinput);
+    if ctx.shared.armed() && !ctx.shared.stepper_sine() {
         if newinput >= THROTTLE_MIN_SIGNAL {
-            let min_duty = duty.minimum;
+            let min_duty = ctx.duty.minimum;
             let setpoint = map(
                 newinput as i32,
                 THROTTLE_MIN_SIGNAL as i32,
@@ -53,150 +44,137 @@ pub fn ten_khz_tick(
                 min_duty as i32,
                 DUTY_SCALE_MAX as i32,
             ) as u16;
-            shared.set_duty_cycle_setpoint(setpoint);
-            if !shared.running() {
-                shared.transition(MotorEvent::StartMotor);
-                duty.last = duty.min_startup;
-                let step = commutation.advance();
-                phase.com_step(step);
-                comp.set_step(step, commutation.rising);
-                comp.change_input();
-                comp.enable_interrupts();
+            ctx.shared.set_duty_cycle_setpoint(setpoint);
+            if !ctx.shared.running() {
+                ctx.shared.transition(MotorEvent::StartMotor);
+                ctx.duty.last = ctx.duty.min_startup;
+                let step = ctx.commutation.advance();
+                ctx.phase.com_step(step);
+                ctx.comp.set_step(step, ctx.commutation.rising);
+                ctx.comp.change_input();
+                ctx.comp.enable_interrupts();
             }
         } else {
-            shared.set_duty_cycle_setpoint(0);
-            // Active brake mode 2: hold motor in comStep(2) at fixed power
-            if config.brake_on_stop == 2 {
-                phase.com_step(2);
-                let brake_duty = (config.active_brake_power as u32 * counters.tim1_arr as u32
+            ctx.shared.set_duty_cycle_setpoint(0);
+            if ctx.config.brake_on_stop == 2 {
+                ctx.phase.com_step(2);
+                let brake_duty = (ctx.config.active_brake_power as u32 * ctx.counters.tim1_arr as u32
                     / DUTY_SCALE_MAX as u32)
                     * 10;
-                pwm.set_duty_all(brake_duty as u16);
+                ctx.pwm.set_duty_all(brake_duty as u16);
             }
         }
     }
 
     // Core tick
-    let setpoint = shared.duty_cycle_setpoint();
-    duty.cycle = setpoint;
-    counters.ten_khz_counter += 1;
-    shared.increment_signal_timeout();
-    duty.ramp_count += 1;
-    counters.one_khz_loop_counter += 1;
+    let setpoint = ctx.shared.duty_cycle_setpoint();
+    ctx.duty.cycle = setpoint;
+    ctx.counters.ten_khz_counter += 1;
+    ctx.shared.increment_signal_timeout();
+    ctx.duty.ramp_count += 1;
+    ctx.counters.one_khz_loop_counter += 1;
 
     // Arming
-    if !shared.armed() {
-        if shared.input_set() && shared.adjusted_input() == 0 {
-            counters.armed_timeout_count += 1;
-            if counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
-                shared.transition(MotorEvent::Arm);
-                counters.armed_timeout_count = 0;
+    if !ctx.shared.armed() {
+        if ctx.shared.input_set() && ctx.shared.adjusted_input() == 0 {
+            ctx.counters.armed_timeout_count += 1;
+            if ctx.counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
+                ctx.shared.transition(MotorEvent::Arm);
+                ctx.counters.armed_timeout_count = 0;
             }
         } else {
-            counters.armed_timeout_count = 0;
+            ctx.counters.armed_timeout_count = 0;
         }
     }
 
     // Old routine BEMF polling
-    if shared.old_routine() && shared.running() && !shared.stepper_sine() {
-        bemf_polling(commutation, bemf, shared, comp, phase, interval, com_timer);
+    if ctx.shared.old_routine() && ctx.shared.running() && !ctx.shared.stepper_sine() {
+        bemf_polling(ctx);
     }
 
     // Ramp rate limiting
-    ramp_limit(duty, shared, counters.voltage_based_ramp);
+    ramp_limit(ctx.duty, ctx.shared, ctx.counters.voltage_based_ramp);
 
-    // Apply stall protection boost (crawler/RC car low-RPM boost)
-    let stall_boost = shared.stall_protection_adjust();
-    if stall_boost > 0 && shared.running() {
-        duty.cycle = duty.cycle.saturating_add(stall_boost);
+    // Apply stall protection boost
+    let stall_boost = ctx.shared.stall_protection_adjust();
+    if stall_boost > 0 && ctx.shared.running() {
+        ctx.duty.cycle = ctx.duty.cycle.saturating_add(stall_boost);
     }
 
     // PWM output
-    let tim1_arr = counters.tim1_arr;
-    if shared.armed() && shared.running() {
-        let adj = ((duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
-        pwm.set_duty_all(adj);
+    let tim1_arr = ctx.counters.tim1_arr;
+    if ctx.shared.armed() && ctx.shared.running() {
+        let adj = ((ctx.duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
+        ctx.pwm.set_duty_all(adj);
     } else {
-        pwm.set_duty_all(0);
+        ctx.pwm.set_duty_all(0);
     }
-    duty.last = duty.cycle;
-    pwm.set_auto_reload(tim1_arr);
+    ctx.duty.last = ctx.duty.cycle;
+    ctx.pwm.set_auto_reload(tim1_arr);
 }
 
-/// BEMF polling (old_routine path). Called from 20kHz tick when old_routine is active.
-///
-/// Samples comparator, counts zero-crossings, and schedules commutation
-/// via com_timer instead of busy-waiting. The actual commutation fires
-/// in `commutation_timer_expired()`.
-fn bemf_polling(
-    commutation: &mut Commutation,
-    bemf: &mut BemfState,
-    shared: &dyn SharedComm,
-    comp: &mut dyn hal::Comparator,
-    phase: &mut dyn hal::PhaseOutput,
-    interval: &mut dyn hal::IntervalTimer,
-    com_timer: &mut dyn hal::ComTimer,
-) {
-    comp.mask_interrupts();
-    let comp_level = comp.output_level();
+/// BEMF polling (old_routine path).
+fn bemf_polling<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
+where
+    S: SharedComm, P: hal::PwmOutput, C: hal::Comparator,
+    Ph: hal::PhaseOutput, I: hal::IntervalTimer, T: hal::ComTimer,
+{
+    ctx.comp.mask_interrupts();
+    let comp_level = ctx.comp.output_level();
     let current_state = !comp_level;
-    if commutation.rising {
+    if ctx.commutation.rising {
         if current_state {
-            bemf.counter += 1;
+            ctx.bemf.counter += 1;
         } else {
-            bemf.bad_count += 1;
-            if bemf.bad_count > bemf.bad_count_threshold {
-                bemf.counter = 0;
+            ctx.bemf.bad_count += 1;
+            if ctx.bemf.bad_count > ctx.bemf.bad_count_threshold {
+                ctx.bemf.counter = 0;
             }
         }
     } else if !current_state {
-        bemf.counter += 1;
+        ctx.bemf.counter += 1;
     } else {
-        bemf.bad_count += 1;
-        if bemf.bad_count > bemf.bad_count_threshold {
-            bemf.counter = 0;
+        ctx.bemf.bad_count += 1;
+        if ctx.bemf.bad_count > ctx.bemf.bad_count_threshold {
+            ctx.bemf.counter = 0;
         }
     }
-    let threshold = if commutation.rising {
-        bemf.min_counts_up
+    let threshold = if ctx.commutation.rising {
+        ctx.bemf.min_counts_up
     } else {
-        bemf.min_counts_down
+        ctx.bemf.min_counts_down
     };
-    if !bemf.zc_found && bemf.counter > threshold {
-        bemf.zc_found = true;
-        bemf.last_zc_time = bemf.this_zc_time;
-        bemf.this_zc_time = interval.count() as u16;
-        interval.set_count(0);
-        let ci = shared.commutation_interval();
-        let new_ci = (bemf.this_zc_time as u32 + 3 * ci) / 4;
-        shared.set_commutation_interval(new_ci);
-        let advance = (bemf.temp_advance as u32 * new_ci) >> ADVANCE_SHIFT;
-        bemf.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
-        let zc = shared.zero_crosses();
+    if !ctx.bemf.zc_found && ctx.bemf.counter > threshold {
+        ctx.bemf.zc_found = true;
+        ctx.bemf.last_zc_time = ctx.bemf.this_zc_time;
+        ctx.bemf.this_zc_time = ctx.interval.count() as u16;
+        ctx.interval.set_count(0);
+        let ci = ctx.shared.commutation_interval();
+        let new_ci = (ctx.bemf.this_zc_time as u32 + 3 * ci) / 4;
+        ctx.shared.set_commutation_interval(new_ci);
+        let advance = (ctx.bemf.temp_advance as u32 * new_ci) >> ADVANCE_SHIFT;
+        ctx.bemf.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
+        let zc = ctx.shared.zero_crosses();
         if zc < MIN_ZC_FOR_ADVANCE {
-            // Not enough zero crosses yet — commutate immediately (no advance timing).
-            let step = commutation.advance();
-            phase.com_step(step);
-            phase.pulse_toggle(step);
-            comp.set_step(step, commutation.rising);
-            comp.change_input();
-            bemf.counter = 0;
-            bemf.bad_count = 0;
-            shared.increment_zero_crosses();
+            let step = ctx.commutation.advance();
+            ctx.phase.com_step(step);
+            ctx.phase.pulse_toggle(step);
+            ctx.comp.set_step(step, ctx.commutation.rising);
+            ctx.comp.change_input();
+            ctx.bemf.counter = 0;
+            ctx.bemf.bad_count = 0;
+            ctx.shared.increment_zero_crosses();
         } else {
-            // Schedule commutation via hardware timer — no busy-wait.
-            // commutation_timer_expired() will handle the actual commutation.
-            com_timer.set_and_enable(bemf.wait_time + 1);
+            ctx.com_timer.set_and_enable(ctx.bemf.wait_time + 1);
         }
     }
 }
 
 /// Ramp rate limiting.
-fn ramp_limit(duty: &mut DutyState, shared: &dyn SharedComm, voltage_based: bool) {
+fn ramp_limit<S: SharedComm>(duty: &mut DutyState, shared: &S, voltage_based: bool) {
     if duty.ramp_count > duty.ramp_divider as u16 {
         duty.ramp_count = 0;
         if voltage_based {
-            // Scale ramp rate by battery voltage (lower voltage = faster ramp)
             let v_change = map(shared.battery_voltage() as i32, 800, 2200, 10, 1) as u8;
             let ci = shared.commutation_interval();
             duty.max_change = if ci > 200 {
@@ -227,18 +205,17 @@ fn ramp_limit(duty: &mut DutyState, shared: &dyn SharedComm, voltage_based: bool
 }
 
 /// Commutation timer expired (TIM14/TIM16 ISR body).
-///
-/// Handles commutation from both paths:
-/// - old_routine: scheduled by bemf_polling() after zero-cross detection
-/// - normal running: scheduled by bemf_zero_cross() via comp ISR
-pub fn commutation_timer_expired(
+pub fn commutation_timer_expired<S, C, Ph, T>(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
-    shared: &dyn SharedComm,
-    com_timer: &mut dyn hal::ComTimer,
-    comp: &mut dyn hal::Comparator,
-    phase: &mut dyn hal::PhaseOutput,
-) {
+    shared: &S,
+    com_timer: &mut T,
+    comp: &mut C,
+    phase: &mut Ph,
+)
+where
+    S: SharedComm, C: hal::Comparator, Ph: hal::PhaseOutput, T: hal::ComTimer,
+{
     com_timer.disable_interrupt();
     let step = commutation.advance();
     phase.com_step(step);
@@ -246,7 +223,6 @@ pub fn commutation_timer_expired(
     comp.set_step(step, commutation.rising);
     comp.change_input();
 
-    // Update commutation interval (only in interrupt-driven mode, not old_routine)
     if !shared.old_routine() {
         let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;
         let ci = shared.commutation_interval();
@@ -262,7 +238,6 @@ pub fn commutation_timer_expired(
     bemf.zc_found = false;
     shared.increment_zero_crosses();
 
-    // Check for old_routine → Running transition
     let zc = shared.zero_crosses();
     let ci = shared.commutation_interval();
     if shared.old_routine() && zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
@@ -271,12 +246,12 @@ pub fn commutation_timer_expired(
 }
 
 /// BEMF zero-cross detected (COMP ISR body).
-pub fn bemf_zero_cross(
+pub fn bemf_zero_cross<C: hal::Comparator, I: hal::IntervalTimer, T: hal::ComTimer>(
     commutation: &Commutation,
     bemf: &mut BemfState,
-    comp: &mut dyn hal::Comparator,
-    interval: &mut dyn hal::IntervalTimer,
-    com_timer: &mut dyn hal::ComTimer,
+    comp: &mut C,
+    interval: &mut I,
+    com_timer: &mut T,
 ) {
     for _ in 0..bemf.filter_level {
         if comp.output_level() == commutation.rising {

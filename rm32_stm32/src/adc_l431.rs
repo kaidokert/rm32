@@ -1,27 +1,24 @@
 //! L431 ADC: CH8 current, CH11 voltage, CH17 temp. DMA1_CH1 circular.
 
-use crate::pac::{ADC1, ADC_COMMON, DMA1, GPIOA};
-use crate::adc_hal::{AdcOps, TempCalibration};
-use crate::adc_generic::GenericAdc;
-use crate::dma_buf::DmaBuf;
-use crate::regs::{modify as modify_reg, InitError, wait_for};
-use crate::periph_addr as addr;
+use crate::pac::{ADC1, ADC_COMMON, DMA1, GPIOA, RCC};
+use crate::adc_hal::AdcOps;
+use crate::regs::{InitError, wait_for};
 
-static ADC_DMA_BUF: DmaBuf<u16, 3> = DmaBuf::new();
-
-const TEMP_CAL: TempCalibration = TempCalibration {
-    cal1_addr: 0x1FFF_75A8, cal2_addr: 0x1FFF_75CA,
+crate::define_adc_boilerplate!(
+    ops: L431AdcOps,
+    type_name: L431Adc,
+    cal1: 0x1FFF_75A8, cal2: 0x1FFF_75CA,
     cal1_temp: 30, cal2_temp: 130,
-};
+);
 
 pub struct L431AdcOps;
 
 impl AdcOps for L431AdcOps {
     fn init(&self) -> Result<(), InitError> {
-        let rcc_base = addr::rcc();
+        let rcc = unsafe { &*RCC::ptr() };
         unsafe {
-            modify_reg(rcc_base + 0x4C, |v| v | (1 << 13) | (1 << 0));
-            modify_reg(rcc_base + 0x48, |v| v | (1 << 0));
+            rcc.ahb2enr.modify(|_, w| w.adcen().set_bit().gpioaen().set_bit());
+            rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
         }
 
         let adc = unsafe { &*ADC1::ptr() };
@@ -68,12 +65,3 @@ impl AdcOps for L431AdcOps {
     }
 }
 
-pub type L431Adc = GenericAdc<L431AdcOps>;
-
-pub fn new_adc() -> L431Adc {
-    GenericAdc::new(L431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
-}
-
-pub fn post_init() -> L431Adc {
-    GenericAdc::post_init(L431AdcOps, &ADC_DMA_BUF, TEMP_CAL)
-}

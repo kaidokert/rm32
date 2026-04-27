@@ -96,9 +96,9 @@ pub struct ProtectionState {
 /// Sensor measurements.
 #[derive(Clone, Default)]
 pub struct Measurements {
-    pub battery_voltage: u16,
-    pub actual_current: i16,
-    pub degrees_celsius: i16,
+    pub battery_voltage: crate::units::MilliVolts,
+    pub actual_current: crate::units::MilliAmps,
+    pub degrees_celsius: crate::units::DegreesCelsius,
     pub consumed_current: i32,
 }
 
