@@ -18,13 +18,16 @@ const ARR: u32 = 0x2C;
 
 use crate::periph_addr as addr;
 
-const TIM2_BASE: u32 = addr::TIM2;
+#[inline(always)]
+fn tim2_base() -> u32 { addr::tim2() }
 
 #[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
-const TIM14_BASE: u32 = addr::TIM14;
-// L431/G431 use TIM16 in place of TIM14 (same register layout)
+#[inline(always)]
+fn tim14_base() -> u32 { addr::tim14() }
+
 #[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
-const TIM14_BASE: u32 = addr::TIM16;
+#[inline(always)]
+fn tim14_base() -> u32 { addr::tim16() }
 
 use crate::regs::{write_off as write_reg, read_off as read_reg, modify_off as modify_reg};
 
@@ -60,12 +63,12 @@ impl Tim2Interval {
         }
 
         unsafe {
-            modify_reg(TIM2_BASE, CR1, |v| v & !(1 << 0)); // CEN=0
-            write_reg(TIM2_BASE, PSC, crate::config::TIMER_PSC as u32);
-            write_reg(TIM2_BASE, ARR, 0xFFFF_FFFF);
-            write_reg(TIM2_BASE, EGR, 1); // UG
-            write_reg(TIM2_BASE, CNT, 0);
-            modify_reg(TIM2_BASE, CR1, |v| v | (1 << 0)); // CEN=1
+            modify_reg(tim2_base(), CR1, |v| v & !(1 << 0)); // CEN=0
+            write_reg(tim2_base(), PSC, crate::config::TIMER_PSC as u32);
+            write_reg(tim2_base(), ARR, 0xFFFF_FFFF);
+            write_reg(tim2_base(), EGR, 1); // UG
+            write_reg(tim2_base(), CNT, 0);
+            modify_reg(tim2_base(), CR1, |v| v | (1 << 0)); // CEN=1
         }
         Self { _private: () }
     }
@@ -73,11 +76,11 @@ impl Tim2Interval {
 
 impl IntervalTimer for Tim2Interval {
     fn count(&self) -> u32 {
-        unsafe { read_reg(TIM2_BASE, CNT) }
+        unsafe { read_reg(tim2_base(), CNT) }
     }
 
     fn set_count(&mut self, val: u32) {
-        unsafe { write_reg(TIM2_BASE, CNT, val); }
+        unsafe { write_reg(tim2_base(), CNT, val); }
     }
 }
 
@@ -112,9 +115,9 @@ impl Tim14Com {
         }
 
         unsafe {
-            write_reg(TIM14_BASE, PSC, crate::config::TIMER_PSC as u32);
-            write_reg(TIM14_BASE, ARR, 0xFFFF);
-            write_reg(TIM14_BASE, EGR, 1);
+            write_reg(tim14_base(), PSC, crate::config::TIMER_PSC as u32);
+            write_reg(tim14_base(), ARR, 0xFFFF);
+            write_reg(tim14_base(), EGR, 1);
         }
         Self { _private: () }
     }
@@ -123,20 +126,20 @@ impl Tim14Com {
 impl ComTimer for Tim14Com {
     fn set_and_enable(&mut self, timeout: u16) {
         unsafe {
-            modify_reg(TIM14_BASE, CR1, |v| v & !(1 << 0));
-            write_reg(TIM14_BASE, CNT, 0);
-            write_reg(TIM14_BASE, ARR, timeout as u32);
-            write_reg(TIM14_BASE, SR, 0);
-            modify_reg(TIM14_BASE, DIER, |v| v | 1);
-            modify_reg(TIM14_BASE, CR1, |v| v | (1 << 0));
+            modify_reg(tim14_base(), CR1, |v| v & !(1 << 0));
+            write_reg(tim14_base(), CNT, 0);
+            write_reg(tim14_base(), ARR, timeout as u32);
+            write_reg(tim14_base(), SR, 0);
+            modify_reg(tim14_base(), DIER, |v| v | 1);
+            modify_reg(tim14_base(), CR1, |v| v | (1 << 0));
         }
     }
 
     fn disable_interrupt(&mut self) {
-        unsafe { modify_reg(TIM14_BASE, DIER, |v| v & !1); }
+        unsafe { modify_reg(tim14_base(), DIER, |v| v & !1); }
     }
 
     fn enable_interrupt(&mut self) {
-        unsafe { modify_reg(TIM14_BASE, DIER, |v| v | 1); }
+        unsafe { modify_reg(tim14_base(), DIER, |v| v | 1); }
     }
 }

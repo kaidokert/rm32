@@ -38,6 +38,7 @@ pub fn ten_khz_tick(
     comp: &mut dyn hal::Comparator,
     phase: &mut dyn hal::PhaseOutput,
     interval: &mut dyn hal::IntervalTimer,
+    com_timer: &mut dyn hal::ComTimer,
 ) {
     // Throttle → setpoint
     let newinput = shared.newinput();
@@ -98,7 +99,7 @@ pub fn ten_khz_tick(
 
     // Old routine BEMF polling
     if shared.old_routine() && shared.running() && !shared.stepper_sine() {
-        bemf_polling(commutation, bemf, shared, comp, phase, interval);
+        bemf_polling(commutation, bemf, shared, comp, phase, interval, com_timer);
     }
 
     // Ramp rate limiting
@@ -123,6 +124,10 @@ pub fn ten_khz_tick(
 }
 
 /// BEMF polling (old_routine path). Called from 20kHz tick when old_routine is active.
+///
+/// Samples comparator, counts zero-crossings, and schedules commutation
+/// via com_timer instead of busy-waiting. The actual commutation fires
+/// in `commutation_timer_expired()`.
 fn bemf_polling(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
@@ -130,6 +135,7 @@ fn bemf_polling(
     comp: &mut dyn hal::Comparator,
     phase: &mut dyn hal::PhaseOutput,
     interval: &mut dyn hal::IntervalTimer,
+    com_timer: &mut dyn hal::ComTimer,
 ) {
     comp.mask_interrupts();
     let comp_level = comp.output_level();
@@ -158,6 +164,7 @@ fn bemf_polling(
     };
     if !bemf.zc_found && bemf.counter > threshold {
         bemf.zc_found = true;
+        bemf.last_zc_time = bemf.this_zc_time;
         bemf.this_zc_time = interval.count() as u16;
         interval.set_count(0);
         let ci = shared.commutation_interval();
@@ -166,22 +173,20 @@ fn bemf_polling(
         let advance = (bemf.temp_advance as u32 * new_ci) >> ADVANCE_SHIFT;
         bemf.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
         let zc = shared.zero_crosses();
-        if zc >= 5 {
-            while (interval.count() as u16) < bemf.wait_time {}
-        }
-        let step = commutation.advance();
-        phase.com_step(step);
-        phase.pulse_toggle(step);
-        comp.set_step(step, commutation.rising);
-        comp.change_input();
-        bemf.counter = 0;
-        bemf.bad_count = 0;
-        shared.increment_zero_crosses();
-        let zc = shared.zero_crosses();
-        let ci = shared.commutation_interval();
-        if zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
-            shared.transition(MotorEvent::BemfLocked);
-            comp.enable_interrupts();
+        if zc < MIN_ZC_FOR_ADVANCE {
+            // Not enough zero crosses yet — commutate immediately (no advance timing).
+            let step = commutation.advance();
+            phase.com_step(step);
+            phase.pulse_toggle(step);
+            comp.set_step(step, commutation.rising);
+            comp.change_input();
+            bemf.counter = 0;
+            bemf.bad_count = 0;
+            shared.increment_zero_crosses();
+        } else {
+            // Schedule commutation via hardware timer — no busy-wait.
+            // commutation_timer_expired() will handle the actual commutation.
+            com_timer.set_and_enable(bemf.wait_time + 1);
         }
     }
 }
@@ -222,6 +227,10 @@ fn ramp_limit(duty: &mut DutyState, shared: &dyn SharedComm, voltage_based: bool
 }
 
 /// Commutation timer expired (TIM14/TIM16 ISR body).
+///
+/// Handles commutation from both paths:
+/// - old_routine: scheduled by bemf_polling() after zero-cross detection
+/// - normal running: scheduled by bemf_zero_cross() via comp ISR
 pub fn commutation_timer_expired(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
@@ -236,16 +245,29 @@ pub fn commutation_timer_expired(
     phase.pulse_toggle(step);
     comp.set_step(step, commutation.rising);
     comp.change_input();
-    let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;
-    let ci = shared.commutation_interval();
-    let new_ci = (ci + zc_avg) >> 1;
-    shared.set_commutation_interval(new_ci);
-    let advance = (new_ci * bemf.temp_advance as u32) >> ADVANCE_SHIFT;
-    bemf.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
+
+    // Update commutation interval (only in interrupt-driven mode, not old_routine)
+    if !shared.old_routine() {
+        let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;
+        let ci = shared.commutation_interval();
+        let new_ci = (ci + zc_avg) >> 1;
+        shared.set_commutation_interval(new_ci);
+        let advance = (new_ci * bemf.temp_advance as u32) >> ADVANCE_SHIFT;
+        bemf.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
+    }
+
     comp.enable_interrupts();
-    shared.increment_zero_crosses();
     bemf.counter = 0;
+    bemf.bad_count = 0;
     bemf.zc_found = false;
+    shared.increment_zero_crosses();
+
+    // Check for old_routine → Running transition
+    let zc = shared.zero_crosses();
+    let ci = shared.commutation_interval();
+    if shared.old_routine() && zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
+        shared.transition(MotorEvent::BemfLocked);
+    }
 }
 
 /// BEMF zero-cross detected (COMP ISR body).

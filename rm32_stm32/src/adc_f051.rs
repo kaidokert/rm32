@@ -18,7 +18,7 @@ pub struct F051AdcOps;
 
 impl AdcOps for F051AdcOps {
     fn init(&self) -> Result<(), InitError> {
-        let rcc_base = addr::RCC;
+        let rcc_base = addr::rcc();
         unsafe {
             let apb2enr = (rcc_base + 0x18) as *mut u32;
             apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 9));

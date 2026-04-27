@@ -1085,6 +1085,7 @@ mod tests {
         };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(1000);
@@ -1100,6 +1101,7 @@ mod tests {
             &mut comp,
             &mut phase,
             &mut interval,
+            &mut com_timer,
         );
 
         assert!(shared.duty_cycle_setpoint() > 0);
@@ -1121,6 +1123,7 @@ mod tests {
         };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(0);
@@ -1136,6 +1139,7 @@ mod tests {
             &mut comp,
             &mut phase,
             &mut interval,
+            &mut com_timer,
         );
 
         assert_eq!(shared.duty_cycle_setpoint(), 0);
@@ -1156,6 +1160,7 @@ mod tests {
         };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
 
         shared.input_set.set(true);
         shared.newinput.set(0);
@@ -1172,6 +1177,7 @@ mod tests {
                 &mut comp,
                 &mut phase,
                 &mut interval,
+                &mut com_timer,
             );
         }
         assert!(!shared.armed());
@@ -1187,6 +1193,7 @@ mod tests {
             &mut comp,
             &mut phase,
             &mut interval,
+            &mut com_timer,
         );
         assert!(shared.armed());
     }
@@ -1206,6 +1213,7 @@ mod tests {
         };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
 
         isr_logic::ten_khz_tick(
             &mut comm,
@@ -1218,6 +1226,7 @@ mod tests {
             &mut comp,
             &mut phase,
             &mut interval,
+            &mut com_timer,
         );
 
         assert_eq!(shared.signal_timeout(), 1);
@@ -1238,6 +1247,7 @@ mod tests {
         };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
+        let mut com_timer = MockComTimer;
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(2047);
@@ -1255,6 +1265,7 @@ mod tests {
             &mut comp,
             &mut phase,
             &mut interval,
+            &mut com_timer,
         );
 
         assert!(

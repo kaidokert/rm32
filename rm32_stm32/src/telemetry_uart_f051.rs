@@ -21,7 +21,7 @@ impl F051TelemUart {
 
         // Enable clocks
         unsafe {
-            let rcc_base = addr::RCC;
+            let rcc_base = addr::rcc();
             let apb2enr = (rcc_base + 0x18) as *mut u32;
             apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 14)); // USART1EN
             let ahbenr = (rcc_base + 0x14) as *mut u32;
@@ -29,7 +29,7 @@ impl F051TelemUart {
         }
 
         // PB6: alternate function (AF0 = USART1_TX), open-drain, pull-up
-        let gpiob_base = addr::GPIOB;
+        let gpiob_base = addr::gpiob();
         unsafe {
             modify_reg(gpiob_base, |v| (v & !(0b11 << 12)) | (0b10 << 12));
             modify_reg(gpiob_base + 0x04, |v| v | (1 << 6)); // open-drain

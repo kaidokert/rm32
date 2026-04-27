@@ -96,8 +96,8 @@ pub fn sine_step(
         motor_poles as u16
     };
 
-    if input > 48 && armed {
-        if input < 137 {
+    if input > crate::constants::THROTTLE_MIN_SIGNAL && armed {
+        if input < crate::constants::SINE_SLOW_STEP_THROTTLE {
             // Sine wave stepper mode — slow rotation
             positions.advance(forward);
             let pwm = sine_drive(
@@ -126,7 +126,7 @@ pub fn sine_step(
                 false,
             );
 
-            if input > 200 && positions.a == 0 {
+            if input > crate::constants::SINE_CHANGEOVER_THROTTLE && positions.a == 0 {
                 // Phase wrapped to 0 at sufficient throttle — transition to BLDC
                 (
                     SineStepResult::Changeover {
@@ -136,7 +136,11 @@ pub fn sine_step(
                     pwm,
                 )
             } else {
-                let step_delay = if input > 200 { 80 } else { 120 };
+                let step_delay = if input > crate::constants::SINE_CHANGEOVER_THROTTLE {
+                    crate::constants::SINE_FAST_STEP_DELAY
+                } else {
+                    crate::constants::SINE_MEDIUM_STEP_DELAY
+                };
                 (SineStepResult::Continue(step_delay), pwm)
             }
         }

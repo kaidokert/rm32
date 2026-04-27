@@ -170,8 +170,8 @@ pub fn init() -> InitResult<F051Pwm, F051System> {
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
 
         // PA8/9/10 as AF2 (TIM1_CH1/2/3)
-        let gpioa_moder = crate::periph_addr::GPIOA as *mut u32;
-        let gpioa_afrh = (crate::periph_addr::GPIOA + 0x24) as *mut u32;
+        let gpioa_moder = crate::periph_addr::gpioa() as *mut u32;
+        let gpioa_afrh = (crate::periph_addr::gpioa() + 0x24) as *mut u32;
         let m = gpioa_moder.read_volatile();
         gpioa_moder.write_volatile(
             (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
@@ -320,8 +320,8 @@ pub fn init() -> InitResult<L431Pwm, L431System> {
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 11));
 
         // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2)
-        let gpioa_moder = crate::periph_addr::GPIOA as *mut u32;
-        let gpioa_afrh = (crate::periph_addr::GPIOA + 0x24) as *mut u32;
+        let gpioa_moder = crate::periph_addr::gpioa() as *mut u32;
+        let gpioa_afrh = (crate::periph_addr::gpioa() + 0x24) as *mut u32;
         let m = gpioa_moder.read_volatile();
         gpioa_moder.write_volatile(
             (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
@@ -461,66 +461,62 @@ impl System for G431System {
 
 #[cfg(feature = "stm32g431")]
 pub fn init() -> InitResult<G431Pwm, G431System> {
-    let rcc_base = 0x4002_1000u32;
+    use stm32g4::stm32g431 as pac;
 
-    // Clock: 170MHz via PLL from HSI16
-    // HSI16 is default on, PLL: M=2, N=85, R=4 → 16/2*85/4 = 170MHz
-    // Actually simplest: M=4, N=85, R=2 → 16/4*85/2 = 170MHz
+    let rcc = unsafe { &*pac::RCC::PTR };
+    let flash = unsafe { &*pac::FLASH::PTR };
+    let gpioa = unsafe { &*pac::GPIOA::PTR };
+    let tim1 = unsafe { &*pac::TIM1::PTR };
+    let tim6 = unsafe { &*pac::TIM6::PTR };
+    let exti = unsafe { &*pac::EXTI::PTR };
+
+    // Clock: 170MHz via PLL from HSI16 (M=4, N=85, R=2 → 16/4*85/2 = 170MHz)
     unsafe {
         // Flash latency = 4 wait states for 170MHz
-        let flash_acr = 0x4002_2000 as *mut u32;
-        flash_acr.write_volatile(flash_acr.read_volatile() & !(0xF) | 4);
-        while flash_acr.read_volatile() & 0xF != 4 {}
+        flash.acr().modify(|_, w| w.latency().bits(4));
+        while flash.acr().read().latency().bits() != 4 {}
 
-        // Configure PLL: HSI16, M=4, N=85, R=2
-        let pllcfgr = (rcc_base + 0x0C) as *mut u32;
-        // PLLSRC=HSI16(2), PLLM=4-1=3, PLLN=85, PLLR=2-1=0, PLLREN=1
-        pllcfgr.write_volatile(
-            (2 << 0)       // PLLSRC = HSI16
-            | (3 << 4)     // PLLM = 4 (M-1)
-            | (85 << 8)    // PLLN = 85
-            | (0 << 25)    // PLLR = 2 (00 = /2)
-            | (1 << 24)    // PLLREN
-        );
+        // Configure PLL: PLLSRC=HSI16, M=4(3), N=85, R=2(0), PLLREN
+        rcc.pllcfgr().write(|w| {
+            w.pllsrc().bits(0b10)  // HSI16
+             .pllm().bits(3)       // M=4 (M-1)
+             .plln().bits(85)
+             .pllr().bits(0)       // R=2 (00=/2)
+             .pllren().set_bit()
+        });
 
         // Enable PLL
-        let cr = rcc_base as *mut u32;
-        cr.write_volatile(cr.read_volatile() | (1 << 24)); // PLLON
-        while cr.read_volatile() & (1 << 25) == 0 {} // wait PLLRDY
+        rcc.cr().modify(|_, w| w.pllon().set_bit());
+        while rcc.cr().read().pllrdy().bit_is_clear() {}
 
         // Switch system clock to PLL
-        let cfgr = (rcc_base + 0x08) as *mut u32;
-        let v = cfgr.read_volatile();
-        cfgr.write_volatile((v & !0b11) | 0b11); // SW = PLL
-        while cfgr.read_volatile() & (0b11 << 2) != (0b11 << 2) {} // wait SWS
+        rcc.cfgr().modify(|_, w| w.sw().bits(0b11));
+        while rcc.cfgr().read().sws().bits() != 0b11 {}
 
-        // Enable GPIOA, GPIOB clocks (AHB2ENR bits 0, 1)
-        crate::regs::modify(rcc_base + 0x4C, |v| v | (1 << 0) | (1 << 1));
-        // Enable TIM1 (APB2ENR bit 11), TIM2 (APB1ENR1 bit 0), TIM6 (bit 4), TIM15 (APB2 bit 16), TIM16 (APB2 bit 17)
-        crate::regs::modify(rcc_base + 0x60, |v| v | (1 << 11) | (1 << 16) | (1 << 17));
-        crate::regs::modify(rcc_base + 0x58, |v| v | (1 << 0) | (1 << 4));
+        // Enable peripheral clocks
+        rcc.ahb2enr().modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
+        rcc.apb2enr().modify(|_, w| w.tim1en().set_bit().tim15en().set_bit().tim16en().set_bit());
+        rcc.apb1enr1().modify(|_, w| w.tim2en().set_bit().tim6en().set_bit());
 
         // PA8/9/10 as AF6 (TIM1_CH1/2/3)
-        let gpioa_moder = crate::periph_addr::GPIOA as *mut u32;
-        let gpioa_afrh = (crate::periph_addr::GPIOA + 0x24) as *mut u32;
-        let m = gpioa_moder.read_volatile();
-        gpioa_moder.write_volatile(
-            (m & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20)
-        );
-        let a = gpioa_afrh.read_volatile();
-        gpioa_afrh.write_volatile((a & !(0xFFF)) | (6 | 6<<4 | 6<<8)); // AF6
+        gpioa.moder().modify(|_, w| {
+            w.moder8().bits(0b10).moder9().bits(0b10).moder10().bits(0b10)
+        });
+        gpioa.afrh().modify(|_, w| {
+            w.afrh8().bits(6).afrh9().bits(6).afrh10().bits(6)
+        });
     }
 
     // TIM1 PWM: 170MHz / (ARR+1) = 24kHz → ARR = 7082
     let dead_time = rm32::board::PROTONDRIVE_G431.dead_time;
     unsafe {
-        ((TIM1_BASE_G4+0x28) as *mut u32).write_volatile(0); // PSC
-        ((TIM1_BASE_G4+0x2C) as *mut u32).write_volatile(crate::config::TIM1_AUTORELOAD as u32);
-        ((TIM1_BASE_G4+0x18) as *mut u32).write_volatile(0x6868); // CCMR1: OC1/2 PWM1
-        ((TIM1_BASE_G4+0x1C) as *mut u32).write_volatile(0x0068); // CCMR2: OC3 PWM1
-        ((TIM1_BASE_G4+0x20) as *mut u32).write_volatile(0x555);  // CCER: CC1-3 + CC1N-3N
-        ((TIM1_BASE_G4+0x44) as *mut u32).write_volatile(dead_time as u32 | (1<<15)); // BDTR: DT + MOE
-        ((TIM1_BASE_G4+0x00) as *mut u32).write_volatile(1); // CR1: CEN
+        tim1.psc().write(|w| w.psc().bits(0));
+        tim1.arr().write(|w| w.arr().bits(crate::config::TIM1_AUTORELOAD as u32));
+        tim1.ccmr1_output().write(|w| w.bits(0x6868));  // OC1/2 PWM mode 1
+        tim1.ccmr2_output().write(|w| w.bits(0x0068));  // OC3 PWM mode 1
+        tim1.ccer().write(|w| w.bits(0x555));            // CC1-3 + CC1N-3N enable
+        tim1.bdtr().write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
+        tim1.cr1().write(|w| w.cen().set_bit());
     }
     let pwm = G431Pwm { _private: () };
     let phase = G0APhaseDriver::new(false);
@@ -529,7 +525,7 @@ pub fn init() -> InitResult<G431Pwm, G431System> {
     crate::comp_init_g431::init_comp();
     let comp = crate::comparator::g431::new_comparator();
     let interval = Tim2Interval::new();
-    let com_timer = Tim14Com::new(); // TIM16 but same register layout
+    let com_timer = Tim14Com::new();
 
     // Input capture (TIM15 + DMA1_CH1)
     {
@@ -548,18 +544,17 @@ pub fn init() -> InitResult<G431Pwm, G431System> {
 
     // TIM6: 170MHz / 8500 = 20kHz
     unsafe {
-        let tim6 = 0x4000_1000u32;
-        ((tim6+0x28) as *mut u32).write_volatile(0); // PSC
-        ((tim6+0x2C) as *mut u32).write_volatile(8499); // ARR: 170MHz/8500=20kHz
-        ((tim6+0x14) as *mut u32).write_volatile(1); // EGR: UG
-        ((tim6+0x10) as *mut u32).write_volatile(0); // SR: clear
-        ((tim6+0x0C) as *mut u32).write_volatile(1); // DIER: UIE
-        ((tim6+0x00) as *mut u32).write_volatile(1); // CR1: CEN
+        tim6.psc().write(|w| w.psc().bits(0));
+        tim6.arr().write(|w| w.arr().bits(8499));
+        tim6.egr().write(|w| w.ug().set_bit());
+        tim6.sr().write(|w| w.bits(0));
+        tim6.dier().write(|w| w.uie().set_bit());
+        tim6.cr1().write(|w| w.cen().set_bit());
     }
 
     // NVIC
     unsafe {
-        use stm32g4::stm32g431::{Interrupt, NVIC};
+        use pac::{Interrupt, NVIC};
         NVIC::unmask(Interrupt::TIM6_DACUNDER);
         NVIC::unmask(Interrupt::TIM1_UP_TIM16);
         NVIC::unmask(Interrupt::COMP1_2_3);
@@ -569,8 +564,7 @@ pub fn init() -> InitResult<G431Pwm, G431System> {
 
     // EXTI line 15 (software-triggered by DMA TC)
     unsafe {
-        let imr = 0x4001_0400 as *mut u32; // EXTI IMR1
-        imr.write_volatile(imr.read_volatile() | (1 << 15));
+        exti.imr1().modify(|_, w| w.im15().set_bit());
     }
 
     let sys = G431System { _private: () };

@@ -168,7 +168,7 @@ fn main() -> ! {
         last_armed: false,
         just_armed: false,
         use_ntc: BOARD.use_ntc,
-        custom_led: BOARD.custom_led,
+        led: rm32_stm32::main_loop::NoLed,
         led_counter: 0,
     };
 

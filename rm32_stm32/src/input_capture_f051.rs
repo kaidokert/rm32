@@ -6,7 +6,7 @@ use crate::capture_generic::GenericCapture;
 use crate::regs::modify as modify_reg;
 use crate::periph_addr as addr;
 
-const RCC_BASE: u32 = addr::RCC;
+fn rcc_base() -> u32 { addr::rcc() }
 
 // --- DMA1 Channel 5 (F051, fixed assignment) ---
 pub struct F051Dma;
@@ -41,8 +41,8 @@ pub struct F051Timer { pub prescaler: u8 }
 impl TimerOps for F051Timer {
     fn reset(&self) {
         unsafe {
-            modify_reg(RCC_BASE + 0x0C, |v| v | (1 << 16));
-            modify_reg(RCC_BASE + 0x0C, |v| v & !(1 << 16));
+            modify_reg(rcc_base() + 0x0C, |v| v | (1 << 16));
+            modify_reg(rcc_base() + 0x0C, |v| v & !(1 << 16));
         }
     }
     fn configure_capture(&self, _: u8) {
@@ -98,9 +98,9 @@ pub type F051DshotCapture = GenericCapture<F051Dma, F051Timer, F051Pin>;
 
 pub fn init_f051() {
     unsafe {
-        let apb2enr = (RCC_BASE + 0x18) as *mut u32;
+        let apb2enr = (rcc_base() + 0x18) as *mut u32;
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 16));
-        let ahbenr = (RCC_BASE + 0x14) as *mut u32;
+        let ahbenr = (rcc_base() + 0x14) as *mut u32;
         ahbenr.write_volatile(ahbenr.read_volatile() | (1 << 0) | (1 << 17));
 
         let gpioa = &*GPIOA::ptr();

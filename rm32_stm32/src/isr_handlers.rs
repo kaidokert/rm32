@@ -84,6 +84,7 @@ pub fn handle_tim6() {
         &mut state.hal.comp,
         &mut state.hal.phase,
         &mut state.hal.interval,
+        &mut state.hal.com_timer,
     );
     state.ten_khz_counter = counters.ten_khz_counter;
     state.one_khz_loop_counter = counters.one_khz_loop_counter;

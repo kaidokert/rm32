@@ -75,3 +75,43 @@ pub const BEMF_LENIENT_THROTTLE: u16 = 150;
 /// `advance = (temp_advance * commutation_interval) >> ADVANCE_SHIFT`
 /// With ADVANCE_SHIFT=6, each unit of temp_advance ≈ 360°/64 ≈ 5.6° of advance.
 pub const ADVANCE_SHIFT: u32 = 6;
+
+/// Minimum zero-crosses before applying advance timing in old_routine BEMF polling.
+/// Below this count, commutate immediately without waiting for advance delay.
+pub const MIN_ZC_FOR_ADVANCE: u32 = 5;
+
+/// Signal timeout threshold (20kHz ticks). 10000 = 0.5 second with no valid input.
+pub const SIGNAL_TIMEOUT_DISARM: u16 = 10000;
+
+/// Sine startup: throttle below which BEMF timeout is cleared.
+pub const SINE_BEMF_CLEAR_THROTTLE: u16 = 160;
+
+/// Sine mode: throttle below which slow stepping is used (vs changeover acceleration).
+pub const SINE_SLOW_STEP_THROTTLE: u16 = 137;
+
+/// Sine mode: throttle above which changeover to BLDC may occur.
+pub const SINE_CHANGEOVER_THROTTLE: u16 = 200;
+
+/// Sine mode step delay at high throttle (µs).
+pub const SINE_FAST_STEP_DELAY: u16 = 80;
+
+/// Sine mode step delay at medium throttle (µs).
+pub const SINE_MEDIUM_STEP_DELAY: u16 = 120;
+
+/// Custom LED blink half-period (main loop ticks).
+pub const LED_BLINK_HALF_PERIOD: u16 = 2000;
+
+/// Custom LED high-throttle threshold (above this = solid on).
+pub const LED_HIGH_THROTTLE: u16 = 1947;
+
+/// DShot bidir: throttle boundary for reverse braking.
+pub const DSHOT_BIDIR_BRAKE_LIMIT: u16 = 1047;
+
+/// Calibration entry: minimum high-stick hold ticks before entering calibration.
+pub const CALIBRATION_ENTRY_COUNT: u8 = 50;
+
+/// Calibration entry: minimum throttle to start counting.
+pub const CALIBRATION_MIN_THROTTLE: u16 = 1500;
+
+/// Calibration entry: maximum jitter between readings.
+pub const CALIBRATION_MAX_JITTER: u32 = 50;

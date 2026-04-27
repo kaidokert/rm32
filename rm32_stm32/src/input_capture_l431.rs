@@ -6,7 +6,7 @@ use crate::capture_generic::GenericCapture;
 use crate::regs::modify as modify_reg;
 use crate::periph_addr as addr;
 
-const RCC_BASE: u32 = addr::RCC;
+fn rcc_base() -> u32 { addr::rcc() }
 
 // --- DMA1 Channel 5 (L431, flat registers) ---
 pub struct L431Dma;
@@ -30,8 +30,8 @@ pub struct L431Timer { pub prescaler: u8 }
 impl TimerOps for L431Timer {
     fn reset(&self) {
         unsafe {
-            modify_reg(RCC_BASE + 0x20, |v| v | (1 << 16));
-            modify_reg(RCC_BASE + 0x20, |v| v & !(1 << 16));
+            modify_reg(rcc_base() + 0x20, |v| v | (1 << 16));
+            modify_reg(rcc_base() + 0x20, |v| v & !(1 << 16));
         }
     }
     fn configure_capture(&self, _: u8) {
@@ -88,9 +88,9 @@ pub fn init_l431() {
     let dma = unsafe { &*DMA1::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
     unsafe {
-        modify_reg(RCC_BASE + 0x60, |v| v | (1 << 16));
-        modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0));
-        modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 0));
+        modify_reg(rcc_base() + 0x60, |v| v | (1 << 16));
+        modify_reg(rcc_base() + 0x48, |v| v | (1 << 0));
+        modify_reg(rcc_base() + 0x4C, |v| v | (1 << 0));
     }
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));

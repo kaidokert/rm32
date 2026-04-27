@@ -12,11 +12,22 @@ use rm32::pid::Pid;
 use rm32::functions::get_abs_dif;
 use rm32::hal::{Adc, TelemetryUart};
 use rm32::telemetry;
+use embedded_hal::digital::OutputPin;
 
 use crate::shared::SharedState;
 
-/// Main-loop exclusive state.
-pub struct MainState {
+/// Marker type for boards without a custom LED.
+pub struct NoLed;
+impl OutputPin for NoLed {
+    fn set_low(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    fn set_high(&mut self) -> Result<(), Self::Error> { Ok(()) }
+}
+impl embedded_hal::digital::ErrorType for NoLed {
+    type Error = core::convert::Infallible;
+}
+
+/// Main-loop exclusive state, generic over optional LED pin.
+pub struct MainState<LED: OutputPin = NoLed> {
     pub protection: ProtectionState,
     pub measurements: Measurements,
     pub telemetry: TelemetryState,
@@ -51,12 +62,12 @@ pub struct MainState {
     pub just_armed: bool,
     /// Use external NTC thermistor instead of internal temp sensor
     pub use_ntc: bool,
-    /// Custom LED: blink rate based on throttle
-    pub custom_led: bool,
+    /// Custom LED pin (NoLed if board has no custom LED)
+    pub led: LED,
     pub led_counter: u16,
 }
 
-impl MainState {
+impl<LED: OutputPin> MainState<LED> {
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
     pub fn tick(&mut self, shared: &SharedState, adc: &mut dyn Adc, telem: &mut dyn TelemetryUart) {
         // e_com_time calculation
@@ -76,7 +87,7 @@ impl MainState {
         if zc > 100 && adj_input < 200 {
             self.protection.bemf_timeout_happened = 0;
         }
-        if self.config.use_sine_start != 0 && adj_input < 160 {
+        if self.config.use_sine_start != 0 && adj_input < rm32::constants::SINE_BEMF_CLEAR_THROTTLE {
             self.protection.bemf_timeout_happened = 0;
         }
         // Dynamic BEMF timeout threshold: lenient at low throttle
@@ -112,7 +123,7 @@ impl MainState {
         }
 
         // Signal timeout
-        if shared.signal_timeout() > 10000
+        if shared.signal_timeout() > rm32::constants::SIGNAL_TIMEOUT_DISARM
             && shared.armed() {
                 shared.transition(rm32::motor_mode::MotorEvent::Disarm);
                 shared.set_input_set(false);
@@ -210,25 +221,21 @@ impl MainState {
             shared.set_send_telemetry(false);
         }
 
-        // Custom LED on PB3: blink with throttle, solid when high
-        if self.custom_led {
+        // Custom LED: blink with throttle, solid when high
+        {
             let input = shared.adjusted_input();
             self.led_counter = self.led_counter.wrapping_add(1);
-            const PB3_BSRR: u32 = 0x4800_0418; // GPIOB BSRR
             if input >= 47 && input < 1947 {
-                let on = self.led_counter > 2000;
-                unsafe {
-                    if on {
-                        (PB3_BSRR as *mut u32).write_volatile(1 << 3);
-                    } else {
-                        (PB3_BSRR as *mut u32).write_volatile(1 << (3 + 16));
-                    }
+                if self.led_counter > rm32::constants::LED_BLINK_HALF_PERIOD {
+                    let _ = self.led.set_high();
+                } else {
+                    let _ = self.led.set_low();
                 }
-                if self.led_counter > 4000 { self.led_counter = 0; }
-            } else if input > 1947 {
-                unsafe { (PB3_BSRR as *mut u32).write_volatile(1 << 3); }
+                if self.led_counter > rm32::constants::LED_BLINK_HALF_PERIOD * 2 { self.led_counter = 0; }
+            } else if input > rm32::constants::LED_HIGH_THROTTLE {
+                let _ = self.led.set_high();
             } else {
-                unsafe { (PB3_BSRR as *mut u32).write_volatile(1 << (3 + 16)); }
+                let _ = self.led.set_low();
             }
         }
     }

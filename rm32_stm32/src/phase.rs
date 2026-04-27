@@ -11,10 +11,15 @@
 use core::marker::PhantomData;
 use rm32::hal::PhaseOutput;
 use crate::gpio_pin::GpioPin;
+use crate::gpio_regs::GpioPort;
 
 /// GPIO MODER values.
 const MODE_OUTPUT: u32 = 0b01;
 const MODE_ALTERNATE: u32 = 0b10;
+
+/// Pulse output toggle function — stored as fn pointer to avoid storing raw addresses.
+/// Monomorphized per pin type at `enable_pulse_output` call site.
+type PulseToggleFn = fn(u32);
 
 /// 3-phase driver, parameterized by 6 compile-time pin types.
 ///
@@ -25,8 +30,8 @@ pub struct PhaseDriver<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: G
     /// PWM/enable bridge mode: low-side pins are enable (output high/low)
     /// instead of complementary PWM (alternate mode).
     bridge_enable: bool,
-    /// RPM pulse output: (port_base, pin_bit_mask) for ODR XOR toggle.
-    pulse_pin: Option<(u32, u32)>,
+    /// RPM pulse output toggle function + pin mask.
+    pulse: Option<(PulseToggleFn, u32)>,
     _pins: PhantomData<(AH, AL, BH, BL, CH, CL)>,
 }
 
@@ -34,19 +39,23 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
     pub fn new(comp_pwm: bool) -> Self {
-        Self { comp_pwm, bridge_enable: false, pulse_pin: None, _pins: PhantomData }
+        Self { comp_pwm, bridge_enable: false, pulse: None, _pins: PhantomData }
     }
 
     pub fn new_bridge(comp_pwm: bool) -> Self {
-        Self { comp_pwm, bridge_enable: true, pulse_pin: None, _pins: PhantomData }
+        Self { comp_pwm, bridge_enable: true, pulse: None, _pins: PhantomData }
     }
 
     /// Enable RPM pulse output on the given pin.
-    /// The pin's GPIO port ODR is XORed with the pin mask on steps 1 and 4.
+    /// Creates a monomorphized toggle function for the pin's port.
     pub fn enable_pulse_output<P: GpioPin>(&mut self) {
         P::set_mode(MODE_OUTPUT);
         P::set_low();
-        self.pulse_pin = Some((P::PORT, P::BSRR_SET));
+        // Capture the port's ODR toggle as a monomorphized fn pointer.
+        fn toggle<Port: GpioPort>(mask: u32) {
+            Port::write_odr(Port::read_odr() ^ mask);
+        }
+        self.pulse = Some((toggle::<P::Port>, P::BSRR_SET));
     }
 
     /// Phase PWM: high-side alternate (TIM1), low-side depends on mode.
@@ -134,13 +143,9 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     }
 
     fn pulse_toggle(&mut self, step: u8) {
-        if let Some((port, mask)) = self.pulse_pin {
+        if let Some((toggle_fn, mask)) = self.pulse {
             if step == 1 || step == 4 {
-                // Toggle via ODR XOR (ODR at offset 0x14)
-                let odr = (port + 0x14) as *mut u32;
-                unsafe {
-                    odr.write_volatile(odr.read_volatile() ^ mask);
-                }
+                toggle_fn(mask);
             }
         }
     }

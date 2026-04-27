@@ -9,7 +9,7 @@ use crate::periph_addr as addr;
 use crate::pac::{DMA1, GPIOB, USART1};
 use crate::regs::modify as modify_reg;
 
-const RCC_BASE: u32 = addr::RCC;
+fn rcc_base() -> u32 { addr::rcc() }
 
 pub struct L431TelemUart { tx_buf: [u8; 49] }
 
@@ -23,9 +23,9 @@ impl L431TelemUart {
 
         unsafe {
             // Enable clocks: USART1 (APB2ENR bit 14), GPIOB (AHB2ENR bit 1), DMA1 (AHB1ENR bit 0)
-            modify_reg(RCC_BASE + 0x60, |v| v | (1 << 14)); // APB2ENR
-            modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 1));  // AHB2ENR GPIOBEN
-            modify_reg(RCC_BASE + 0x48, |v| v | (1 << 0));  // AHB1ENR DMA1EN
+            modify_reg(rcc_base() + 0x60, |v| v | (1 << 14)); // APB2ENR
+            modify_reg(rcc_base() + 0x4C, |v| v | (1 << 1));  // AHB2ENR GPIOBEN
+            modify_reg(rcc_base() + 0x48, |v| v | (1 << 0));  // AHB1ENR DMA1EN
 
             // PB6: AF7 (USART1_TX), open-drain, pull-up
             gpiob.moder.modify(|_, w| w.moder6().bits(0b10)); // AF mode

@@ -8,7 +8,7 @@
 use crate::periph_addr as addr;
 use crate::pac::{COMP, EXTI, GPIOA};
 
-const RCC_BASE: u32 = addr::RCC;
+fn rcc_base() -> u32 { addr::rcc() }
 
 /// Initialize COMP1 for BEMF sensing.
 pub fn init_comp1() {
@@ -26,7 +26,7 @@ pub fn init_comp1() {
         });
 
         // Enable SYSCFG/COMP clock (APB2ENR bit 0)
-        let apb2enr = (RCC_BASE + 0x18) as *mut u32;
+        let apb2enr = (rcc_base() + 0x18) as *mut u32;
         apb2enr.write_volatile(apb2enr.read_volatile() | (1 << 0));
 
         // Configure COMP1: PA5 as INM (INMSEL=101), enabled, high speed

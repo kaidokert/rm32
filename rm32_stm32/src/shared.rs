@@ -1,11 +1,12 @@
 //! Shared state between ISR and main loop — all atomic, lock-free.
 //!
-//! Uses Release (stores) / Acquire (loads) ordering for cross-context
-//! data passing. While Relaxed is sufficient on single-core Cortex-M0+
-//! (no cache, no reordering), Acquire/Release is future-proof for
-//! dual-core targets (RP2040, STM32H7) and communicates intent.
+//! Uses `portable-atomic` for cross-architecture support:
+//! - On Cortex-M4+ (G431, L431): hardware LDREX/STREX for lock-free CAS
+//! - On Cortex-M0+ (G071, F051): automatic fallback to interrupt-free sections
+//!
+//! Acquire/Release ordering for cross-context data passing.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
+use portable_atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 use rm32::motor_mode::MotorMode;
 
 /// Store ordering — ensures writes are visible to other contexts.
@@ -89,15 +90,14 @@ impl SharedState {
     pub fn motor_mode(&self) -> MotorMode { MotorMode::from_u8(self.motor_mode.load(ACQ)) }
     pub fn set_motor_mode(&self, mode: MotorMode) { self.motor_mode.store(mode as u8, REL); }
 
-    /// Atomic state transition under interrupt::free.
+    /// Atomic state transition via CAS.
+    /// On M4: hardware LDREX/STREX. On M0: portable-atomic disables interrupts.
     pub fn transition(&self, event: rm32::motor_mode::MotorEvent) {
-        cortex_m::interrupt::free(|_| {
-            let cur = self.motor_mode();
-            let new = cur.transition(event);
-            if new != cur {
-                self.motor_mode.store(new as u8, REL);
-            }
-        });
+        self.motor_mode.fetch_update(REL, ACQ, |cur| {
+            let mode = MotorMode::from_u8(cur);
+            let new = mode.transition(event);
+            if new != mode { Some(new as u8) } else { None }
+        }).ok();
     }
 
     // Convenience getters (delegate to motor_mode)
@@ -106,44 +106,39 @@ impl SharedState {
     pub fn old_routine(&self) -> bool { self.motor_mode().is_old_routine() }
     pub fn stepper_sine(&self) -> bool { self.motor_mode().is_stepper_sine() }
 
-    // Convenience setters — interrupt-free CAS for mode transitions.
-    // On Cortex-M0+ (no CAS instruction), disabling interrupts is the
-    // only way to make load-check-store atomic.
+    // Convenience setters — atomic CAS via portable-atomic.
+    // Hardware LDREX/STREX on M4, interrupt-free fallback on M0.
     pub fn set_armed(&self, v: bool) {
-        cortex_m::interrupt::free(|_| {
-            if v && !self.armed() {
-                self.motor_mode.store(MotorMode::Armed as u8, REL);
-            } else if !v {
-                self.motor_mode.store(MotorMode::Disarmed as u8, REL);
-            }
-        });
+        self.motor_mode.fetch_update(REL, ACQ, |cur| {
+            let mode = MotorMode::from_u8(cur);
+            if v && !mode.is_armed() { Some(MotorMode::Armed as u8) }
+            else if !v { Some(MotorMode::Disarmed as u8) }
+            else { None }
+        }).ok();
     }
     pub fn set_running(&self, v: bool) {
-        cortex_m::interrupt::free(|_| {
-            if v && !self.running() {
-                self.motor_mode.store(MotorMode::OldRoutine as u8, REL);
-            } else if !v && self.running() {
-                self.motor_mode.store(MotorMode::Armed as u8, REL);
-            }
-        });
+        self.motor_mode.fetch_update(REL, ACQ, |cur| {
+            let mode = MotorMode::from_u8(cur);
+            if v && !mode.is_running() { Some(MotorMode::OldRoutine as u8) }
+            else if !v && mode.is_running() { Some(MotorMode::Armed as u8) }
+            else { None }
+        }).ok();
     }
     pub fn set_old_routine(&self, v: bool) {
-        cortex_m::interrupt::free(|_| {
-            if v && self.running() {
-                self.motor_mode.store(MotorMode::OldRoutine as u8, REL);
-            } else if !v && self.old_routine() {
-                self.motor_mode.store(MotorMode::Running as u8, REL);
-            }
-        });
+        self.motor_mode.fetch_update(REL, ACQ, |cur| {
+            let mode = MotorMode::from_u8(cur);
+            if v && mode.is_running() { Some(MotorMode::OldRoutine as u8) }
+            else if !v && mode.is_old_routine() { Some(MotorMode::Running as u8) }
+            else { None }
+        }).ok();
     }
     pub fn set_stepper_sine(&self, v: bool) {
-        cortex_m::interrupt::free(|_| {
-            if v {
-                self.motor_mode.store(MotorMode::StepperSine as u8, REL);
-            } else if self.stepper_sine() {
-                self.motor_mode.store(MotorMode::Armed as u8, REL);
-            }
-        });
+        self.motor_mode.fetch_update(REL, ACQ, |cur| {
+            let mode = MotorMode::from_u8(cur);
+            if v { Some(MotorMode::StepperSine as u8) }
+            else if mode.is_stepper_sine() { Some(MotorMode::Armed as u8) }
+            else { None }
+        }).ok();
     }
 
     // --- Bool accessors ---
@@ -174,14 +169,10 @@ impl SharedState {
     pub fn zero_crosses(&self) -> u32 { self.zero_crosses.load(ACQ) }
     pub fn set_zero_crosses(&self, v: u32) { self.zero_crosses.store(v, REL); }
     /// Increment zero_crosses, capped at 10000 (matches C behavior).
-    /// Uses interrupt-free section to prevent ISR/main RMW race.
     pub fn increment_zero_crosses(&self) {
-        cortex_m::interrupt::free(|_| {
-            let v = self.zero_crosses.load(ACQ);
-            if v < 10000 {
-                self.zero_crosses.store(v + 1, REL);
-            }
-        });
+        self.zero_crosses.fetch_update(REL, ACQ, |v| {
+            if v < 10000 { Some(v + 1) } else { None }
+        }).ok();
     }
 
     pub fn commutation_interval(&self) -> u32 { self.commutation_interval.load(ACQ) }
@@ -204,12 +195,9 @@ impl SharedState {
     pub fn signal_timeout(&self) -> u16 { self.signal_timeout.load(ACQ) }
     pub fn set_signal_timeout(&self, v: u16) { self.signal_timeout.store(v, REL); }
     pub fn increment_signal_timeout(&self) {
-        cortex_m::interrupt::free(|_| {
-            let v = self.signal_timeout.load(ACQ);
-            if v < u16::MAX {
-                self.signal_timeout.store(v + 1, REL);
-            }
-        });
+        self.signal_timeout.fetch_update(REL, ACQ, |v| {
+            if v < u16::MAX { Some(v + 1) } else { None }
+        }).ok();
     }
 
     pub fn zero_input_count(&self) -> u16 { self.zero_input_count.load(ACQ) }
@@ -234,15 +222,8 @@ impl rm32::shared_comm::SharedComm for SharedState {
     fn motor_mode(&self) -> MotorMode { self.motor_mode() }
     fn set_motor_mode(&self, mode: MotorMode) { self.set_motor_mode(mode); }
 
-    /// Atomic transition: load-compute-store under interrupt::free.
     fn transition(&self, event: rm32::motor_mode::MotorEvent) {
-        cortex_m::interrupt::free(|_| {
-            let cur = self.motor_mode();
-            let new = cur.transition(event);
-            if new != cur {
-                self.motor_mode.store(new as u8, REL);
-            }
-        });
+        SharedState::transition(self, event);
     }
 
     fn input_set(&self) -> bool { self.input_set() }

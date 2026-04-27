@@ -6,101 +6,83 @@
 use crate::adc_hal::{AdcOps, TempCalibration};
 use crate::adc_generic::GenericAdc;
 use crate::dma_buf::DmaBuf;
-use crate::regs::{modify as modify_reg, write, InitError, wait_for};
-use crate::periph_addr as addr;
+use crate::regs::{InitError, wait_for};
+use stm32g4::stm32g431 as pac;
 
 static ADC_DMA_BUF: DmaBuf<u16, 3> = DmaBuf::new();
-// Dual mode: separate buffers for ADC1 and ADC2
 static ADC1_DMA_BUF: DmaBuf<u16, 2> = DmaBuf::new();
 static ADC2_DMA_BUF: DmaBuf<u16, 2> = DmaBuf::new();
 
-// G4 temp cal addresses (same as L4 family)
 const TEMP_CAL: TempCalibration = TempCalibration {
     cal1_addr: 0x1FFF_75A8, cal2_addr: 0x1FFF_75CA,
     cal1_temp: 30, cal2_temp: 110,
 };
 
-// G431 peripheral base addresses
-const RCC: u32 = 0x4002_1000;
-const ADC1_BASE: u32 = 0x5000_0000;
-const ADC_COMMON: u32 = 0x5000_0300;
-const DMA1_BASE: u32 = 0x4002_0000;
-const DMAMUX_BASE: u32 = 0x4002_0800;
-const GPIOA: u32 = 0x4800_0000;
-
 pub struct G431AdcOps;
 
 impl AdcOps for G431AdcOps {
     fn init(&self) -> Result<(), InitError> {
+        let rcc = unsafe { &*pac::RCC::PTR };
+        let gpioa = unsafe { &*pac::GPIOA::PTR };
+        let adc1 = unsafe { &*pac::ADC1::PTR };
+        let adc_common = unsafe { &*pac::ADC12_COMMON::PTR };
+        let dma = unsafe { &*pac::DMA1::PTR };
+        let dmamux = unsafe { &*pac::DMAMUX::PTR };
+
         unsafe {
-            // Enable clocks: ADC12 (AHB2ENR bit 13), DMA1 (AHB1ENR bit 0), GPIOA (AHB2ENR bit 0)
-            modify_reg(RCC + 0x4C, |v| v | (1 << 13) | (1 << 0)); // AHB2ENR
-            modify_reg(RCC + 0x48, |v| v | (1 << 0));              // AHB1ENR
+            // Enable clocks
+            rcc.ahb2enr().modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit());
+            rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
 
             // PA4, PA5 as analog
-            let moder = GPIOA as *mut u32;
-            modify_reg(GPIOA, |v| (v & !(0b11 << 8 | 0b11 << 10)) | (0b11 << 8 | 0b11 << 10));
+            gpioa.moder().modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));
 
-            // ADC common: CKMODE = PCLK/4
-            write(ADC_COMMON + 0x08, 0b11 << 16); // CCR: CKMODE=0b11 (HCLK/4)
-            // Enable temperature sensor channel
-            modify_reg(ADC_COMMON + 0x08, |v| v | (1 << 23)); // VSENSESEL
+            // ADC common: CKMODE = PCLK/4, enable temp sensor
+            adc_common.ccr().write(|w| w.ckmode().bits(0b11).vsensesel().set_bit());
 
-            // DMA1 Channel 2 setup
-            // DMAMUX: CH1 (DMA CH2 = DMAMUX CH1) → ADC1 request (5)
-            write(DMAMUX_BASE + 0x04, 5); // DMAMUX_C1CR = ADC1
+            // DMA1 Channel 2 → ADC1 (DMAMUX request 5)
+            dmamux.ccr(1).write(|w| w.dmareq_id().bits(5));
+            let ch2 = dma.ch2();
+            ch2.cr().write(|w| w.bits(0)); // disable
+            ch2.par().write(|w| w.bits(adc1.dr().as_ptr() as u32));
+            ch2.mar().write(|w| w.bits(ADC_DMA_BUF.as_ptr() as u32));
+            ch2.ndtr().write(|w| w.bits(3));
+            // Circular, MINC, 16-bit psize, 16-bit msize
+            ch2.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch2.cr().modify(|r, w| w.bits(r.bits() | 1)); // enable
 
-            let dma_ch2_base = DMA1_BASE + 0x1C; // Channel 2 offset
-            write(dma_ch2_base + 0x00, 0); // CCR: disable
-            write(dma_ch2_base + 0x08, ADC1_BASE + 0x40); // CPAR: ADC1_DR
-            write(dma_ch2_base + 0x0C, ADC_DMA_BUF.as_ptr() as u32); // CMAR
-            write(dma_ch2_base + 0x04, 3); // CNDTR: 3 transfers
-            // CCR: circ, minc, 16-bit psize, 16-bit msize
-            write(dma_ch2_base + 0x00, (1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10));
-            modify_reg(dma_ch2_base + 0x00, |v| v | 1); // Enable
+            // ADC1: exit deep power-down, enable regulator
+            adc1.cr().modify(|_, w| w.deeppwd().clear_bit());
+            adc1.cr().modify(|_, w| w.advregen().set_bit());
+            cortex_m::asm::delay(170 * 20);
 
-            // ADC1 configuration
-            // Exit deep power-down
-            modify_reg(ADC1_BASE + 0x08, |v| v & !(1 << 29)); // DEEPPWD clear
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 28));  // ADVREGEN enable
-            cortex_m::asm::delay(170 * 20); // ~20us startup
-
-            // Sampling time: 47.5 cycles for all channels
-            write(ADC1_BASE + 0x14, 0b100 << 15 | 0b100 << 12); // SMPR1: CH5=47.5, CH4=47.5
-            write(ADC1_BASE + 0x18, 0b100 << 9);                 // SMPR2: CH13=47.5
-            // Enable temperature sensor sampling time
-            modify_reg(ADC1_BASE + 0x14, |v| v | (0b100 << 0)); // SMP0 for TEMPSENSOR (CH16)
+            // Sampling times: 47.5 cycles
+            adc1.smpr1().write(|w| w.bits(0b100 << 15 | 0b100 << 12)); // CH5, CH4
+            adc1.smpr2().write(|w| w.bits(0b100 << 9)); // CH13
 
             // Sequence: 3 conversions — TEMPSENSOR(16), voltage(13), current(5)
-            write(ADC1_BASE + 0x2C, (2 << 0) | (16 << 6) | (13 << 12) | (5 << 18)); // SQR1
+            adc1.sqr1().write(|w| w.bits((2 << 0) | (16 << 6) | (13 << 12) | (5 << 18)));
 
             // CFGR: DMAEN + DMACFG (circular) + CONT
-            write(ADC1_BASE + 0x0C, (1 << 0) | (1 << 1) | (1 << 13));
+            adc1.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit().cont().set_bit());
 
             // Calibration
-            modify_reg(ADC1_BASE + 0x08, |v| v & !(1 << 30)); // ADCALDIF clear (single-ended)
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 31));  // ADCAL start
-            wait_for(|| {
-                let cr = (ADC1_BASE + 0x08) as *const u32;
-                cr.read_volatile() & (1 << 31) == 0
-            }, 100_000, "ADC cal")?;
+            adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
+            adc1.cr().modify(|_, w| w.adcal().set_bit());
+            wait_for(|| !adc1.cr().read().adcal().bit(), 100_000, "ADC cal")?;
             cortex_m::asm::delay(170 * 20);
 
             // Enable ADC
-            write(ADC1_BASE + 0x00, 1 << 0); // ISR: clear ADRDY
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 0)); // ADEN
-            wait_for(|| {
-                let isr = (ADC1_BASE as *const u32).read_volatile();
-                isr & (1 << 0) != 0
-            }, 100_000, "ADC ready")?;
+            adc1.isr().write(|w| w.adrdy().clear_bit_by_one());
+            adc1.cr().modify(|_, w| w.aden().set_bit());
+            wait_for(|| adc1.isr().read().adrdy().bit(), 100_000, "ADC ready")?;
         }
         Ok(())
     }
 
     fn start_conversion(&self) {
-        unsafe {
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 2)); // ADSTART
-        }
+        let adc1 = unsafe { &*pac::ADC1::PTR };
+        unsafe { adc1.cr().modify(|_, w| w.adstart().set_bit()); }
     }
 }
 
@@ -116,95 +98,83 @@ pub fn post_init() -> G431Adc {
 
 // ============================================================
 // Dual ADC mode (SEQURE_G431)
-// ADC1: TEMPSENSOR + NTC (PB1/CH12) → DMA1_CH2
-// ADC2: Voltage (PA6/CH3) + Current (PA7/CH4) → DMA1_CH4
 // ============================================================
-
-const ADC2_BASE: u32 = 0x5000_0100;
-const GPIOB: u32 = 0x4800_0400;
 
 /// Dual ADC: implements Adc trait directly, owns two DMA buffers.
 pub struct G431DualAdc;
 
 impl G431DualAdc {
     pub fn init() -> Result<Self, InitError> {
+        let rcc = unsafe { &*pac::RCC::PTR };
+        let gpioa = unsafe { &*pac::GPIOA::PTR };
+        let gpiob = unsafe { &*pac::GPIOB::PTR };
+        let adc1 = unsafe { &*pac::ADC1::PTR };
+        let adc2 = unsafe { &*pac::ADC2::PTR };
+        let adc_common = unsafe { &*pac::ADC12_COMMON::PTR };
+        let dma = unsafe { &*pac::DMA1::PTR };
+        let dmamux = unsafe { &*pac::DMAMUX::PTR };
+
         unsafe {
-            // Enable clocks: ADC12, DMA1, GPIOA, GPIOB
-            modify_reg(RCC + 0x4C, |v| v | (1 << 13) | (1 << 0) | (1 << 1)); // AHB2ENR
-            modify_reg(RCC + 0x48, |v| v | (1 << 0)); // AHB1ENR
+            // Enable clocks
+            rcc.ahb2enr().modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit().gpioben().set_bit());
+            rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
 
-            // PA6, PA7 as analog (ADC2 inputs)
-            modify_reg(GPIOA, |v| v | (0b11 << 12) | (0b11 << 14));
-            // PB1 as analog (NTC input)
-            modify_reg(GPIOB, |v| v | (0b11 << 2));
+            // PA6, PA7 as analog (ADC2), PB1 as analog (NTC)
+            gpioa.moder().modify(|_, w| w.moder6().bits(0b11).moder7().bits(0b11));
+            gpiob.moder().modify(|_, w| w.moder1().bits(0b11));
 
-            // ADC common: CKMODE = PCLK/4, VSENSESEL, independent mode
-            write(ADC_COMMON + 0x08, (0b11 << 16) | (1 << 23));
+            // ADC common: CKMODE = PCLK/4, enable temp sensor
+            adc_common.ccr().write(|w| w.ckmode().bits(0b11).vsensesel().set_bit());
 
-            // --- DMA1 Channel 2 → ADC1 ---
-            write(DMAMUX_BASE + 0x04, 5); // DMAMUX_C1CR = ADC1
-            let dma_ch2 = DMA1_BASE + 0x1C;
-            write(dma_ch2 + 0x00, 0);
-            write(dma_ch2 + 0x08, ADC1_BASE + 0x40); // CPAR
-            write(dma_ch2 + 0x0C, ADC1_DMA_BUF.as_ptr() as u32);
-            write(dma_ch2 + 0x04, 2); // 2 transfers
-            write(dma_ch2 + 0x00, (1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10));
-            modify_reg(dma_ch2 + 0x00, |v| v | 1);
+            // DMA1 CH2 → ADC1
+            dmamux.ccr(1).write(|w| w.dmareq_id().bits(5));
+            let ch2 = dma.ch2();
+            ch2.cr().write(|w| w.bits(0));
+            ch2.par().write(|w| w.bits(adc1.dr().as_ptr() as u32));
+            ch2.mar().write(|w| w.bits(ADC1_DMA_BUF.as_ptr() as u32));
+            ch2.ndtr().write(|w| w.bits(2));
+            ch2.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch2.cr().modify(|r, w| w.bits(r.bits() | 1));
 
-            // --- DMA1 Channel 4 → ADC2 ---
-            write(DMAMUX_BASE + 0x0C, 36); // DMAMUX_C3CR = ADC2 (request 36)
-            let dma_ch4 = DMA1_BASE + 0x44;
-            write(dma_ch4 + 0x00, 0);
-            write(dma_ch4 + 0x08, ADC2_BASE + 0x40); // CPAR
-            write(dma_ch4 + 0x0C, ADC2_DMA_BUF.as_ptr() as u32);
-            write(dma_ch4 + 0x04, 2); // 2 transfers
-            write(dma_ch4 + 0x00, (1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10));
-            modify_reg(dma_ch4 + 0x00, |v| v | 1);
+            // DMA1 CH4 → ADC2
+            dmamux.ccr(3).write(|w| w.dmareq_id().bits(36));
+            let ch4 = dma.ch4();
+            ch4.cr().write(|w| w.bits(0));
+            ch4.par().write(|w| w.bits(adc2.dr().as_ptr() as u32));
+            ch4.mar().write(|w| w.bits(ADC2_DMA_BUF.as_ptr() as u32));
+            ch4.ndtr().write(|w| w.bits(2));
+            ch4.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch4.cr().modify(|r, w| w.bits(r.bits() | 1));
 
-            // --- ADC1: TEMPSENSOR(16) + NTC(12) ---
-            modify_reg(ADC1_BASE + 0x08, |v| v & !(1 << 29));
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 28));
+            // ADC1: TEMPSENSOR(16) + NTC(12)
+            adc1.cr().modify(|_, w| w.deeppwd().clear_bit());
+            adc1.cr().modify(|_, w| w.advregen().set_bit());
             cortex_m::asm::delay(170 * 20);
-
-            write(ADC1_BASE + 0x14, 0b100 << 0); // SMPR1: SMP0 for temp sensor
-            write(ADC1_BASE + 0x18, 0b100 << 6); // SMPR2: SMP12 = 47.5 cycles
-            write(ADC1_BASE + 0x2C, (1 << 0) | (16 << 6) | (12 << 12)); // SQR1: 2 ranks, temp+NTC
-            write(ADC1_BASE + 0x0C, (1 << 0) | (1 << 1)); // CFGR: DMAEN + DMACFG
-
-            modify_reg(ADC1_BASE + 0x08, |v| v & !(1 << 30));
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 31));
-            wait_for(|| (ADC1_BASE + 0x08) as *const u32 == core::ptr::null() || {
-                ((ADC1_BASE + 0x08) as *const u32).read_volatile() & (1 << 31) == 0
-            }, 100_000, "ADC1 cal")?;
+            adc1.smpr2().write(|w| w.bits(0b100 << 6)); // SMP12 = 47.5 cycles
+            adc1.sqr1().write(|w| w.bits((1 << 0) | (16 << 6) | (12 << 12)));
+            adc1.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit());
+            adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
+            adc1.cr().modify(|_, w| w.adcal().set_bit());
+            wait_for(|| !adc1.cr().read().adcal().bit(), 100_000, "ADC1 cal")?;
             cortex_m::asm::delay(170 * 20);
+            adc1.isr().write(|w| w.adrdy().clear_bit_by_one());
+            adc1.cr().modify(|_, w| w.aden().set_bit());
+            wait_for(|| adc1.isr().read().adrdy().bit(), 100_000, "ADC1 ready")?;
 
-            write(ADC1_BASE + 0x00, 1);
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 0));
-            wait_for(|| {
-                (ADC1_BASE as *const u32).read_volatile() & 1 != 0
-            }, 100_000, "ADC1 ready")?;
-
-            // --- ADC2: Voltage(CH3) + Current(CH4) ---
-            modify_reg(ADC2_BASE + 0x08, |v| v & !(1 << 29));
-            modify_reg(ADC2_BASE + 0x08, |v| v | (1 << 28));
+            // ADC2: Voltage(CH3) + Current(CH4)
+            adc2.cr().modify(|_, w| w.deeppwd().clear_bit());
+            adc2.cr().modify(|_, w| w.advregen().set_bit());
             cortex_m::asm::delay(170 * 20);
-
-            write(ADC2_BASE + 0x14, (0b010 << 9) | (0b100 << 12)); // SMPR1: CH3=2.5cyc, CH4=47.5cyc
-            write(ADC2_BASE + 0x2C, (1 << 0) | (3 << 6) | (4 << 12)); // SQR1: 2 ranks
-            write(ADC2_BASE + 0x0C, (1 << 0) | (1 << 1)); // CFGR: DMAEN + DMACFG
-
-            modify_reg(ADC2_BASE + 0x08, |v| v & !(1 << 30));
-            modify_reg(ADC2_BASE + 0x08, |v| v | (1 << 31));
-            wait_for(|| {
-                ((ADC2_BASE + 0x08) as *const u32).read_volatile() & (1 << 31) == 0
-            }, 100_000, "ADC2 cal")?;
+            adc2.smpr1().write(|w| w.bits((0b010 << 9) | (0b100 << 12))); // CH3=2.5, CH4=47.5
+            adc2.sqr1().write(|w| w.bits((1 << 0) | (3 << 6) | (4 << 12)));
+            adc2.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit());
+            adc2.cr().modify(|_, w| w.adcaldif().clear_bit());
+            adc2.cr().modify(|_, w| w.adcal().set_bit());
+            wait_for(|| !adc2.cr().read().adcal().bit(), 100_000, "ADC2 cal")?;
             cortex_m::asm::delay(170 * 20);
-
-            write(ADC2_BASE + 0x00, 1);
-            modify_reg(ADC2_BASE + 0x08, |v| v | (1 << 0));
-            wait_for(|| {
-                (ADC2_BASE as *const u32).read_volatile() & 1 != 0
-            }, 100_000, "ADC2 ready")?;
+            adc2.isr().write(|w| w.adrdy().clear_bit_by_one());
+            adc2.cr().modify(|_, w| w.aden().set_bit());
+            wait_for(|| adc2.isr().read().adrdy().bit(), 100_000, "ADC2 ready")?;
         }
         Ok(Self)
     }
@@ -214,15 +184,13 @@ impl G431DualAdc {
 
 impl rm32::hal::Adc for G431DualAdc {
     fn start_conversion(&mut self) {
-        unsafe {
-            modify_reg(ADC1_BASE + 0x08, |v| v | (1 << 2));
-        }
+        let adc1 = unsafe { &*pac::ADC1::PTR };
+        unsafe { adc1.cr().modify(|_, w| w.adstart().set_bit()); }
     }
 
     fn start_conversion_2(&mut self) {
-        unsafe {
-            modify_reg(ADC2_BASE + 0x08, |v| v | (1 << 2));
-        }
+        let adc2 = unsafe { &*pac::ADC2::PTR };
+        unsafe { adc2.cr().modify(|_, w| w.adstart().set_bit()); }
     }
 
     fn raw_temperature(&self) -> u16 { ADC1_DMA_BUF.read()[0] }

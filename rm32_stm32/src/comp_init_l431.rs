@@ -9,7 +9,7 @@ use crate::periph_addr as addr;
 use crate::pac::{COMP, EXTI, GPIOA, GPIOB};
 use crate::regs::modify as modify_reg;
 
-const RCC_BASE: u32 = addr::RCC;
+fn rcc_base() -> u32 { addr::rcc() }
 
 /// Initialize COMP2 for BEMF sensing on L431.
 pub fn init_comp2() {
@@ -20,7 +20,7 @@ pub fn init_comp2() {
 
     unsafe {
         // Enable GPIOA, GPIOB clocks (AHB2ENR bits 0, 1)
-        modify_reg(RCC_BASE + 0x4C, |v| v | (1 << 0) | (1 << 1));
+        modify_reg(rcc_base() + 0x4C, |v| v | (1 << 0) | (1 << 1));
 
         // PA4, PA5 as analog (INM inputs)
         gpioa.moder.modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));

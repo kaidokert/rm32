@@ -8,7 +8,7 @@
 
 use rm32::ws2812::WS2812Pin;
 
-const GPIOB_BASE: u32 = crate::periph_addr::GPIOB;
+fn gpiob_base() -> u32 { crate::periph_addr::gpiob() }
 const BSRR: u32 = 0x18;
 const OSPEEDR: u32 = 0x08;
 
@@ -24,12 +24,12 @@ impl Ws2812Gpio {
     pub fn new(pin: u8, cpu_mhz: u32) -> Self {
         // Configure pin as push-pull output, high speed
         unsafe {
-            let moder = GPIOB_BASE as *mut u32;
+            let moder = gpiob_base() as *mut u32;
             let offset = pin as u32 * 2;
             let v = moder.read_volatile();
             moder.write_volatile((v & !(0b11 << offset)) | (0b01 << offset)); // output
 
-            let ospeedr = (GPIOB_BASE + OSPEEDR) as *mut u32;
+            let ospeedr = (gpiob_base() + OSPEEDR) as *mut u32;
             let v = ospeedr.read_volatile();
             ospeedr.write_volatile(v | (0b11 << offset)); // very high speed
         }
@@ -41,14 +41,14 @@ impl WS2812Pin for Ws2812Gpio {
     #[inline(always)]
     fn set_high(&mut self) {
         unsafe {
-            ((GPIOB_BASE + BSRR) as *mut u32).write_volatile(1 << self.pin);
+            ((gpiob_base() + BSRR) as *mut u32).write_volatile(1 << self.pin);
         }
     }
 
     #[inline(always)]
     fn set_low(&mut self) {
         unsafe {
-            ((GPIOB_BASE + BSRR) as *mut u32).write_volatile(1 << (self.pin + 16));
+            ((gpiob_base() + BSRR) as *mut u32).write_volatile(1 << (self.pin + 16));
         }
     }
 

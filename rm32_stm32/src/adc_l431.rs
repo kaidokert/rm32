@@ -18,7 +18,7 @@ pub struct L431AdcOps;
 
 impl AdcOps for L431AdcOps {
     fn init(&self) -> Result<(), InitError> {
-        let rcc_base = addr::RCC;
+        let rcc_base = addr::rcc();
         unsafe {
             modify_reg(rcc_base + 0x4C, |v| v | (1 << 13) | (1 << 0));
             modify_reg(rcc_base + 0x48, |v| v | (1 << 0));

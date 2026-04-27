@@ -47,11 +47,19 @@ pub unsafe fn modify_off(base: u32, offset: u32, f: impl FnOnce(u32) -> u32) {
     ptr.write_volatile(f(ptr.read_volatile()));
 }
 
-/// Hardware initialization error.
+/// Hardware initialization error with subsystem identification.
 #[derive(Debug, Clone, Copy)]
 pub enum InitError {
     /// A hardware flag didn't reach expected state within timeout.
     Timeout(&'static str),
+    /// ADC calibration or enable failed.
+    AdcInit(&'static str),
+    /// Clock PLL lock or switch failed.
+    ClockInit(&'static str),
+    /// UART handshake failed.
+    UartInit(&'static str),
+    /// Flash unlock or erase failed.
+    FlashError(&'static str),
 }
 
 /// Spin-wait for a condition with a cycle-counted timeout.

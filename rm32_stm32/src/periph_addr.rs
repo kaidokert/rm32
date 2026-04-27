@@ -1,48 +1,27 @@
-//! Peripheral base addresses — single source of truth.
+//! Peripheral base addresses — derived from PAC for correctness.
 //!
-//! Values match PAC definitions (e.g. `pac::GPIOA::PTR`).
-//! Defined as u32 constants since PAC pointers can't be cast to
-//! integers in const context.
+//! Wraps `pac::PERIPHERAL::PTR` to produce u32 addresses for raw MMIO.
+//! Using PAC addresses prevents transcription errors (e.g., GPIO is at
+//! 0x5000_0000 on G0 but 0x4800_0000 on F0/L4/G4).
 
-// GPIO (same across all 3 MCUs)
-pub const GPIOA: u32 = 0x4800_0000;
-pub const GPIOB: u32 = 0x4800_0400;
+use crate::pac;
 
-// Clocks
-pub const RCC: u32 = 0x4002_1000;
-
-// DMA
-pub const DMA1: u32 = 0x4002_0000;
+// GPIO — IOPORT bus on G0 (0x5000_xxxx), AHB on F0/L4/G4 (0x4800_xxxx).
+pub fn gpioa() -> u32 { pac::GPIOA::PTR as u32 }
+pub fn gpiob() -> u32 { pac::GPIOB::PTR as u32 }
 
 // Timers
-pub const TIM1: u32 = 0x4001_2C00;
-pub const TIM2: u32 = 0x4000_0000;
+pub fn tim1() -> u32 { pac::TIM1::PTR as u32 }
+pub fn tim2() -> u32 { pac::TIM2::PTR as u32 }
 
 #[cfg(any(feature = "stm32g071", feature = "stm32f051"))]
-pub const TIM14: u32 = 0x4000_2000;
+pub fn tim14() -> u32 { pac::TIM14::PTR as u32 }
+
 #[cfg(any(feature = "stm32l431", feature = "stm32g431"))]
-pub const TIM16: u32 = 0x4001_4400;
+pub fn tim16() -> u32 { pac::TIM16::PTR as u32 }
 
-#[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
-pub const TIM15: u32 = 0x4001_4000;
+// Clocks
+pub fn rcc() -> u32 { pac::RCC::PTR as u32 }
 
-// USART
-pub const USART1: u32 = 0x4001_3800;
-
-// ADC
-#[cfg(feature = "stm32f051")]
-pub const ADC: u32 = 0x4001_2400;
-#[cfg(feature = "stm32g071")]
-pub const ADC: u32 = 0x4001_2400; // same on G0
-#[cfg(feature = "stm32l431")]
-pub const ADC1: u32 = 0x5004_0000;
-
-// EXTI
-pub const EXTI: u32 = 0x4001_0400;
-
-// DMA channel register helpers (base + channel offset)
-// Channel n registers start at DMA1 + 0x08 + (n-1) * 0x14
-pub const fn dma_ch_ccr(ch: u32) -> u32 { DMA1 + 0x08 + (ch - 1) * 0x14 }
-pub const fn dma_ch_cndtr(ch: u32) -> u32 { DMA1 + 0x0C + (ch - 1) * 0x14 }
-pub const fn dma_ch_cpar(ch: u32) -> u32 { DMA1 + 0x10 + (ch - 1) * 0x14 }
-pub const fn dma_ch_cmar(ch: u32) -> u32 { DMA1 + 0x14 + (ch - 1) * 0x14 }
+// DMA
+pub fn dma1() -> u32 { pac::DMA1::PTR as u32 }

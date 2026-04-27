@@ -1,18 +1,15 @@
 //! Compile-time GPIO pin identity for phase commutation.
 //!
-//! Each pin is a zero-sized type with associated constants for port base
-//! address and pin number. Runtime register access uses these constants
-//! directly — no branches, no indirection.
-//!
-//! MODER is at offset 0x00 and BSRR at offset 0x18 on all STM32 families.
-//! No #[cfg] needed.
+//! Each pin is a zero-sized type associating a `GpioPort` and pin number.
+//! All register access via `GpioPort` trait — zero `unsafe` at call sites,
+//! zero runtime overhead (static dispatch, monomorphized to constants).
 
-use crate::periph_addr;
+use crate::gpio_regs::{GpioPort, PortA, PortB};
 
 /// A GPIO pin known at compile time.
 pub trait GpioPin {
-    /// Port base address (e.g. GPIOA = 0x4800_0000).
-    const PORT: u32;
+    /// The port this pin belongs to.
+    type Port: GpioPort;
     /// Pin number (0..15).
     const PIN: u8;
 
@@ -26,52 +23,41 @@ pub trait GpioPin {
     const BSRR_RESET: u32 = 1 << (Self::PIN as u32 + 16);
 
     /// Set GPIO mode for this pin (output, alternate, etc).
+    /// Safe: GpioPort handles the unsafe register access internally.
     #[inline(always)]
     fn set_mode(mode: u32) {
-        // SAFETY: PORT is a valid GPIO base address (from periph_addr).
-        // MODER is at offset 0x00 on all STM32 families.
-        // Read-modify-write is safe: called from ISR at fixed priority (no preemption).
-        let moder = Self::PORT as *mut u32;
-        unsafe {
-            let val = moder.read_volatile();
-            moder.write_volatile((val & !Self::MODER_MASK) | (mode << Self::MODER_OFFSET));
-        }
+        Self::Port::modify_moder(|v| (v & !Self::MODER_MASK) | (mode << Self::MODER_OFFSET));
     }
 
     /// Set pin high via BSRR (atomic, write-only).
     #[inline(always)]
     fn set_high() {
-        // SAFETY: BSRR at offset 0x18 is write-only, bit-atomic — no read-modify-write needed.
-        unsafe { ((Self::PORT + 0x18) as *mut u32).write_volatile(Self::BSRR_SET); }
+        Self::Port::write_bsrr(Self::BSRR_SET);
     }
 
     /// Set pin low via BSRR reset bits (atomic, write-only).
     #[inline(always)]
     fn set_low() {
-        // SAFETY: BSRR at offset 0x18 is write-only, bit-atomic.
-        unsafe { ((Self::PORT + 0x18) as *mut u32).write_volatile(Self::BSRR_RESET); }
+        Self::Port::write_bsrr(Self::BSRR_RESET);
     }
 }
 
-// --- Pin definitions for motor phase outputs ---
+// --- Pin definitions ---
 
-pub struct PA7;
-impl GpioPin for PA7 { const PORT: u32 = periph_addr::GPIOA; const PIN: u8 = 7; }
+macro_rules! gpio_pin {
+    ($name:ident, $port:ty, $pin:literal) => {
+        pub struct $name;
+        impl GpioPin for $name {
+            type Port = $port;
+            const PIN: u8 = $pin;
+        }
+    };
+}
 
-pub struct PA8;
-impl GpioPin for PA8 { const PORT: u32 = periph_addr::GPIOA; const PIN: u8 = 8; }
-
-pub struct PA9;
-impl GpioPin for PA9 { const PORT: u32 = periph_addr::GPIOA; const PIN: u8 = 9; }
-
-pub struct PA10;
-impl GpioPin for PA10 { const PORT: u32 = periph_addr::GPIOA; const PIN: u8 = 10; }
-
-pub struct PB0;
-impl GpioPin for PB0 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 0; }
-
-pub struct PB1;
-impl GpioPin for PB1 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 1; }
-
-pub struct PB10;
-impl GpioPin for PB10 { const PORT: u32 = periph_addr::GPIOB; const PIN: u8 = 10; }
+gpio_pin!(PA7,  PortA, 7);
+gpio_pin!(PA8,  PortA, 8);
+gpio_pin!(PA9,  PortA, 9);
+gpio_pin!(PA10, PortA, 10);
+gpio_pin!(PB0,  PortB, 0);
+gpio_pin!(PB1,  PortB, 1);
+gpio_pin!(PB10, PortB, 10);
