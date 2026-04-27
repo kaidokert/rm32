@@ -87,13 +87,14 @@ impl MotorState {
         self.commutate(hal);
 
         let zc_avg = (self.bemf.last_zc_time as u32 + self.bemf.this_zc_time as u32) >> 1;
-        self.timing.commutation_interval =
-            (self.timing.commutation_interval + zc_avg) >> 1;
+        self.timing.commutation_interval = (self.timing.commutation_interval + zc_avg) >> 1;
 
         let advance = if self.config.auto_advance == 0 {
-            (self.timing.commutation_interval * self.bemf.temp_advance as u32) >> crate::constants::ADVANCE_SHIFT
+            (self.timing.commutation_interval * self.bemf.temp_advance as u32)
+                >> crate::constants::ADVANCE_SHIFT
         } else {
-            (self.timing.commutation_interval * self.bemf.auto_advance_level as u32) >> crate::constants::ADVANCE_SHIFT
+            (self.timing.commutation_interval * self.bemf.auto_advance_level as u32)
+                >> crate::constants::ADVANCE_SHIFT
         };
         self.bemf.advance = advance as u16;
 
@@ -148,12 +149,15 @@ impl MotorState {
             if self.input.adjusted < 30 {
                 self.input.input = 0;
             } else if self.input.adjusted > 30 && self.input.adjusted < changeover {
-                self.input.input = map(
-                    self.input.adjusted as i32, 30, changeover as i32, 47, 160,
-                ) as u16;
+                self.input.input =
+                    map(self.input.adjusted as i32, 30, changeover as i32, 47, 160) as u16;
             } else if self.input.adjusted >= changeover {
                 self.input.input = map(
-                    self.input.adjusted as i32, changeover as i32, 2047, 160, 2047,
+                    self.input.adjusted as i32,
+                    changeover as i32,
+                    2047,
+                    160,
+                    2047,
                 ) as u16;
             }
         } else if !self.pid.use_speed_control {
@@ -173,11 +177,21 @@ impl MotorState {
                     self.duty.last = self.duty.min_startup;
                 }
                 self.duty.setpoint = if self.config.use_sine_start != 0 {
-                    map(self.input.input as i32, 137, 2047,
-                        self.duty.minimum as i32 + 40, 2000) as u16
+                    map(
+                        self.input.input as i32,
+                        137,
+                        2047,
+                        self.duty.minimum as i32 + 40,
+                        2000,
+                    ) as u16
                 } else {
-                    map(self.input.input as i32, 47, 2047,
-                        self.duty.minimum as i32, 2000) as u16
+                    map(
+                        self.input.input as i32,
+                        47,
+                        2047,
+                        self.duty.minimum as i32,
+                        2000,
+                    ) as u16
                 };
                 if self.config.rc_car_reverse == 0 {
                     self.prop_brake_active = false;
@@ -243,9 +257,10 @@ impl MotorState {
                     self.duty.setpoint = self.duty.maximum;
                 }
                 if self.pid.use_current_limit
-                    && self.duty.setpoint > self.pid.current_limit_adjust as u16 {
-                        self.duty.setpoint = self.pid.current_limit_adjust as u16;
-                    }
+                    && self.duty.setpoint > self.pid.current_limit_adjust as u16
+                {
+                    self.duty.setpoint = self.pid.current_limit_adjust as u16;
+                }
             }
         }
     }
@@ -269,8 +284,8 @@ impl MotorState {
                     self.input.newinput = 0;
                 }
             }
-            self.input.adjusted =
-                ((self.input.newinput.saturating_sub(1048)) * 2 + 47).saturating_sub(reversing_dead_band);
+            self.input.adjusted = ((self.input.newinput.saturating_sub(1048)) * 2 + 47)
+                .saturating_sub(reversing_dead_band);
         } else if self.input.newinput <= 1047 && self.input.newinput > 47 {
             if self.commutation.forward == (self.config.dir_reversed == 0) {
                 if (self.timing.commutation_interval > self.reverse_speed_threshold as u32
@@ -285,8 +300,8 @@ impl MotorState {
                     self.input.newinput = 0;
                 }
             }
-            self.input.adjusted =
-                ((self.input.newinput.saturating_sub(48)) * 2 + 47).saturating_sub(reversing_dead_band);
+            self.input.adjusted = ((self.input.newinput.saturating_sub(48)) * 2 + 47)
+                .saturating_sub(reversing_dead_band);
         } else {
             self.input.adjusted = 0;
         }
@@ -348,7 +363,11 @@ impl MotorState {
             if !self.prop_brake_active {
                 self.return_to_center = false;
                 self.input.adjusted = map(
-                    self.input.newinput as i32, (1000 + dead_band) as i32, 2000, 47, 2047,
+                    self.input.newinput as i32,
+                    (1000 + dead_band) as i32,
+                    2000,
+                    47,
+                    2047,
                 ) as u16;
             }
         } else if self.input.newinput < 1000u16.saturating_sub(dead_band) {
@@ -364,7 +383,11 @@ impl MotorState {
             if !self.prop_brake_active {
                 self.return_to_center = false;
                 self.input.adjusted = map(
-                    self.input.newinput as i32, 0, 1000i32 - dead_band as i32, 2047, 47,
+                    self.input.newinput as i32,
+                    0,
+                    1000i32 - dead_band as i32,
+                    2047,
+                    47,
                 ) as u16;
             }
         } else {
@@ -393,7 +416,11 @@ impl MotorState {
                 }
             }
             self.input.adjusted = map(
-                self.input.newinput as i32, (1000 + dead_band) as i32, 2000, 47, 2047,
+                self.input.newinput as i32,
+                (1000 + dead_band) as i32,
+                2000,
+                47,
+                2047,
             ) as u16;
         } else if self.input.newinput < 1000u16.saturating_sub(dead_band) {
             if self.commutation.forward == (self.config.dir_reversed == 0) {
@@ -410,7 +437,11 @@ impl MotorState {
                 }
             }
             self.input.adjusted = map(
-                self.input.newinput as i32, 0, 1000i32 - dead_band as i32, 2047, 47,
+                self.input.newinput as i32,
+                0,
+                1000i32 - dead_band as i32,
+                2047,
+                47,
             ) as u16;
         } else {
             self.input.adjusted = 0;
@@ -428,8 +459,9 @@ impl MotorState {
         // Telemetry interval
         if self.config.telemetry_on_interval != 0 {
             self.telemetry.ms_count += 1;
-            let threshold = (self.telemetry_interval_ms as u16
-                - 1 + self.config.telemetry_on_interval as u16) * 20;
+            let threshold = (self.telemetry_interval_ms as u16 - 1
+                + self.config.telemetry_on_interval as u16)
+                * 20;
             if self.telemetry.ms_count > threshold {
                 self.telemetry.send_telemetry = true;
                 self.telemetry.ms_count = 0;
@@ -440,7 +472,8 @@ impl MotorState {
         if !self.armed {
             if self.cell_count == 0 && self.input.input_set && self.input.adjusted == 0 {
                 self.armed_timeout_count += 1;
-                if self.armed_timeout_count > 20000 { // LOOP_FREQUENCY_HZ
+                if self.armed_timeout_count > 20000 {
+                    // LOOP_FREQUENCY_HZ
                     if self.input.zero_input_count > 30 {
                         self.armed = true;
                     } else {
@@ -454,17 +487,22 @@ impl MotorState {
         }
 
         // 1kHz PID loops
-        if self.one_khz_loop_counter > 20 { // PID_LOOP_DIVIDER
+        if self.one_khz_loop_counter > 20 {
+            // PID_LOOP_DIVIDER
             self.one_khz_loop_counter = 0;
 
             if self.pid.use_current_limit && self.running {
                 let target = self.config.current_limit as i32 * 200;
-                let adj = self.pid.current.calculate(
-                    self.measurements.actual_current as i32, target,
-                ) / 10000;
+                let adj = self
+                    .pid
+                    .current
+                    .calculate(self.measurements.actual_current as i32, target)
+                    / 10000;
                 self.pid.current_limit_adjust -= adj as i16;
-                self.pid.current_limit_adjust =
-                    self.pid.current_limit_adjust.clamp(self.duty.minimum as i16, 2000);
+                self.pid.current_limit_adjust = self
+                    .pid
+                    .current_limit_adjust
+                    .clamp(self.duty.minimum as i16, 2000);
             }
 
             if self.config.stall_protection != 0 && self.running {
@@ -503,7 +541,8 @@ impl MotorState {
 
         // Adjusted duty cycle calculation
         if self.armed && self.running && self.input.input > 47 {
-            self.duty.adjusted = ((self.duty.cycle as u32 * self.tim1_arr as u32) / 2000 + 1) as u16;
+            self.duty.adjusted =
+                ((self.duty.cycle as u32 * self.tim1_arr as u32) / 2000 + 1) as u16;
         } else if self.prop_brake_active {
             self.duty.adjusted = self.tim1_arr
                 - ((self.prop_brake_duty_cycle as u32 * self.tim1_arr as u32) / 2000) as u16;
@@ -519,7 +558,12 @@ impl MotorState {
     /// Main loop iteration. Equivalent to C `main_loop()`.
     pub fn main_loop_tick(&mut self) {
         // e_com_time calculation
-        let sum: u32 = self.timing.commutation_intervals.iter().map(|&v| v as u32).sum();
+        let sum: u32 = self
+            .timing
+            .commutation_intervals
+            .iter()
+            .map(|&v| v as u32)
+            .sum();
         self.timing.e_com_time = ((sum + 4) >> 1) as i32;
 
         // Min BEMF counts adjustment
@@ -539,8 +583,11 @@ impl MotorState {
         // Variable PWM
         if self.config.variable_pwm == 1 {
             self.tim1_arr = map(
-                self.timing.commutation_interval as i32, 96, 200,
-                self.timer1_max_arr as i32 / 2, self.timer1_max_arr as i32,
+                self.timing.commutation_interval as i32,
+                96,
+                200,
+                self.timer1_max_arr as i32 / 2,
+                self.timer1_max_arr as i32,
             ) as u16;
         } else if self.config.variable_pwm == 2 {
             // Automatic: scale average_interval by CPU_MHZ/9, clamped to 100-250
@@ -556,9 +603,9 @@ impl MotorState {
         }
 
         // Consumed current accumulation (1s interval)
-        if self.ten_khz_counter > 20000 { // LOOP_FREQUENCY_HZ
-            self.measurements.consumed_current +=
-                self.measurements.actual_current as i32;
+        if self.ten_khz_counter > 20000 {
+            // LOOP_FREQUENCY_HZ
+            self.measurements.consumed_current += self.measurements.actual_current as i32;
             self.ten_khz_counter = 0;
         }
 
@@ -592,7 +639,8 @@ impl MotorState {
         }
 
         // Signal timeout
-        if self.input.signal_timeout > 10000 { // LOOP_FREQUENCY_HZ >> 1
+        if self.input.signal_timeout > 10000 {
+            // LOOP_FREQUENCY_HZ >> 1
             if self.armed {
                 self.armed = false;
                 self.input.input = 0;
@@ -623,9 +671,8 @@ impl MotorState {
         if self.timing.zero_crosses < 100 && self.timing.commutation_interval > 500 {
             self.bemf.filter_level = 12;
         } else {
-            self.bemf.filter_level = map(
-                self.timing.average_interval as i32, 100, 500, 3, 12,
-            ) as u8;
+            self.bemf.filter_level =
+                map(self.timing.average_interval as i32, 100, 500, 3, 12) as u8;
         }
         if self.timing.commutation_interval < 50 {
             self.bemf.filter_level = 2;
@@ -656,7 +703,9 @@ impl MotorState {
         {
             let k_erpm = if self.timing.e_com_time > 0 {
                 (600000 / self.timing.e_com_time) / 10
-            } else { 0 };
+            } else {
+                0
+            };
             let low_rpm = self.motor_kv as i32 / 100 / (32 / self.config.motor_poles.max(2) as i32);
             let high_rpm = self.motor_kv as i32 / 12 / (32 / self.config.motor_poles.max(2) as i32);
             if k_erpm > 0 && high_rpm > low_rpm {
@@ -672,15 +721,14 @@ impl MotorState {
                 self.measurements.degrees_celsius as i32,
                 self.config.temperature_limit as i32 - 10,
                 self.config.temperature_limit as i32 + 10,
-                1000, 1,
+                1000,
+                1,
             ) as u16;
         }
 
         // Auto advance
         if self.config.auto_advance != 0 {
-            self.bemf.auto_advance_level = map(
-                self.duty.cycle as i32, 100, 2000, 13, 23,
-            ) as u8;
+            self.bemf.auto_advance_level = map(self.duty.cycle as i32, 100, 2000, 13, 23) as u8;
         }
     }
 }

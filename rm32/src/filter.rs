@@ -18,7 +18,10 @@ impl<const K: u8> Default for EwmaPow2<K> {
 
 impl<const K: u8> EwmaPow2<K> {
     pub const fn new() -> Self {
-        Self { state: 0, initialized: false }
+        Self {
+            state: 0,
+            initialized: false,
+        }
     }
 
     /// Feed a new sample, return the filtered value.

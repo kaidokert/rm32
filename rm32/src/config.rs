@@ -104,17 +104,39 @@ impl EepromConfig {
 
     // --- Typed accessors for boolean-like fields ---
 
-    pub fn is_dir_reversed(&self) -> bool { self.dir_reversed != 0 }
-    pub fn is_bidirectional(&self) -> bool { self.bi_direction != 0 }
-    pub fn use_sine_start(&self) -> bool { self.use_sine_start != 0 }
-    pub fn use_comp_pwm(&self) -> bool { self.comp_pwm != 0 }
-    pub fn has_stuck_rotor_protection(&self) -> bool { self.stuck_rotor_protection != 0 }
-    pub fn has_stall_protection(&self) -> bool { self.stall_protection != 0 }
-    pub fn has_low_voltage_cutoff(&self) -> bool { self.low_voltage_cut_off != 0 }
-    pub fn is_lvc_per_cell(&self) -> bool { self.low_voltage_cut_off == 1 }
-    pub fn is_lvc_absolute(&self) -> bool { self.low_voltage_cut_off == 2 }
-    pub fn disable_stick_cal(&self) -> bool { self.disable_stick_calibration != 0 }
-    pub fn is_rc_car_reverse(&self) -> bool { self.rc_car_reverse != 0 }
+    pub fn is_dir_reversed(&self) -> bool {
+        self.dir_reversed != 0
+    }
+    pub fn is_bidirectional(&self) -> bool {
+        self.bi_direction != 0
+    }
+    pub fn use_sine_start(&self) -> bool {
+        self.use_sine_start != 0
+    }
+    pub fn use_comp_pwm(&self) -> bool {
+        self.comp_pwm != 0
+    }
+    pub fn has_stuck_rotor_protection(&self) -> bool {
+        self.stuck_rotor_protection != 0
+    }
+    pub fn has_stall_protection(&self) -> bool {
+        self.stall_protection != 0
+    }
+    pub fn has_low_voltage_cutoff(&self) -> bool {
+        self.low_voltage_cut_off != 0
+    }
+    pub fn is_lvc_per_cell(&self) -> bool {
+        self.low_voltage_cut_off == 1
+    }
+    pub fn is_lvc_absolute(&self) -> bool {
+        self.low_voltage_cut_off == 2
+    }
+    pub fn disable_stick_cal(&self) -> bool {
+        self.disable_stick_calibration != 0
+    }
+    pub fn is_rc_car_reverse(&self) -> bool {
+        self.rc_car_reverse != 0
+    }
 
     pub fn input_type(&self) -> InputType {
         match self.input_type {
@@ -178,7 +200,9 @@ impl EepromConfig {
 }
 
 impl Default for EepromConfig {
-    fn default() -> Self { Self::ZEROED }
+    fn default() -> Self {
+        Self::ZEROED
+    }
 }
 
 #[cfg(test)]
@@ -189,7 +213,9 @@ mod tests {
     fn blank_flash_is_invalid() {
         // All 0xFF simulates erased flash
         let mut cfg = EepromConfig::default();
-        for b in cfg.as_bytes_mut().iter_mut() { *b = 0xFF; }
+        for b in cfg.as_bytes_mut().iter_mut() {
+            *b = 0xFF;
+        }
         assert!(!cfg.is_valid()); // eeprom_version=255 > EEPROM_VERSION
     }
 
@@ -238,7 +264,9 @@ mod tests {
     fn blank_flash_fallback_produces_safe_defaults() {
         // Simulate the full main.rs load path
         let mut cfg = EepromConfig::default();
-        for b in cfg.as_bytes_mut().iter_mut() { *b = 0xFF; }
+        for b in cfg.as_bytes_mut().iter_mut() {
+            *b = 0xFF;
+        }
         if !cfg.is_valid() {
             cfg = EepromConfig::default();
         }

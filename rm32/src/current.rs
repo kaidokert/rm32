@@ -74,7 +74,9 @@ mod tests {
     #[test]
     fn reset_clears() {
         let mut f = CurrentFilter::new();
-        for _ in 0..30 { f.update(500); }
+        for _ in 0..30 {
+            f.update(500);
+        }
         f.reset();
         assert_eq!(f.total, 0);
         assert_eq!(f.index, 0);

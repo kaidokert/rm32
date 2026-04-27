@@ -18,8 +18,7 @@ impl MotorState {
 
         // Update commutation interval (exponential moving average, 75/25 split)
         let ci = self.timing.commutation_interval;
-        self.timing.commutation_interval =
-            (self.bemf.this_zc_time as u32 + 3 * ci) / 4;
+        self.timing.commutation_interval = (self.bemf.this_zc_time as u32 + 3 * ci) / 4;
 
         // Calculate advance and wait time
         let advance = (self.bemf.temp_advance as u32 * self.timing.commutation_interval) >> 6;

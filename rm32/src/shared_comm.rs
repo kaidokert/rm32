@@ -13,10 +13,18 @@ pub trait SharedComm {
     fn set_motor_mode(&self, mode: MotorMode);
 
     // Convenience accessors derived from motor_mode
-    fn armed(&self) -> bool { self.motor_mode().is_armed() }
-    fn running(&self) -> bool { self.motor_mode().is_running() }
-    fn old_routine(&self) -> bool { self.motor_mode().is_old_routine() }
-    fn stepper_sine(&self) -> bool { self.motor_mode().is_stepper_sine() }
+    fn armed(&self) -> bool {
+        self.motor_mode().is_armed()
+    }
+    fn running(&self) -> bool {
+        self.motor_mode().is_running()
+    }
+    fn old_routine(&self) -> bool {
+        self.motor_mode().is_old_routine()
+    }
+    fn stepper_sine(&self) -> bool {
+        self.motor_mode().is_stepper_sine()
+    }
 
     // Convenience setters that translate to mode transitions
     fn set_armed(&self, v: bool) {
@@ -69,6 +77,12 @@ pub trait SharedComm {
     fn signal_timeout(&self) -> u16;
     fn increment_signal_timeout(&self);
 
-    fn stall_protection_adjust(&self) -> u16 { 0 }
+    fn stall_protection_adjust(&self) -> u16 {
+        0
+    }
     fn set_stall_protection_adjust(&self, _v: u16) {}
+
+    fn battery_voltage(&self) -> u16 {
+        0
+    }
 }

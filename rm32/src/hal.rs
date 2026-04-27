@@ -35,6 +35,11 @@ pub trait Comparator {
     fn mask_interrupts(&mut self);
 }
 
+/// Debug pulse output — toggles a GPIO on commutation for RPM measurement.
+pub trait PulseOutput {
+    fn toggle(&mut self);
+}
+
 /// Motor phase output control (6-step commutation)
 pub trait PhaseOutput {
     fn com_step(&mut self, step: u8);
@@ -42,6 +47,9 @@ pub trait PhaseOutput {
     fn full_brake(&mut self);
     fn all_pwm(&mut self);
     fn proportional_brake(&mut self);
+    /// Toggle pulse output on commutation step 1/4 (debug RPM measurement).
+    /// Default no-op — override for boards with pulse output pin.
+    fn pulse_toggle(&mut self, _step: u8) {}
 }
 
 /// Interval timer (commutation timing measurement)
@@ -70,6 +78,8 @@ pub trait InputCapture {
     fn set_pull_up(&mut self);
     fn set_pull_down(&mut self);
     fn set_pull_none(&mut self);
+    /// Set inverted input polarity (for boards with signal inversion).
+    fn set_inverted(&mut self, _inverted: bool) {}
 }
 
 /// ADC readings (voltage, current, temperature)
@@ -79,6 +89,8 @@ pub trait Adc {
     fn raw_current(&self) -> u16;
     fn raw_temperature(&self) -> u16;
     fn calc_temperature(&self, raw: u16) -> crate::units::DegreesCelsius;
+    /// Trigger second ADC conversion (for boards with dual ADC). Default no-op.
+    fn start_conversion_2(&mut self) {}
 }
 
 /// Flash storage for persistent settings
@@ -98,6 +110,13 @@ pub trait SerialInput {
 pub trait EmergencyOff {
     /// Force all motor FETs off via direct GPIO writes. Does not require HAL state.
     fn emergency_off();
+}
+
+/// Hall sensor input for commutation (alternative to BEMF zero-cross detection).
+/// Boards with hall sensors bypass the comparator entirely.
+pub trait HallSensor {
+    /// Read the 3 hall sensor states as a 3-bit value (0-7).
+    fn read_halls(&self) -> u8;
 }
 
 /// System control (IRQ, watchdog, reset)

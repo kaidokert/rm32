@@ -1,0 +1,50 @@
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    -   id: trailing-whitespace
+    -   id: end-of-file-fixer
+    -   id: check-added-large-files
+    -   id: check-merge-conflict
+    -   id: check-yaml
+    -   id: check-toml
+    -   id: mixed-line-ending
+        args: ["--fix=lf"]
+
+-   repo: https://github.com/doublify/pre-commit-rust
+    rev: v1.0
+    hooks:
+    -   id: fmt
+        name: Fmt
+
+-   repo: local
+    hooks:
+    -   id: cargo-test
+        name: Cargo Test (rm32)
+        entry: cargo test -p rm32
+        language: system
+        pass_filenames: false
+
+    -   id: cargo-clippy
+        name: Clippy (rm32)
+        entry: cargo clippy -p rm32 -- -D warnings
+        language: system
+        pass_filenames: false
+
+    -   id: cross-build-g071
+        name: Cross Build - STM32G071
+        entry: cargo build -p rm32_stm32 --release --features stm32g071 --no-default-features --target thumbv6m-none-eabi
+        language: system
+        pass_filenames: false
+
+    -   id: cross-build-f051
+        name: Cross Build - STM32F051
+        entry: cargo build -p rm32_stm32 --release --features stm32f051 --no-default-features --target thumbv6m-none-eabi
+        language: system
+        pass_filenames: false
+
+    -   id: cross-build-l431
+        name: Cross Build - STM32L431
+        entry: cargo build -p rm32_stm32 --release --features stm32l431 --no-default-features --target thumbv7em-none-eabihf
+        language: system
+        pass_filenames: false

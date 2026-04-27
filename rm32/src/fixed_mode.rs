@@ -15,7 +15,11 @@ pub fn fixed_duty_input(power: u8) -> u16 {
 /// `rpm`: target mechanical RPM
 /// `motor_poles`: total pole count from EEPROM (e.g. 14)
 pub fn fixed_speed_target(rpm: u32, motor_poles: u8) -> u32 {
-    let poles = if motor_poles < 2 { 14 } else { motor_poles as u32 };
+    let poles = if motor_poles < 2 {
+        14
+    } else {
+        motor_poles as u32
+    };
     60_000_000 / rpm / (poles / 2)
 }
 

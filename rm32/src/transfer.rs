@@ -5,9 +5,9 @@
 //! telemetry, and unarmed frame averaging.
 
 use crate::dshot;
-use crate::signal;
-use crate::servo::{ServoState, ServoResult};
 use crate::functions::get_abs_dif;
+use crate::servo::{ServoResult, ServoState};
+use crate::signal;
 
 /// Transfer complete processing state.
 #[derive(Default)]
@@ -21,7 +21,6 @@ pub struct TransferState {
     pub last_input: u16,
 }
 
-
 /// Actions the caller (ISR) should take after transfer complete.
 #[derive(Default)]
 pub struct TransferActions {
@@ -32,12 +31,11 @@ pub struct TransferActions {
     pub input_is_dshot: bool,
     pub input_is_servo: bool,
     pub save_settings: bool,
-    pub play_tone: u8, // 0=none, 1=default, 2=changed, 3=beacon
+    pub play_tone: u8,      // 0=none, 1=default, 2=changed, 3=beacon
     pub dshot_command: u16, // 0=none, 1-47=DShot command to dispatch
     pub frametime_high: Option<u16>,
     pub frametime_low: Option<u16>,
 }
-
 
 impl TransferState {
     /// Process a DMA transfer complete event.
@@ -93,29 +91,28 @@ impl TransferState {
         }
 
         // --- DShot processing ---
-        if dshot_mode
-            && dma_buffer.len() >= 32 {
-                let buf: [u32; 32] = {
-                    let mut b = [0u32; 32];
-                    b.copy_from_slice(&dma_buffer[..32]);
-                    b
-                };
-                let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
-                match frame {
-                    dshot::DshotFrame::Throttle { value, telemetry } => {
-                        actions.newinput = Some(value);
-                        actions.send_telemetry = telemetry;
-                        actions.signal_timeout_reset = true;
-                    }
-                    dshot::DshotFrame::Command { cmd, telemetry } => {
-                        actions.newinput = Some(0);
-                        actions.send_telemetry = telemetry;
-                        actions.signal_timeout_reset = true;
-                        actions.dshot_command = cmd;
-                    }
-                    _ => {} // bad CRC or timing
+        if dshot_mode && dma_buffer.len() >= 32 {
+            let buf: [u32; 32] = {
+                let mut b = [0u32; 32];
+                b.copy_from_slice(&dma_buffer[..32]);
+                b
+            };
+            let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
+            match frame {
+                dshot::DshotFrame::Throttle { value, telemetry } => {
+                    actions.newinput = Some(value);
+                    actions.send_telemetry = telemetry;
+                    actions.signal_timeout_reset = true;
                 }
+                dshot::DshotFrame::Command { cmd, telemetry } => {
+                    actions.newinput = Some(0);
+                    actions.send_telemetry = telemetry;
+                    actions.signal_timeout_reset = true;
+                    actions.dshot_command = cmd;
+                }
+                _ => {} // bad CRC or timing
             }
+        }
 
         // --- Servo processing ---
         if servo_mode {

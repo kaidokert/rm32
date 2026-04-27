@@ -3,11 +3,11 @@
 //! Same stdin/stdout line protocol as the C am32_harness.
 //! Python blackbox tests can verify both implementations produce identical output.
 
-use std::io::{self, BufRead, Write};
 use rm32::control::state::MotorState;
 use rm32::dshot;
 use rm32::hal;
 use rm32::signal;
+use std::io::{self, BufRead, Write};
 
 /// Mock HAL that records PWM outputs.
 struct StdHal {
@@ -37,8 +37,13 @@ impl StdHal {
 }
 
 impl hal::PwmOutput for StdHal {
-    fn set_duty_all(&mut self, duty: u16) { self.pwm_duty = duty; self.pwm_duty_count += 1; }
-    fn set_auto_reload(&mut self, arr: u16) { self.pwm_arr = arr; }
+    fn set_duty_all(&mut self, duty: u16) {
+        self.pwm_duty = duty;
+        self.pwm_duty_count += 1;
+    }
+    fn set_auto_reload(&mut self, arr: u16) {
+        self.pwm_arr = arr;
+    }
     fn set_prescaler(&mut self, _psc: u16) {}
     fn set_compare1(&mut self, _val: u16) {}
     fn set_compare2(&mut self, _val: u16) {}
@@ -48,11 +53,15 @@ impl hal::PwmOutput for StdHal {
 }
 
 impl hal::Comparator for StdHal {
-    fn output_level(&self) -> bool { self.comp_level }
+    fn output_level(&self) -> bool {
+        self.comp_level
+    }
     fn set_step(&mut self, _step: u8, _rising: bool) {}
     fn change_input(&mut self) {}
     fn enable_interrupts(&mut self) {}
-    fn mask_interrupts(&mut self) { self.mask_called = true; }
+    fn mask_interrupts(&mut self) {
+        self.mask_called = true;
+    }
 }
 
 impl hal::PhaseOutput for StdHal {
@@ -64,8 +73,12 @@ impl hal::PhaseOutput for StdHal {
 }
 
 impl hal::IntervalTimer for StdHal {
-    fn count(&self) -> u32 { self.timer_count }
-    fn set_count(&mut self, val: u32) { self.timer_count = val; }
+    fn count(&self) -> u32 {
+        self.timer_count
+    }
+    fn set_count(&mut self, val: u32) {
+        self.timer_count = val;
+    }
 }
 
 impl hal::ComTimer for StdHal {
@@ -75,7 +88,9 @@ impl hal::ComTimer for StdHal {
 }
 
 impl hal::System for StdHal {
-    fn reset(&mut self) -> ! { std::process::exit(0) }
+    fn reset(&mut self) -> ! {
+        std::process::exit(0)
+    }
     fn enable_irq(&mut self) {}
     fn disable_irq(&mut self) {}
     fn start_watchdog(&mut self, _prescaler: u8, _reload: u16) {}
@@ -166,12 +181,28 @@ impl Harness {
                         // Process commands (direction, bidir, etc.)
                         // Simplified: just set forward based on cmd 7/8/20/21
                         match cmd {
-                            7 => { self.state.config.dir_reversed = 0; self.state.commutation.forward = true; }
-                            8 => { self.state.config.dir_reversed = 1; self.state.commutation.forward = false; }
-                            9 => { self.state.config.bi_direction = 0; }
-                            10 => { self.state.config.bi_direction = 1; }
-                            20 => { self.state.commutation.forward = self.state.config.dir_reversed == 0; }
-                            21 => { self.state.commutation.forward = self.state.config.dir_reversed != 0; }
+                            7 => {
+                                self.state.config.dir_reversed = 0;
+                                self.state.commutation.forward = true;
+                            }
+                            8 => {
+                                self.state.config.dir_reversed = 1;
+                                self.state.commutation.forward = false;
+                            }
+                            9 => {
+                                self.state.config.bi_direction = 0;
+                            }
+                            10 => {
+                                self.state.config.bi_direction = 1;
+                            }
+                            20 => {
+                                self.state.commutation.forward =
+                                    self.state.config.dir_reversed == 0;
+                            }
+                            21 => {
+                                self.state.commutation.forward =
+                                    self.state.config.dir_reversed != 0;
+                            }
                             _ => {}
                         }
                     }
@@ -181,9 +212,7 @@ impl Harness {
                 // Servo: compute input from pulse width
                 let pulse = self.dma_buffer[1].saturating_sub(self.dma_buffer[0]) as u16;
                 if pulse > 800 && pulse < 2200 {
-                    let val = signal::compute_servo_unidirectional(
-                        pulse, 1100, 1900,
-                    );
+                    let val = signal::compute_servo_unidirectional(pulse, 1100, 1900);
                     self.state.input.newinput = val;
                     self.state.input.signal_timeout = 0;
                 }
@@ -239,22 +268,43 @@ impl Harness {
              duty_cycle_maximum={} filter_level={} \
              send_telemetry={} send_esc_info_flag={}",
             self.tick_count,
-            s.armed as i32, s.running as i32,
-            s.commutation.step, s.commutation.forward as i32,
-            s.duty.cycle, s.duty.setpoint, s.duty.adjusted,
-            s.timing.commutation_interval, s.timing.average_interval,
-            s.timing.e_com_time, s.timing.e_rpm, s.timing.zero_crosses,
-            s.input.input, s.input.adjusted, s.input.newinput,
-            s.bemf.counter, s.bemf.zc_found as i32, s.commutation.rising as i32,
-            s.old_routine as i32, s.stepper_sine as i32,
-            s.input.signal_timeout, s.armed_timeout_count,
-            s.measurements.battery_voltage, s.measurements.actual_current,
+            s.armed as i32,
+            s.running as i32,
+            s.commutation.step,
+            s.commutation.forward as i32,
+            s.duty.cycle,
+            s.duty.setpoint,
+            s.duty.adjusted,
+            s.timing.commutation_interval,
+            s.timing.average_interval,
+            s.timing.e_com_time,
+            s.timing.e_rpm,
+            s.timing.zero_crosses,
+            s.input.input,
+            s.input.adjusted,
+            s.input.newinput,
+            s.bemf.counter,
+            s.bemf.zc_found as i32,
+            s.commutation.rising as i32,
+            s.old_routine as i32,
+            s.stepper_sine as i32,
+            s.input.signal_timeout,
+            s.armed_timeout_count,
+            s.measurements.battery_voltage,
+            s.measurements.actual_current,
             s.measurements.degrees_celsius,
-            s.duty.last, s.prop_brake_active as i32,
-            s.input.input_set as i32, s.input.dshot as i32, s.input.servo_pwm as i32,
-            self.hal.pwm_duty, self.hal.pwm_arr, self.hal.pwm_duty_count,
-            s.duty.maximum, s.bemf.filter_level,
-            s.telemetry.send_telemetry as i32, s.telemetry.send_esc_info as i32,
+            s.duty.last,
+            s.prop_brake_active as i32,
+            s.input.input_set as i32,
+            s.input.dshot as i32,
+            s.input.servo_pwm as i32,
+            self.hal.pwm_duty,
+            self.hal.pwm_arr,
+            self.hal.pwm_duty_count,
+            s.duty.maximum,
+            s.bemf.filter_level,
+            s.telemetry.send_telemetry as i32,
+            s.telemetry.send_esc_info as i32,
         );
         io::stdout().flush().unwrap();
     }
@@ -263,12 +313,20 @@ impl Harness {
         let v: i64 = val.parse().unwrap_or(0);
         match key {
             "throttle" => {
-                if v < 0 { self.has_throttle = false; }
-                else { self.throttle_value = v as u16; self.has_throttle = true; self.state.input.edt_armed = true; }
+                if v < 0 {
+                    self.has_throttle = false;
+                } else {
+                    self.throttle_value = v as u16;
+                    self.has_throttle = true;
+                    self.state.input.edt_armed = true;
+                }
             }
             "comp" => self.hal.comp_level = v != 0,
             "transfer" => self.do_transfer = v != 0,
-            "dshot_frame" => { self.build_dshot_frame(v as u16); self.do_transfer = true; }
+            "dshot_frame" => {
+                self.build_dshot_frame(v as u16);
+                self.do_transfer = true;
+            }
             "zc" => {
                 if v == 1 {
                     self.state.interrupt_routine(&mut self.hal);
@@ -278,7 +336,10 @@ impl Harness {
             "interval_timer" => self.hal.timer_count = v as u32,
             k if k.starts_with("dma_") => {
                 if let Ok(idx) = k[4..].parse::<usize>()
-                    && idx < 64 { self.dma_buffer[idx] = v as u32; }
+                    && idx < 64
+                {
+                    self.dma_buffer[idx] = v as u32;
+                }
             }
             "armed" => self.state.armed = v != 0,
             "running" => self.state.running = v != 0,
@@ -309,13 +370,20 @@ impl Harness {
             "send_telemetry" => self.state.telemetry.send_telemetry = v != 0,
             "low_voltage_count" => self.state.protection.low_voltage_count = v as u16,
             "out_put" => {} // not used in Rust harness (bidir DMA direction)
-            "calibration_required" | "high_calibration_set" |
-            "high_calibration_counts" | "low_calibration_counts" |
-            "servo_high_threshold" | "servo_low_threshold" |
-            "enter_calibration_count" | "last_input" | "adjusted_input" => {
+            "calibration_required"
+            | "high_calibration_set"
+            | "high_calibration_counts"
+            | "low_calibration_counts"
+            | "servo_high_threshold"
+            | "servo_low_threshold"
+            | "enter_calibration_count"
+            | "last_input"
+            | "adjusted_input" => {
                 // Servo calibration state - simplified in Rust
                 // Some of these map to input state
-                if key == "adjusted_input" { self.state.input.adjusted = v as u16; }
+                if key == "adjusted_input" {
+                    self.state.input.adjusted = v as u16;
+                }
             }
             "duty_cycle" => self.state.duty.cycle = v as u16,
             "bemf_timeout" => self.state.protection.bemf_timeout = v as u8,
@@ -329,7 +397,9 @@ impl Harness {
             "eeprom.brake_on_stop" => self.state.config.brake_on_stop = v as u8,
             "eeprom.stall_protection" => self.state.config.stall_protection = v as u8,
             "eeprom.stuck_rotor_protection" => self.state.config.stuck_rotor_protection = v as u8,
-            "eeprom.sine_mode_changeover_thottle_level" => self.state.config.sine_mode_changeover_throttle_level = v as u8,
+            "eeprom.sine_mode_changeover_thottle_level" => {
+                self.state.config.sine_mode_changeover_throttle_level = v as u8
+            }
             "eeprom.drag_brake_strength" => self.state.config.drag_brake_strength = v as u8,
             "eeprom.input_type" => self.state.config.input_type = v as u8,
             "eeprom.telemetry_on_interval" => self.state.config.telemetry_on_interval = v as u8,

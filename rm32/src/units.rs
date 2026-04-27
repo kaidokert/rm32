@@ -12,7 +12,9 @@ impl MilliVolts {
     pub const ZERO: Self = Self(0);
 
     /// Convert to centivolts for KISS telemetry.
-    pub fn to_centivolts(self) -> u16 { self.0 / 10 }
+    pub fn to_centivolts(self) -> u16 {
+        self.0 / 10
+    }
 
     /// Per-cell check: voltage < cell_count * per_cell_mv
     pub fn below_cell_threshold(self, cell_count: u8, per_cell_mv: u16) -> bool {
@@ -30,7 +32,9 @@ impl MilliAmps {
     pub const ZERO: Self = Self(0);
 
     /// Convert to centiamps for KISS telemetry.
-    pub fn to_centiamps(self) -> u16 { (self.0 / 10) as u16 }
+    pub fn to_centiamps(self) -> u16 {
+        (self.0 / 10) as u16
+    }
 }
 
 /// Temperature in degrees Celsius.
@@ -40,7 +44,9 @@ pub struct DegreesCelsius(pub i16);
 
 impl DegreesCelsius {
     /// As i8 for KISS telemetry packet.
-    pub fn to_i8(self) -> i8 { self.0 as i8 }
+    pub fn to_i8(self) -> i8 {
+        self.0 as i8
+    }
 }
 
 /// Timer ticks (0.5µs resolution at 2MHz timer clock).
@@ -54,7 +60,11 @@ impl TimerTicks {
     /// Convert to eRPM (in units of 100 eRPM).
     /// Formula: 600000 / ticks (when ticks = e_com_time)
     pub fn to_erpm_100(self) -> u16 {
-        if self.0 > 0 { (600000 / self.0) as u16 } else { 0 }
+        if self.0 > 0 {
+            (600000 / self.0) as u16
+        } else {
+            0
+        }
     }
 }
 
@@ -84,17 +94,27 @@ impl AdcCount {
 
 /// Pure temperature calculation from raw ADC and calibration values (testable on host).
 pub fn calc_temperature_pure(
-    raw: u16, ts_cal1: u16, ts_cal2: u16, cal1_temp: i32, cal2_temp: i32,
+    raw: u16,
+    ts_cal1: u16,
+    ts_cal2: u16,
+    cal1_temp: i32,
+    cal2_temp: i32,
 ) -> DegreesCelsius {
     let c1 = ts_cal1 as i32;
     let c2 = ts_cal2 as i32;
-    if c2 == c1 { return DegreesCelsius(25); }
+    if c2 == c1 {
+        return DegreesCelsius(25);
+    }
     DegreesCelsius(((cal2_temp - cal1_temp) * (raw as i32 - c1) / (c2 - c1) + cal1_temp) as i16)
 }
 
 /// Calculate temperature from raw ADC and ROM calibration addresses (hardware-only).
 pub fn calc_temperature_from_cal(
-    raw: u16, cal1_addr: u32, cal2_addr: u32, cal1_temp: i32, cal2_temp: i32,
+    raw: u16,
+    cal1_addr: u32,
+    cal2_addr: u32,
+    cal1_temp: i32,
+    cal2_temp: i32,
 ) -> DegreesCelsius {
     let ts_cal1 = unsafe { *(cal1_addr as *const u16) };
     let ts_cal2 = unsafe { *(cal2_addr as *const u16) };
@@ -142,12 +162,18 @@ mod tests {
     #[test]
     fn temp_at_cal1_returns_cal1_temp() {
         // raw == ts_cal1 → should return cal1_temp exactly
-        assert_eq!(calc_temperature_pure(1000, 1000, 1500, 30, 130), DegreesCelsius(30));
+        assert_eq!(
+            calc_temperature_pure(1000, 1000, 1500, 30, 130),
+            DegreesCelsius(30)
+        );
     }
 
     #[test]
     fn temp_at_cal2_returns_cal2_temp() {
-        assert_eq!(calc_temperature_pure(1500, 1000, 1500, 30, 130), DegreesCelsius(130));
+        assert_eq!(
+            calc_temperature_pure(1500, 1000, 1500, 30, 130),
+            DegreesCelsius(130)
+        );
     }
 
     #[test]
@@ -159,7 +185,10 @@ mod tests {
 
     #[test]
     fn temp_equal_cals_returns_25() {
-        assert_eq!(calc_temperature_pure(1234, 1000, 1000, 30, 130), DegreesCelsius(25));
+        assert_eq!(
+            calc_temperature_pure(1234, 1000, 1000, 30, 130),
+            DegreesCelsius(25)
+        );
     }
 
     #[test]
@@ -173,7 +202,11 @@ mod tests {
     fn adc_zero_offset_current() {
         // Zero offset, 20 mv/A: mid-range ADC = ~4024 mA
         let ma = AdcCount(2048).to_milliamps(0, 20);
-        assert!(ma.0 > 8000, "expected high mA with zero offset, got {}", ma.0);
+        assert!(
+            ma.0 > 8000,
+            "expected high mA with zero offset, got {}",
+            ma.0
+        );
     }
 
     #[test]

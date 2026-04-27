@@ -44,8 +44,7 @@ impl Pid {
         self.derivative = self.kd as i32 * (self.error - self.last_error);
         self.last_error = self.error;
 
-        self.pid_output =
-            self.error * self.kp as i32 + self.integral + self.derivative;
+        self.pid_output = self.error * self.kp as i32 + self.integral + self.derivative;
 
         if self.pid_output > self.output_limit {
             self.pid_output = self.output_limit;

@@ -163,20 +163,28 @@ fn unpack_channels(payload: &[u8]) -> [u16; 16] {
     // Channel 0: bits [0..10] of payload
     // Channel 1: bits [11..21]
     // etc.
-    channels[0]  = ((payload[0] as u16)       | ((payload[1] as u16) << 8)) & 0x7FF;
-    channels[1]  = ((payload[1] as u16) >> 3  | ((payload[2] as u16) << 5)) & 0x7FF;
-    channels[2]  = ((payload[2] as u16) >> 6  | ((payload[3] as u16) << 2) | ((payload[4] as u16) << 10)) & 0x7FF;
-    channels[3]  = ((payload[4] as u16) >> 1  | ((payload[5] as u16) << 7)) & 0x7FF;
-    channels[4]  = ((payload[5] as u16) >> 4  | ((payload[6] as u16) << 4)) & 0x7FF;
-    channels[5]  = ((payload[6] as u16) >> 7  | ((payload[7] as u16) << 1) | ((payload[8] as u16) << 9)) & 0x7FF;
-    channels[6]  = ((payload[8] as u16) >> 2  | ((payload[9] as u16) << 6)) & 0x7FF;
-    channels[7]  = ((payload[9] as u16) >> 5  | ((payload[10] as u16) << 3)) & 0x7FF;
-    channels[8]  = ((payload[11] as u16)      | ((payload[12] as u16) << 8)) & 0x7FF;
-    channels[9]  = ((payload[12] as u16) >> 3 | ((payload[13] as u16) << 5)) & 0x7FF;
-    channels[10] = ((payload[13] as u16) >> 6 | ((payload[14] as u16) << 2) | ((payload[15] as u16) << 10)) & 0x7FF;
+    channels[0] = ((payload[0] as u16) | ((payload[1] as u16) << 8)) & 0x7FF;
+    channels[1] = ((payload[1] as u16) >> 3 | ((payload[2] as u16) << 5)) & 0x7FF;
+    channels[2] =
+        ((payload[2] as u16) >> 6 | ((payload[3] as u16) << 2) | ((payload[4] as u16) << 10))
+            & 0x7FF;
+    channels[3] = ((payload[4] as u16) >> 1 | ((payload[5] as u16) << 7)) & 0x7FF;
+    channels[4] = ((payload[5] as u16) >> 4 | ((payload[6] as u16) << 4)) & 0x7FF;
+    channels[5] =
+        ((payload[6] as u16) >> 7 | ((payload[7] as u16) << 1) | ((payload[8] as u16) << 9))
+            & 0x7FF;
+    channels[6] = ((payload[8] as u16) >> 2 | ((payload[9] as u16) << 6)) & 0x7FF;
+    channels[7] = ((payload[9] as u16) >> 5 | ((payload[10] as u16) << 3)) & 0x7FF;
+    channels[8] = ((payload[11] as u16) | ((payload[12] as u16) << 8)) & 0x7FF;
+    channels[9] = ((payload[12] as u16) >> 3 | ((payload[13] as u16) << 5)) & 0x7FF;
+    channels[10] =
+        ((payload[13] as u16) >> 6 | ((payload[14] as u16) << 2) | ((payload[15] as u16) << 10))
+            & 0x7FF;
     channels[11] = ((payload[15] as u16) >> 1 | ((payload[16] as u16) << 7)) & 0x7FF;
     channels[12] = ((payload[16] as u16) >> 4 | ((payload[17] as u16) << 4)) & 0x7FF;
-    channels[13] = ((payload[17] as u16) >> 7 | ((payload[18] as u16) << 1) | ((payload[19] as u16) << 9)) & 0x7FF;
+    channels[13] =
+        ((payload[17] as u16) >> 7 | ((payload[18] as u16) << 1) | ((payload[19] as u16) << 9))
+            & 0x7FF;
     channels[14] = ((payload[19] as u16) >> 2 | ((payload[20] as u16) << 6)) & 0x7FF;
     channels[15] = ((payload[20] as u16) >> 5 | ((payload[21] as u16) << 3)) & 0x7FF;
     channels

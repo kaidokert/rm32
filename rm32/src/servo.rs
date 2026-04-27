@@ -79,14 +79,16 @@ impl ServoState {
                     pulse_width as i32,
                     self.low_threshold as i32,
                     self.neutral as i32,
-                    0, 1000,
+                    0,
+                    1000,
                 );
             } else {
                 self.raw_input = map(
                     pulse_width as i32,
                     self.neutral as i32 + 1,
                     self.high_threshold as i32,
-                    1001, 2000,
+                    1001,
+                    2000,
                 );
             }
         } else {
@@ -94,7 +96,8 @@ impl ServoState {
                 pulse_width as i32,
                 self.low_threshold as i32,
                 self.high_threshold as i32,
-                47, 2047,
+                47,
+                2047,
             );
             if self.raw_input <= 48 {
                 self.raw_input = 0;

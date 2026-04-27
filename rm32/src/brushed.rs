@@ -48,7 +48,10 @@ pub fn brushed_tick(
     if input < 48 {
         // Below threshold: set direction on next throttle-up
         state.direction_set = false;
-        return BrushedOutput { duty: 0, direction: state.direction };
+        return BrushedOutput {
+            duty: 0,
+            direction: state.direction,
+        };
     }
 
     if bidirectional {
@@ -58,19 +61,28 @@ pub fn brushed_tick(
                 state.direction_set = true;
             }
             let duty = map(input as i32, 1048, 2047, 0, max_duty as i32) as u16;
-            BrushedOutput { duty, direction: BrushedDirection::Forward }
+            BrushedOutput {
+                duty,
+                direction: BrushedDirection::Forward,
+            }
         } else {
             if !state.direction_set {
                 state.direction = BrushedDirection::Reverse;
                 state.direction_set = true;
             }
             let duty = map(input as i32, 1047, 48, 0, max_duty as i32) as u16;
-            BrushedOutput { duty, direction: BrushedDirection::Reverse }
+            BrushedOutput {
+                duty,
+                direction: BrushedDirection::Reverse,
+            }
         }
     } else {
         // Unidirectional: 48-2047 → 0-95% duty (reserve 5% headroom)
         let duty = map(input as i32, 48, 2047, 0, (max_duty as i32 * 95) / 100) as u16;
-        BrushedOutput { duty, direction: BrushedDirection::Forward }
+        BrushedOutput {
+            duty,
+            direction: BrushedDirection::Forward,
+        }
     }
 }
 

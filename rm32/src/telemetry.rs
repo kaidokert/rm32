@@ -61,7 +61,7 @@ mod tests {
         assert_eq!(buf[6], 0x64); // consumption_l
         assert_eq!(buf[7], 0x0B); // erpm_h
         assert_eq!(buf[8], 0xB8); // erpm_l
-        assert_ne!(buf[9], 0);    // CRC non-zero
+        assert_ne!(buf[9], 0); // CRC non-zero
     }
 
     #[test]

@@ -45,6 +45,8 @@ pub fn handle_tim6() {
         one_khz_loop_counter: state.one_khz_loop_counter,
         armed_timeout_count: state.armed_timeout_count,
         tim1_arr: state.tim1_arr,
+        voltage_based_ramp: false, // Set from BOARD config at init
+        pulse_output: false,
     };
     rm32::control::isr_logic::ten_khz_tick(
         &mut state.commutation,

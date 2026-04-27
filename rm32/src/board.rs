@@ -29,6 +29,20 @@ pub struct BoardConfig {
     pub has_led: bool,
     /// WS2812 LED pin number on GPIOB (e.g. 8 for PB8)
     pub led_pin: Option<u8>,
+    /// Use external NTC thermistor instead of internal temp sensor
+    pub use_ntc: bool,
+    /// Inverted input signal polarity
+    pub inverted_input: bool,
+    /// KV divider for limited cell count boards (1=normal, 2=THREE_CELL_MAX, 16=ONE_TWO_CELL_MAX)
+    pub kv_divider: u8,
+    /// Enable startup boost (extra initial torque for heavy props)
+    pub startup_boost: bool,
+    /// Enable voltage-based ramp rate scaling
+    pub voltage_based_ramp: bool,
+    /// Enable RPM pulse output on commutation step 1/4 (debug)
+    pub pulse_output: bool,
+    /// Enable dual ADC conversion triggering
+    pub dual_adc: bool,
 }
 
 impl BoardConfig {
@@ -39,12 +53,19 @@ impl BoardConfig {
         voltage_divider: 110,
         millivolt_per_amp: 20,
         current_offset: 0,
-        current_adc_channel: 4,  // PA4
-        voltage_adc_channel: 6,  // PA6
+        current_adc_channel: 4, // PA4
+        voltage_adc_channel: 6, // PA6
         stall_protect_interval: 6500,
         has_led: false,
         led_pin: None,
-        min_bemf_counts: 2, // TARGET_MIN_BEMF_COUNTS default
+        min_bemf_counts: 2,
+        use_ntc: false,
+        inverted_input: false,
+        kv_divider: 1,
+        startup_boost: false,
+        voltage_based_ramp: false,
+        pulse_output: false,
+        dual_adc: false,
     };
 }
 
@@ -61,8 +82,8 @@ pub const GEN_64K_G071: BoardConfig = BoardConfig {
 pub const TBS_4IN1_G071: BoardConfig = BoardConfig {
     name: "TBS 4N1 G071",
     dead_time: 60,
-    current_adc_channel: 5,  // PA5
-    voltage_adc_channel: 6,  // PA6
+    current_adc_channel: 5, // PA5
+    voltage_adc_channel: 6, // PA6
     ..BoardConfig::DEFAULT
 };
 

@@ -33,10 +33,18 @@ impl MotorMode {
         }
     }
 
-    pub fn is_armed(self) -> bool { self as u8 >= Self::Armed as u8 }
-    pub fn is_running(self) -> bool { self == Self::OldRoutine || self == Self::Running }
-    pub fn is_old_routine(self) -> bool { self == Self::OldRoutine }
-    pub fn is_stepper_sine(self) -> bool { self == Self::StepperSine }
+    pub fn is_armed(self) -> bool {
+        self as u8 >= Self::Armed as u8
+    }
+    pub fn is_running(self) -> bool {
+        self == Self::OldRoutine || self == Self::Running
+    }
+    pub fn is_old_routine(self) -> bool {
+        self == Self::OldRoutine
+    }
+    pub fn is_stepper_sine(self) -> bool {
+        self == Self::StepperSine
+    }
 }
 
 #[cfg(test)]

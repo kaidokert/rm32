@@ -1,8 +1,8 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
-use core::cell::Cell;
 use crate::motor_mode::MotorMode;
 use crate::shared_comm::SharedComm;
+use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
 pub struct TestShared {
@@ -42,33 +42,71 @@ impl TestShared {
 }
 
 impl SharedComm for TestShared {
-    fn motor_mode(&self) -> MotorMode { self.mode.get() }
-    fn set_motor_mode(&self, mode: MotorMode) { self.mode.set(mode); }
+    fn motor_mode(&self) -> MotorMode {
+        self.mode.get()
+    }
+    fn set_motor_mode(&self, mode: MotorMode) {
+        self.mode.set(mode);
+    }
 
-    fn input_set(&self) -> bool { self.input_set.get() }
-    fn set_input_set(&self, v: bool) { self.input_set.set(v); }
-    fn dshot_telemetry(&self) -> bool { self.dshot_telemetry.get() }
+    fn input_set(&self) -> bool {
+        self.input_set.get()
+    }
+    fn set_input_set(&self, v: bool) {
+        self.input_set.set(v);
+    }
+    fn dshot_telemetry(&self) -> bool {
+        self.dshot_telemetry.get()
+    }
 
-    fn newinput(&self) -> u16 { self.newinput.get() }
-    fn set_newinput(&self, v: u16) { self.newinput.set(v); }
-    fn adjusted_input(&self) -> u16 { self.adjusted_input.get() }
-    fn set_adjusted_input(&self, v: u16) { self.adjusted_input.set(v); }
-    fn duty_cycle_setpoint(&self) -> u16 { self.duty_cycle_setpoint.get() }
-    fn set_duty_cycle_setpoint(&self, v: u16) { self.duty_cycle_setpoint.set(v); }
+    fn newinput(&self) -> u16 {
+        self.newinput.get()
+    }
+    fn set_newinput(&self, v: u16) {
+        self.newinput.set(v);
+    }
+    fn adjusted_input(&self) -> u16 {
+        self.adjusted_input.get()
+    }
+    fn set_adjusted_input(&self, v: u16) {
+        self.adjusted_input.set(v);
+    }
+    fn duty_cycle_setpoint(&self) -> u16 {
+        self.duty_cycle_setpoint.get()
+    }
+    fn set_duty_cycle_setpoint(&self, v: u16) {
+        self.duty_cycle_setpoint.set(v);
+    }
 
-    fn zero_crosses(&self) -> u32 { self.zero_crosses.get() }
-    fn set_zero_crosses(&self, v: u32) { self.zero_crosses.set(v); }
+    fn zero_crosses(&self) -> u32 {
+        self.zero_crosses.get()
+    }
+    fn set_zero_crosses(&self, v: u32) {
+        self.zero_crosses.set(v);
+    }
     fn increment_zero_crosses(&self) {
         let v = self.zero_crosses.get();
-        if v < 10000 { self.zero_crosses.set(v + 1); }
+        if v < 10000 {
+            self.zero_crosses.set(v + 1);
+        }
     }
-    fn commutation_interval(&self) -> u32 { self.commutation_interval.get() }
-    fn set_commutation_interval(&self, v: u32) { self.commutation_interval.set(v); }
-    fn e_com_time(&self) -> i32 { self.e_com_time.get() }
+    fn commutation_interval(&self) -> u32 {
+        self.commutation_interval.get()
+    }
+    fn set_commutation_interval(&self, v: u32) {
+        self.commutation_interval.set(v);
+    }
+    fn e_com_time(&self) -> i32 {
+        self.e_com_time.get()
+    }
 
-    fn signal_timeout(&self) -> u16 { self.signal_timeout.get() }
+    fn signal_timeout(&self) -> u16 {
+        self.signal_timeout.get()
+    }
     fn increment_signal_timeout(&self) {
         let v = self.signal_timeout.get();
-        if v < u16::MAX { self.signal_timeout.set(v + 1); }
+        if v < u16::MAX {
+            self.signal_timeout.set(v + 1);
+        }
     }
 }

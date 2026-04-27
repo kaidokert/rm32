@@ -18,6 +18,8 @@ pub struct TickCounters {
     pub one_khz_loop_counter: u16,
     pub armed_timeout_count: u32,
     pub tim1_arr: u16,
+    pub voltage_based_ramp: bool,
+    pub pulse_output: bool,
 }
 
 /// 20kHz control loop tick.
@@ -44,8 +46,11 @@ pub fn ten_khz_tick(
         if newinput >= THROTTLE_MIN_SIGNAL {
             let min_duty = duty.minimum;
             let setpoint = map(
-                newinput as i32, THROTTLE_MIN_SIGNAL as i32, DSHOT_MAX_THROTTLE as i32,
-                min_duty as i32, DUTY_SCALE_MAX as i32,
+                newinput as i32,
+                THROTTLE_MIN_SIGNAL as i32,
+                DSHOT_MAX_THROTTLE as i32,
+                min_duty as i32,
+                DUTY_SCALE_MAX as i32,
             ) as u16;
             shared.set_duty_cycle_setpoint(setpoint);
             if !shared.running() {
@@ -62,7 +67,9 @@ pub fn ten_khz_tick(
             // Active brake mode 2: hold motor in comStep(2) at fixed power
             if config.brake_on_stop == 2 {
                 phase.com_step(2);
-                let brake_duty = (config.active_brake_power as u32 * counters.tim1_arr as u32 / DUTY_SCALE_MAX as u32) * 10;
+                let brake_duty = (config.active_brake_power as u32 * counters.tim1_arr as u32
+                    / DUTY_SCALE_MAX as u32)
+                    * 10;
                 pwm.set_duty_all(brake_duty as u16);
             }
         }
@@ -95,7 +102,7 @@ pub fn ten_khz_tick(
     }
 
     // Ramp rate limiting
-    ramp_limit(duty, shared);
+    ramp_limit(duty, shared, counters.voltage_based_ramp);
 
     // Apply stall protection boost (crawler/RC car low-RPM boost)
     let stall_boost = shared.stall_protection_adjust();
@@ -128,17 +135,27 @@ fn bemf_polling(
     let comp_level = comp.output_level();
     let current_state = !comp_level;
     if commutation.rising {
-        if current_state { bemf.counter += 1; }
-        else {
+        if current_state {
+            bemf.counter += 1;
+        } else {
             bemf.bad_count += 1;
-            if bemf.bad_count > bemf.bad_count_threshold { bemf.counter = 0; }
+            if bemf.bad_count > bemf.bad_count_threshold {
+                bemf.counter = 0;
+            }
         }
-    } else if !current_state { bemf.counter += 1; }
-    else {
+    } else if !current_state {
+        bemf.counter += 1;
+    } else {
         bemf.bad_count += 1;
-        if bemf.bad_count > bemf.bad_count_threshold { bemf.counter = 0; }
+        if bemf.bad_count > bemf.bad_count_threshold {
+            bemf.counter = 0;
+        }
     }
-    let threshold = if commutation.rising { bemf.min_counts_up } else { bemf.min_counts_down };
+    let threshold = if commutation.rising {
+        bemf.min_counts_up
+    } else {
+        bemf.min_counts_down
+    };
     if !bemf.zc_found && bemf.counter > threshold {
         bemf.zc_found = true;
         bemf.this_zc_time = interval.count() as u16;
@@ -169,20 +186,35 @@ fn bemf_polling(
 }
 
 /// Ramp rate limiting.
-fn ramp_limit(duty: &mut DutyState, shared: &dyn SharedComm) {
+fn ramp_limit(duty: &mut DutyState, shared: &dyn SharedComm, voltage_based: bool) {
     if duty.ramp_count > duty.ramp_divider as u16 {
         duty.ramp_count = 0;
-        let zc = shared.zero_crosses();
-        if zc < 150 || duty.last < 150 {
-            duty.max_change = duty.max_ramp_startup;
-        } else if duty.last > 500 {
-            duty.max_change = duty.max_ramp_low_rpm;
+        if voltage_based {
+            // Scale ramp rate by battery voltage (lower voltage = faster ramp)
+            let v_change = map(shared.battery_voltage() as i32, 800, 2200, 10, 1) as u8;
+            let ci = shared.commutation_interval();
+            duty.max_change = if ci > 200 {
+                v_change
+            } else {
+                v_change.saturating_mul(3)
+            };
         } else {
-            duty.max_change = duty.max_ramp_high_rpm;
+            let zc = shared.zero_crosses();
+            if zc < 150 || duty.last < 150 {
+                duty.max_change = duty.max_ramp_startup;
+            } else if duty.last > 500 {
+                duty.max_change = duty.max_ramp_low_rpm;
+            } else {
+                duty.max_change = duty.max_ramp_high_rpm;
+            }
         }
         let change = duty.max_change as u16;
-        if duty.cycle > duty.last + change { duty.cycle = duty.last + change; }
-        if duty.last > duty.cycle + change { duty.cycle = duty.last - change; }
+        if duty.cycle > duty.last + change {
+            duty.cycle = duty.last + change;
+        }
+        if duty.last > duty.cycle + change {
+            duty.cycle = duty.last - change;
+        }
     } else {
         duty.cycle = duty.last;
     }
@@ -223,7 +255,9 @@ pub fn bemf_zero_cross(
     com_timer: &mut dyn hal::ComTimer,
 ) {
     for _ in 0..bemf.filter_level {
-        if comp.output_level() == commutation.rising { return; }
+        if comp.output_level() == commutation.rising {
+            return;
+        }
     }
     comp.mask_interrupts();
     bemf.last_zc_time = bemf.this_zc_time;

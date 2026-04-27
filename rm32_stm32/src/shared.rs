@@ -217,4 +217,6 @@ impl rm32::shared_comm::SharedComm for SharedState {
 
     fn stall_protection_adjust(&self) -> u16 { self.stall_protection_adjust() }
     fn set_stall_protection_adjust(&self, v: u16) { self.set_stall_protection_adjust(v); }
+
+    fn battery_voltage(&self) -> u16 { self.battery_voltage() }
 }

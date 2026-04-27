@@ -6,30 +6,24 @@
 /// 360-entry sine table (0-360 mapped to 0-360 duty units).
 /// Matches C firmware's `pwmSin[]` array exactly.
 pub static PWM_SIN: [i16; 360] = [
-    180, 183, 186, 189, 193, 196, 199, 202, 205, 208, 211, 214, 217, 220, 224,
-    227, 230, 233, 236, 239, 242, 245, 247, 250, 253, 256, 259, 262, 265, 267,
-    270, 273, 275, 278, 281, 283, 286, 288, 291, 293, 296, 298, 300, 303, 305,
-    307, 309, 312, 314, 316, 318, 320, 322, 324, 326, 327, 329, 331, 333, 334,
-    336, 337, 339, 340, 342, 343, 344, 346, 347, 348, 349, 350, 351, 352, 353,
-    354, 355, 355, 356, 357, 357, 358, 358, 359, 359, 359, 360, 360, 360, 360,
-    360, 360, 360, 360, 360, 359, 359, 359, 358, 358, 357, 357, 356, 355, 355,
-    354, 353, 352, 351, 350, 349, 348, 347, 346, 344, 343, 342, 340, 339, 337,
-    336, 334, 333, 331, 329, 327, 326, 324, 322, 320, 318, 316, 314, 312, 309,
-    307, 305, 303, 300, 298, 296, 293, 291, 288, 286, 283, 281, 278, 275, 273,
-    270, 267, 265, 262, 259, 256, 253, 250, 247, 245, 242, 239, 236, 233, 230,
-    227, 224, 220, 217, 214, 211, 208, 205, 202, 199, 196, 193, 189, 186, 183,
-    180, 177, 174, 171, 167, 164, 161, 158, 155, 152, 149, 146, 143, 140, 136,
-    133, 130, 127, 124, 121, 118, 115, 113, 110, 107, 104, 101,  98,  95,  93,
-     90,  87,  85,  82,  79,  77,  74,  72,  69,  67,  64,  62,  60,  57,  55,
-     53,  51,  48,  46,  44,  42,  40,  38,  36,  34,  33,  31,  29,  27,  26,
-     24,  23,  21,  20,  18,  17,  16,  14,  13,  12,  11,  10,   9,   8,   7,
-      6,   5,   5,   4,   3,   3,   2,   2,   1,   1,   1,   0,   0,   0,   0,
-      0,   0,   0,   0,   0,   1,   1,   1,   2,   2,   3,   3,   4,   5,   5,
-      6,   7,   8,   9,  10,  11,  12,  13,  14,  16,  17,  18,  20,  21,  23,
-     24,  26,  27,  29,  31,  33,  34,  36,  38,  40,  42,  44,  46,  48,  51,
-     53,  55,  57,  60,  62,  64,  67,  69,  72,  74,  77,  79,  82,  85,  87,
-     90,  93,  95,  98, 101, 104, 107, 110, 113, 115, 118, 121, 124, 127, 130,
-    133, 136, 140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 171, 174, 177,
+    180, 183, 186, 189, 193, 196, 199, 202, 205, 208, 211, 214, 217, 220, 224, 227, 230, 233, 236,
+    239, 242, 245, 247, 250, 253, 256, 259, 262, 265, 267, 270, 273, 275, 278, 281, 283, 286, 288,
+    291, 293, 296, 298, 300, 303, 305, 307, 309, 312, 314, 316, 318, 320, 322, 324, 326, 327, 329,
+    331, 333, 334, 336, 337, 339, 340, 342, 343, 344, 346, 347, 348, 349, 350, 351, 352, 353, 354,
+    355, 355, 356, 357, 357, 358, 358, 359, 359, 359, 360, 360, 360, 360, 360, 360, 360, 360, 360,
+    359, 359, 359, 358, 358, 357, 357, 356, 355, 355, 354, 353, 352, 351, 350, 349, 348, 347, 346,
+    344, 343, 342, 340, 339, 337, 336, 334, 333, 331, 329, 327, 326, 324, 322, 320, 318, 316, 314,
+    312, 309, 307, 305, 303, 300, 298, 296, 293, 291, 288, 286, 283, 281, 278, 275, 273, 270, 267,
+    265, 262, 259, 256, 253, 250, 247, 245, 242, 239, 236, 233, 230, 227, 224, 220, 217, 214, 211,
+    208, 205, 202, 199, 196, 193, 189, 186, 183, 180, 177, 174, 171, 167, 164, 161, 158, 155, 152,
+    149, 146, 143, 140, 136, 133, 130, 127, 124, 121, 118, 115, 113, 110, 107, 104, 101, 98, 95,
+    93, 90, 87, 85, 82, 79, 77, 74, 72, 69, 67, 64, 62, 60, 57, 55, 53, 51, 48, 46, 44, 42, 40, 38,
+    36, 34, 33, 31, 29, 27, 26, 24, 23, 21, 20, 18, 17, 16, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 5,
+    4, 3, 3, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 7, 8, 9,
+    10, 11, 12, 13, 14, 16, 17, 18, 20, 21, 23, 24, 26, 27, 29, 31, 33, 34, 36, 38, 40, 42, 44, 46,
+    48, 51, 53, 55, 57, 60, 62, 64, 67, 69, 72, 74, 77, 79, 82, 85, 87, 90, 93, 95, 98, 101, 104,
+    107, 110, 113, 115, 118, 121, 124, 127, 130, 133, 136, 140, 143, 146, 149, 152, 155, 158, 161,
+    164, 167, 171, 174, 177,
 ];
 
 /// Compute sinusoidal PWM compare values for three phases.
@@ -47,7 +41,11 @@ pub fn sine_drive(
     gimbal_mode: bool,
 ) -> (u16, u16, u16) {
     let arr = timer1_max_arr as i32;
-    let power = if gimbal_mode { 10 } else { sine_mode_power.max(1) as i32 };
+    let power = if gimbal_mode {
+        10
+    } else {
+        sine_mode_power.max(1) as i32
+    };
     let divider = if gimbal_mode { 1i32 } else { 2 }; // SINE_DIVIDER
 
     let compute = |pos: i16| -> u16 {
@@ -56,7 +54,11 @@ pub fn sine_drive(
         duty.max(0) as u16
     };
 
-    (compute(positions.a), compute(positions.b), compute(positions.c))
+    (
+        compute(positions.a),
+        compute(positions.b),
+        compute(positions.c),
+    )
 }
 
 /// Result of a sine mode step — tells the caller what to do next.
@@ -64,10 +66,7 @@ pub enum SineStepResult {
     /// Continue sine stepping with this delay in microseconds
     Continue(u16),
     /// Transition to BLDC mode — motor is at changeover point
-    Changeover {
-        commutation_interval: u32,
-        step: u8,
-    },
+    Changeover { commutation_interval: u32, step: u8 },
     /// Throttle too low or not armed — do nothing
     Idle,
 }
@@ -91,36 +90,64 @@ pub fn sine_step(
     timer1_max_arr: u16,
     sine_mode_power: u8,
 ) -> (SineStepResult, (u16, u16, u16)) {
-    let poles = if motor_poles == 0 { 14 } else { motor_poles as u16 };
+    let poles = if motor_poles == 0 {
+        14
+    } else {
+        motor_poles as u16
+    };
 
     if input > 48 && armed {
         if input < 137 {
             // Sine wave stepper mode — slow rotation
             positions.advance(forward);
-            let pwm = sine_drive(positions, gate_drive_offset, timer1_max_arr, sine_mode_power, false);
+            let pwm = sine_drive(
+                positions,
+                gate_drive_offset,
+                timer1_max_arr,
+                sine_mode_power,
+                false,
+            );
             let step_delay = crate::functions::map(
-                input as i32, 48, 120,
-                7000i32 / poles as i32, 810i32 / poles as i32,
+                input as i32,
+                48,
+                120,
+                7000i32 / poles as i32,
+                810i32 / poles as i32,
             ) as u16;
             (SineStepResult::Continue(step_delay), pwm)
         } else {
             // Higher throttle — accelerate to changeover
             positions.advance(forward);
-            let pwm = sine_drive(positions, gate_drive_offset, timer1_max_arr, sine_mode_power, false);
+            let pwm = sine_drive(
+                positions,
+                gate_drive_offset,
+                timer1_max_arr,
+                sine_mode_power,
+                false,
+            );
 
             if input > 200 && positions.a == 0 {
                 // Phase wrapped to 0 at sufficient throttle — transition to BLDC
-                (SineStepResult::Changeover {
-                    commutation_interval: 9000,
-                    step: changeover_step,
-                }, pwm)
+                (
+                    SineStepResult::Changeover {
+                        commutation_interval: 9000,
+                        step: changeover_step,
+                    },
+                    pwm,
+                )
             } else {
                 let step_delay = if input > 200 { 80 } else { 120 };
                 (SineStepResult::Continue(step_delay), pwm)
             }
         }
     } else {
-        let pwm = sine_drive(positions, gate_drive_offset, timer1_max_arr, sine_mode_power, false);
+        let pwm = sine_drive(
+            positions,
+            gate_drive_offset,
+            timer1_max_arr,
+            sine_mode_power,
+            false,
+        );
         (SineStepResult::Idle, pwm)
     }
 }
@@ -166,18 +193,30 @@ impl PhasePositions {
     pub fn advance(&mut self, forward: bool) {
         if !forward {
             self.a += 1;
-            if self.a > 359 { self.a = 0; }
+            if self.a > 359 {
+                self.a = 0;
+            }
             self.b += 1;
-            if self.b > 359 { self.b = 0; }
+            if self.b > 359 {
+                self.b = 0;
+            }
             self.c += 1;
-            if self.c > 359 { self.c = 0; }
+            if self.c > 359 {
+                self.c = 0;
+            }
         } else {
             self.a -= 1;
-            if self.a < 0 { self.a = 359; }
+            if self.a < 0 {
+                self.a = 359;
+            }
             self.b -= 1;
-            if self.b < 0 { self.b = 359; }
+            if self.b < 0 {
+                self.b = 359;
+            }
             self.c -= 1;
-            if self.c < 0 { self.c = 359; }
+            if self.c < 0 {
+                self.c = 359;
+            }
         }
     }
 }
@@ -188,7 +227,11 @@ mod tests {
 
     #[test]
     fn forward_decrements() {
-        let mut p = PhasePositions { a: 100, b: 219, c: 339 };
+        let mut p = PhasePositions {
+            a: 100,
+            b: 219,
+            c: 339,
+        };
         p.advance(true);
         assert_eq!(p.a, 99);
         assert_eq!(p.b, 218);
@@ -197,7 +240,11 @@ mod tests {
 
     #[test]
     fn reverse_increments() {
-        let mut p = PhasePositions { a: 100, b: 219, c: 339 };
+        let mut p = PhasePositions {
+            a: 100,
+            b: 219,
+            c: 339,
+        };
         p.advance(false);
         assert_eq!(p.a, 101);
         assert_eq!(p.b, 220);
@@ -215,7 +262,11 @@ mod tests {
 
     #[test]
     fn reverse_wraps_359_to_0() {
-        let mut p = PhasePositions { a: 359, b: 359, c: 359 };
+        let mut p = PhasePositions {
+            a: 359,
+            b: 359,
+            c: 359,
+        };
         p.advance(false);
         assert_eq!(p.a, 0);
         assert_eq!(p.b, 0);
@@ -227,13 +278,17 @@ mod tests {
         // Table should be symmetric around index 180
         assert_eq!(PWM_SIN[0], PWM_SIN[359 - 359 + 0]); // first = 180
         assert_eq!(PWM_SIN[90], 360); // peak
-        assert_eq!(PWM_SIN[270], 0);  // trough
-        assert_eq!(PWM_SIN[0], 180);  // midpoint
+        assert_eq!(PWM_SIN[270], 0); // trough
+        assert_eq!(PWM_SIN[0], 180); // midpoint
     }
 
     #[test]
     fn sine_drive_produces_valid_pwm() {
-        let p = PhasePositions { a: 0, b: 120, c: 240 };
+        let p = PhasePositions {
+            a: 0,
+            b: 120,
+            c: 240,
+        };
         let (ch1, ch2, ch3) = sine_drive(&p, 60, 1999, 5, false);
         // All channels should be > 0 (gate_drive_offset ensures minimum)
         assert!(ch1 > 0);
@@ -247,14 +302,22 @@ mod tests {
 
     #[test]
     fn sine_step_idle_when_not_armed() {
-        let mut p = PhasePositions { a: 0, b: 120, c: 240 };
+        let mut p = PhasePositions {
+            a: 0,
+            b: 120,
+            c: 240,
+        };
         let (result, _) = sine_step(&mut p, 100, false, true, 14, 1, 60, 1999, 5);
         assert!(matches!(result, SineStepResult::Idle));
     }
 
     #[test]
     fn sine_step_continues_at_low_throttle() {
-        let mut p = PhasePositions { a: 0, b: 120, c: 240 };
+        let mut p = PhasePositions {
+            a: 0,
+            b: 120,
+            c: 240,
+        };
         let (result, _) = sine_step(&mut p, 80, true, true, 14, 1, 60, 1999, 5);
         match result {
             SineStepResult::Continue(delay) => assert!(delay > 0),
@@ -265,10 +328,17 @@ mod tests {
     #[test]
     fn sine_step_changeover_at_high_throttle() {
         // Set phase A to 1 so one advance(true) wraps to 0
-        let mut p = PhasePositions { a: 1, b: 121, c: 241 };
+        let mut p = PhasePositions {
+            a: 1,
+            b: 121,
+            c: 241,
+        };
         let (result, _) = sine_step(&mut p, 500, true, true, 14, 3, 60, 1999, 5);
         match result {
-            SineStepResult::Changeover { commutation_interval, step } => {
+            SineStepResult::Changeover {
+                commutation_interval,
+                step,
+            } => {
                 assert_eq!(commutation_interval, 9000);
                 assert_eq!(step, 3);
             }

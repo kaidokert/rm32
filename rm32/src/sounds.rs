@@ -4,7 +4,7 @@
 //! Each note: activate a phase pair via com_step, set PWM prescaler for
 //! frequency, set low duty cycle for volume, delay for duration.
 
-use crate::hal::{PwmOutput, PhaseOutput, System};
+use crate::hal::{PhaseOutput, PwmOutput, System};
 
 /// Beep volume (0-11 maps to duty 0-33).
 pub struct Sounds {
@@ -50,11 +50,7 @@ impl Sounds {
         sys.reload_watchdog();
     }
 
-    fn silence(
-        &self,
-        pwm: &mut impl PwmOutput,
-        phase: &mut impl PhaseOutput,
-    ) {
+    fn silence(&self, pwm: &mut impl PwmOutput, phase: &mut impl PhaseOutput) {
         phase.all_off();
         pwm.set_prescaler(0);
         pwm.set_auto_reload(self.tim1_autoreload);

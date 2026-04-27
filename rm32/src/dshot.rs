@@ -6,10 +6,8 @@
 
 /// GCR encode table for DShot telemetry
 const GCR_ENCODE_TABLE: [u8; 16] = [
-    0b11001, 0b11011, 0b10010, 0b10011,
-    0b11101, 0b10101, 0b10110, 0b10111,
-    0b11010, 0b01001, 0b01010, 0b01011,
-    0b11110, 0b01101, 0b01110, 0b01111,
+    0b11001, 0b11011, 0b10010, 0b10011, 0b11101, 0b10101, 0b10110, 0b10111, 0b11010, 0b01001,
+    0b01010, 0b01011, 0b11110, 0b01101, 0b01110, 0b01111,
 ];
 
 /// DShot command numbers
@@ -95,9 +93,15 @@ pub fn decode_frame(
     if value > 47 {
         DshotFrame::Throttle { value, telemetry }
     } else if value > 0 {
-        DshotFrame::Command { cmd: value, telemetry }
+        DshotFrame::Command {
+            cmd: value,
+            telemetry,
+        }
     } else {
-        DshotFrame::Throttle { value: 0, telemetry }
+        DshotFrame::Throttle {
+            value: 0,
+            telemetry,
+        }
     }
 }
 
@@ -155,7 +159,11 @@ pub fn erpm_to_12bit(com_time: u16, running: bool) -> u16 {
 /// Encode an eRPM telemetry response into a GCR buffer.
 /// `gcr_shift` is 6 for F051-like MCUs, 7 for G071-like MCUs.
 pub fn encode_telemetry_with_shift(
-    com_time: u16, running: bool, gcr_out: &mut [u32], padding: usize, gcr_shift: u8,
+    com_time: u16,
+    running: bool,
+    gcr_out: &mut [u32],
+    padding: usize,
+    gcr_shift: u8,
 ) {
     let value = erpm_to_12bit(com_time, running);
     encode_gcr_frame(value, gcr_out, padding, gcr_shift);
@@ -228,7 +236,10 @@ mod tests {
     fn decode_bad_crc() {
         let mut buf = build_frame(100, false, false);
         buf[31] = buf[30] + 22; // corrupt last pulse
-        assert!(matches!(decode_frame(&buf, 400, 600, false), DshotFrame::BadCrc));
+        assert!(matches!(
+            decode_frame(&buf, 400, 600, false),
+            DshotFrame::BadCrc
+        ));
     }
 
     #[test]
@@ -252,7 +263,10 @@ mod tests {
     #[test]
     fn decode_invalid_timing() {
         let buf = build_frame(100, false, false);
-        assert!(matches!(decode_frame(&buf, 50, 100, false), DshotFrame::InvalidTiming));
+        assert!(matches!(
+            decode_frame(&buf, 50, 100, false),
+            DshotFrame::InvalidTiming
+        ));
     }
 
     #[test]

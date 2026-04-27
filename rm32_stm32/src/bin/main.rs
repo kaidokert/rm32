@@ -182,7 +182,7 @@ fn main() -> ! {
         main_state.current_pid.kp = (cfg.current_p as u32) * 2;
         main_state.current_pid.ki = cfg.current_i as u32;
         main_state.current_pid.kd = (cfg.current_d as u32) * 2;
-        main_state.motor_kv = (cfg.motor_kv as u16) * 40 + 20;
+        main_state.motor_kv = ((cfg.motor_kv as u16) * 40 + 20) / BOARD.kv_divider.max(1) as u16;
         main_state.low_cell_volt_cutoff = cfg.low_cell_volt_cutoff as u16 + 250;
     }
 
@@ -199,10 +199,17 @@ fn main() -> ! {
             minimum_duty_cycle
         }
     };
-    // Scale startup duty by PWM frequency (C: min_startup_duty += 200 + pwm_freq*100/24)
-    let pf = main_state.config.pwm_frequency;
-    let min_startup_duty = min_startup_duty + 200 + (pf as u16 * 100 / 24);
-    let startup_max_duty = minimum_duty_cycle + 400;
+    // Startup boost: extra duty for heavy props (gated by board config)
+    let (min_startup_duty, minimum_duty_cycle, startup_max_duty) = if BOARD.startup_boost {
+        let pf = main_state.config.pwm_frequency;
+        (
+            min_startup_duty + 200 + (pf as u16 * 100 / 24),
+            minimum_duty_cycle + 50 + (pf as u16 * 50 / 24),
+            minimum_duty_cycle + 400,
+        )
+    } else {
+        (min_startup_duty, minimum_duty_cycle, minimum_duty_cycle + 400)
+    };
 
     // KV-based threshold scaling
     let _reverse_speed_threshold = rm32::functions::map(

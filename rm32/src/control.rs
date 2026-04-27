@@ -5,9 +5,9 @@
 //! - tenKhzRoutine equivalent (ramp, duty cycle, PID)
 //! - main_loop equivalent (desync, eRPM, LVC, telemetry triggers)
 
-pub mod state;
-pub mod tick;
 pub mod isr_logic;
 pub mod shared_impl;
+pub mod state;
 #[cfg(test)]
 mod tests;
+pub mod tick;

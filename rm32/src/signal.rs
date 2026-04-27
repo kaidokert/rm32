@@ -49,7 +49,9 @@ pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
 /// MultiShot uses a single pulse width (243-1200µs → 0-2000 throttle).
 pub fn compute_multishot(dma_buffer: &[u32]) -> Option<u16> {
     use crate::functions::map;
-    if dma_buffer.len() < 2 { return None; }
+    if dma_buffer.len() < 2 {
+        return None;
+    }
     let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]);
     if pulse > 0 && pulse < 1500 {
         Some(map(pulse as i32, 243, 1200, 0, 2000) as u16)
@@ -83,14 +85,18 @@ mod tests {
     #[test]
     fn detect_dshot600() {
         let mut buf = [0u32; 32];
-        for i in 0..32 { buf[i] = 100 + i as u32 * 3; }
+        for i in 0..32 {
+            buf[i] = 100 + i as u32 * 3;
+        }
         assert_eq!(detect_input(&buf, 48), SignalType::Dshot600);
     }
 
     #[test]
     fn detect_servo() {
         let mut buf = [0u32; 32];
-        for i in 0..32 { buf[i] = 100 + i as u32 * 1000; }
+        for i in 0..32 {
+            buf[i] = 100 + i as u32 * 1000;
+        }
         assert_eq!(detect_input(&buf, 48), SignalType::ServoPwm);
     }
 
@@ -121,14 +127,18 @@ mod tests {
     #[test]
     fn detect_dshot300() {
         let mut buf = [0u32; 32];
-        for i in 0..32 { buf[i] = 100 + i as u32 * 5; }
+        for i in 0..32 {
+            buf[i] = 100 + i as u32 * 5;
+        }
         assert_eq!(detect_input(&buf, 48), SignalType::Dshot300);
     }
 
     #[test]
     fn detect_rejects_ambiguous() {
         let mut buf = [0u32; 32];
-        for i in 0..32 { buf[i] = 100 + i as u32 * 12; } // smallest=12, >8
+        for i in 0..32 {
+            buf[i] = 100 + i as u32 * 12;
+        } // smallest=12, >8
         // average = 12*31/32 ~ 11, not matching servo (>200) either
         assert_eq!(detect_input(&buf, 48), SignalType::None);
     }

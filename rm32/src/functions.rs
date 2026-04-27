@@ -2,11 +2,20 @@
 
 /// Linear interpolation with clamping. i64 intermediate prevents overflow.
 pub fn map(x: i32, in_min: i32, in_max: i32, out_min: i32, out_max: i32) -> i32 {
-    if in_max == in_min { return out_min; }
+    if in_max == in_min {
+        return out_min;
+    }
     let lo = in_min.min(in_max);
     let hi = in_min.max(in_max);
-    let x = if x < lo { lo } else if x > hi { hi } else { x };
-    ((x - in_min) as i64 * (out_max - out_min) as i64 / (in_max - in_min) as i64 + out_min as i64) as i32
+    let x = if x < lo {
+        lo
+    } else if x > hi {
+        hi
+    } else {
+        x
+    };
+    ((x - in_min) as i64 * (out_max - out_min) as i64 / (in_max - in_min) as i64 + out_min as i64)
+        as i32
 }
 
 /// Absolute difference between two integers.

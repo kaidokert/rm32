@@ -36,7 +36,10 @@ mod tests {
     }
 
     impl hal::PwmOutput for MockHal {
-        fn set_duty_all(&mut self, duty: u16) { self.last_duty_all = duty; self.duty_all_count += 1; }
+        fn set_duty_all(&mut self, duty: u16) {
+            self.last_duty_all = duty;
+            self.duty_all_count += 1;
+        }
         fn set_auto_reload(&mut self, _arr: u16) {}
         fn set_prescaler(&mut self, _psc: u16) {}
         fn set_compare1(&mut self, _val: u16) {}
@@ -47,24 +50,39 @@ mod tests {
     }
 
     impl hal::Comparator for MockHal {
-        fn output_level(&self) -> bool { self.comp_level }
+        fn output_level(&self) -> bool {
+            self.comp_level
+        }
         fn set_step(&mut self, _step: u8, _rising: bool) {}
         fn change_input(&mut self) {}
-        fn enable_interrupts(&mut self) { self.enable_comp_called = true; }
-        fn mask_interrupts(&mut self) { self.mask_called = true; }
+        fn enable_interrupts(&mut self) {
+            self.enable_comp_called = true;
+        }
+        fn mask_interrupts(&mut self) {
+            self.mask_called = true;
+        }
     }
 
     impl hal::PhaseOutput for MockHal {
-        fn com_step(&mut self, step: u8) { self.last_com_step = step; self.com_step_count += 1; }
-        fn all_off(&mut self) { self.all_off_called = true; }
+        fn com_step(&mut self, step: u8) {
+            self.last_com_step = step;
+            self.com_step_count += 1;
+        }
+        fn all_off(&mut self) {
+            self.all_off_called = true;
+        }
         fn full_brake(&mut self) {}
         fn all_pwm(&mut self) {}
         fn proportional_brake(&mut self) {}
     }
 
     impl hal::IntervalTimer for MockHal {
-        fn count(&self) -> u32 { self.timer_count }
-        fn set_count(&mut self, val: u32) { self.timer_count = val; }
+        fn count(&self) -> u32 {
+            self.timer_count
+        }
+        fn set_count(&mut self, val: u32) {
+            self.timer_count = val;
+        }
     }
 
     impl hal::ComTimer for MockHal {
@@ -74,7 +92,9 @@ mod tests {
     }
 
     impl hal::System for MockHal {
-        fn reset(&mut self) -> ! { panic!("reset called") }
+        fn reset(&mut self) -> ! {
+            panic!("reset called")
+        }
         fn enable_irq(&mut self) {}
         fn disable_irq(&mut self) {}
         fn start_watchdog(&mut self, _prescaler: u8, _reload: u16) {}
@@ -984,13 +1004,24 @@ mod tests {
     use crate::shared_comm::SharedComm as _;
 
     fn make_counters() -> TickCounters {
-        TickCounters { ten_khz_counter: 0, one_khz_loop_counter: 0, armed_timeout_count: 0, tim1_arr: 1999 }
+        TickCounters {
+            ten_khz_counter: 0,
+            one_khz_loop_counter: 0,
+            armed_timeout_count: 0,
+            tim1_arr: 1999,
+            voltage_based_ramp: false,
+            pulse_output: false,
+        }
     }
 
     // Separate mocks for isr_logic (needs 4 distinct &mut references)
-    struct MockPwm { last_duty: u16 }
+    struct MockPwm {
+        last_duty: u16,
+    }
     impl hal::PwmOutput for MockPwm {
-        fn set_duty_all(&mut self, d: u16) { self.last_duty = d; }
+        fn set_duty_all(&mut self, d: u16) {
+            self.last_duty = d;
+        }
         fn set_auto_reload(&mut self, _: u16) {}
         fn set_prescaler(&mut self, _: u16) {}
         fn set_compare1(&mut self, _: u16) {}
@@ -999,13 +1030,20 @@ mod tests {
         fn generate_update_event(&mut self) {}
         fn set_dead_time_override(&mut self, _dtg: u16) {}
     }
-    struct MockComp { level: bool, mask_called: bool }
+    struct MockComp {
+        level: bool,
+        mask_called: bool,
+    }
     impl hal::Comparator for MockComp {
-        fn output_level(&self) -> bool { self.level }
+        fn output_level(&self) -> bool {
+            self.level
+        }
         fn set_step(&mut self, _: u8, _: bool) {}
         fn change_input(&mut self) {}
         fn enable_interrupts(&mut self) {}
-        fn mask_interrupts(&mut self) { self.mask_called = true; }
+        fn mask_interrupts(&mut self) {
+            self.mask_called = true;
+        }
     }
     struct MockPhase;
     impl hal::PhaseOutput for MockPhase {
@@ -1015,10 +1053,16 @@ mod tests {
         fn all_pwm(&mut self) {}
         fn proportional_brake(&mut self) {}
     }
-    struct MockInterval { count: u32 }
+    struct MockInterval {
+        count: u32,
+    }
     impl hal::IntervalTimer for MockInterval {
-        fn count(&self) -> u32 { self.count }
-        fn set_count(&mut self, v: u32) { self.count = v; }
+        fn count(&self) -> u32 {
+            self.count
+        }
+        fn set_count(&mut self, v: u32) {
+            self.count = v;
+        }
     }
     struct MockComTimer;
     impl hal::ComTimer for MockComTimer {
@@ -1036,7 +1080,10 @@ mod tests {
         let mut counters = make_counters();
         let shared = TestShared::new();
         let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
@@ -1044,8 +1091,16 @@ mod tests {
         shared.newinput.set(1000);
 
         isr_logic::ten_khz_tick(
-            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            &mut comm,
+            &mut bemf,
+            &mut duty,
+            &config,
+            &mut counters,
+            &shared,
+            &mut pwm,
+            &mut comp,
+            &mut phase,
+            &mut interval,
         );
 
         assert!(shared.duty_cycle_setpoint() > 0);
@@ -1061,7 +1116,10 @@ mod tests {
         let mut counters = make_counters();
         let shared = TestShared::new();
         let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
@@ -1069,8 +1127,16 @@ mod tests {
         shared.newinput.set(0);
 
         isr_logic::ten_khz_tick(
-            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            &mut comm,
+            &mut bemf,
+            &mut duty,
+            &config,
+            &mut counters,
+            &shared,
+            &mut pwm,
+            &mut comp,
+            &mut phase,
+            &mut interval,
         );
 
         assert_eq!(shared.duty_cycle_setpoint(), 0);
@@ -1085,7 +1151,10 @@ mod tests {
         let mut counters = make_counters();
         let shared = TestShared::new();
         let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
@@ -1094,15 +1163,31 @@ mod tests {
 
         for _ in 0..20000 {
             isr_logic::ten_khz_tick(
-                &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-                &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+                &mut comm,
+                &mut bemf,
+                &mut duty,
+                &config,
+                &mut counters,
+                &shared,
+                &mut pwm,
+                &mut comp,
+                &mut phase,
+                &mut interval,
             );
         }
         assert!(!shared.armed());
 
         isr_logic::ten_khz_tick(
-            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            &mut comm,
+            &mut bemf,
+            &mut duty,
+            &config,
+            &mut counters,
+            &shared,
+            &mut pwm,
+            &mut comp,
+            &mut phase,
+            &mut interval,
         );
         assert!(shared.armed());
     }
@@ -1116,13 +1201,24 @@ mod tests {
         let mut counters = make_counters();
         let shared = TestShared::new();
         let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
         isr_logic::ten_khz_tick(
-            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            &mut comm,
+            &mut bemf,
+            &mut duty,
+            &config,
+            &mut counters,
+            &shared,
+            &mut pwm,
+            &mut comp,
+            &mut phase,
+            &mut interval,
         );
 
         assert_eq!(shared.signal_timeout(), 1);
@@ -1137,7 +1233,10 @@ mod tests {
         let mut counters = make_counters();
         let shared = TestShared::new();
         let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
         let mut interval = MockInterval { count: 0 };
 
@@ -1147,12 +1246,28 @@ mod tests {
         duty.ramp_divider = 0;
 
         isr_logic::ten_khz_tick(
-            &mut comm, &mut bemf, &mut duty, &config, &mut counters,
-            &shared, &mut pwm, &mut comp, &mut phase, &mut interval,
+            &mut comm,
+            &mut bemf,
+            &mut duty,
+            &config,
+            &mut counters,
+            &shared,
+            &mut pwm,
+            &mut comp,
+            &mut phase,
+            &mut interval,
         );
 
-        assert!(duty.cycle < 2000, "duty should be ramp-limited, got {}", duty.cycle);
-        assert!(duty.cycle > 100, "duty should increase from 100, got {}", duty.cycle);
+        assert!(
+            duty.cycle < 2000,
+            "duty should be ramp-limited, got {}",
+            duty.cycle
+        );
+        assert!(
+            duty.cycle > 100,
+            "duty should increase from 100, got {}",
+            duty.cycle
+        );
     }
 
     #[test]
@@ -1161,13 +1276,20 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let shared = TestShared::new();
         let mut com_timer = MockComTimer;
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut phase = MockPhase;
 
         let step_before = comm.step;
         isr_logic::commutation_timer_expired(
-            &mut comm, &mut bemf, &shared,
-            &mut com_timer, &mut comp, &mut phase,
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
         );
 
         assert_ne!(comm.step, step_before);
@@ -1179,7 +1301,10 @@ mod tests {
     fn isr_bemf_zero_cross_detected() {
         let comm = crate::commutation::Commutation::new(); // rising=true
         let mut bemf = crate::control::state::BemfState::default();
-        let mut comp = MockComp { level: false, mask_called: false };
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
         let mut interval = MockInterval { count: 500 };
         let mut com_timer = MockComTimer;
 
@@ -1187,9 +1312,7 @@ mod tests {
         bemf.wait_time = 500;
         // comp_level=false, rising=true → false != true → filter passes
 
-        isr_logic::bemf_zero_cross(
-            &comm, &mut bemf, &mut comp, &mut interval, &mut com_timer,
-        );
+        isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
         assert!(comp.mask_called);
     }
@@ -1198,16 +1321,17 @@ mod tests {
     fn isr_bemf_zero_cross_filtered_out() {
         let comm = crate::commutation::Commutation::new(); // rising=true
         let mut bemf = crate::control::state::BemfState::default();
-        let mut comp = MockComp { level: true, mask_called: false };
+        let mut comp = MockComp {
+            level: true,
+            mask_called: false,
+        };
         let mut interval = MockInterval { count: 0 };
         let mut com_timer = MockComTimer;
 
         bemf.filter_level = 2;
         // comp_level=true, rising=true → true == true → filter rejects (early return)
 
-        isr_logic::bemf_zero_cross(
-            &comm, &mut bemf, &mut comp, &mut interval, &mut com_timer,
-        );
+        isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
         assert!(!comp.mask_called);
     }
@@ -1272,7 +1396,10 @@ mod tests {
         let actual_current = current_mv / mv_per_amp as i32;
         // (2048 * 3300 / 41) = 164878 (integer), - 49800 = 115078
         // 115078 / 20 = 5753 (integer)
-        assert!(actual_current > 5700 && actual_current < 5800,
-            "expected ~5750, got {}", actual_current);
+        assert!(
+            actual_current > 5700 && actual_current < 5800,
+            "expected ~5750, got {}",
+            actual_current
+        );
     }
 }

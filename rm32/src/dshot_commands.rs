@@ -83,9 +83,7 @@ impl CommandProcessor {
                 config.bi_direction = 1;
                 CommandResult::None
             }
-            commands::SAVE_SETTINGS => {
-                CommandResult::SaveSettings
-            }
+            commands::SAVE_SETTINGS => CommandResult::SaveSettings,
             commands::EDT_ENABLE => {
                 self.extended_telemetry = true;
                 self.send_edt_init = true;
@@ -123,7 +121,11 @@ impl CommandProcessor {
 
     /// Process a frame while in programming mode.
     /// Returns Some((position, value)) when a commit happens.
-    pub fn process_programming(&mut self, value: u16, config: &mut EepromConfig) -> Option<CommandResult> {
+    pub fn process_programming(
+        &mut self,
+        value: u16,
+        config: &mut EepromConfig,
+    ) -> Option<CommandResult> {
         match self.programming_mode {
             1 => {
                 self.position = value;
@@ -164,13 +166,26 @@ mod tests {
     use super::*;
 
     fn setup() -> (CommandProcessor, EepromConfig, bool, bool) {
-        (CommandProcessor::default(), EepromConfig::default(), true, false)
+        (
+            CommandProcessor::default(),
+            EepromConfig::default(),
+            true,
+            false,
+        )
     }
 
     #[test]
     fn beacon_command_immediate() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
-        let result = cp.process(1, true, false, &mut config, &mut forward, &mut edt_armed, false);
+        let result = cp.process(
+            1,
+            true,
+            false,
+            &mut config,
+            &mut forward,
+            &mut edt_armed,
+            false,
+        );
         assert_eq!(result, CommandResult::PlayTone(1));
     }
 
@@ -178,10 +193,26 @@ mod tests {
     fn non_beacon_needs_6_repetitions() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         for _ in 0..5 {
-            let r = cp.process(7, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            let r = cp.process(
+                7,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
             assert_eq!(r, CommandResult::None);
         }
-        let r = cp.process(7, true, false, &mut config, &mut forward, &mut edt_armed, false);
+        let r = cp.process(
+            7,
+            true,
+            false,
+            &mut config,
+            &mut forward,
+            &mut edt_armed,
+            false,
+        );
         // After 6th: command executes
         assert_eq!(r, CommandResult::None); // direction change returns None
         assert_eq!(config.dir_reversed, 0);
@@ -193,7 +224,15 @@ mod tests {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         forward = false;
         for _ in 0..6 {
-            cp.process(7, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                7,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert_eq!(config.dir_reversed, 0);
         assert!(forward);
@@ -203,7 +242,15 @@ mod tests {
     fn command_8_sets_reversed() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         for _ in 0..6 {
-            cp.process(8, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                8,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert_eq!(config.dir_reversed, 1);
         assert!(!forward);
@@ -214,7 +261,15 @@ mod tests {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         config.bi_direction = 1;
         for _ in 0..6 {
-            cp.process(9, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                9,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert_eq!(config.bi_direction, 0);
     }
@@ -223,7 +278,15 @@ mod tests {
     fn command_10_enables_bidir() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         for _ in 0..6 {
-            cp.process(10, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                10,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert_eq!(config.bi_direction, 1);
     }
@@ -232,7 +295,15 @@ mod tests {
     fn command_13_enables_edt() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         for _ in 0..6 {
-            cp.process(13, true, false, &mut config, &mut forward, &mut edt_armed, true);
+            cp.process(
+                13,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                true,
+            );
         }
         assert!(cp.extended_telemetry);
         assert!(edt_armed);
@@ -243,7 +314,15 @@ mod tests {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         cp.extended_telemetry = true;
         for _ in 0..6 {
-            cp.process(14, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                14,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert!(!cp.extended_telemetry);
     }
@@ -253,12 +332,28 @@ mod tests {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         config.dir_reversed = 0;
         for _ in 0..6 {
-            cp.process(21, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                21,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert!(!forward); // dir_reversed=0 -> forward = dir_reversed != 0 = false
 
         for _ in 0..6 {
-            cp.process(20, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                20,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert!(forward); // forward = dir_reversed == 0 = true
     }
@@ -268,7 +363,15 @@ mod tests {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         // Enter programming mode
         for _ in 0..6 {
-            cp.process(36, true, false, &mut config, &mut forward, &mut edt_armed, false);
+            cp.process(
+                36,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
         }
         assert_eq!(cp.programming_mode, 1);
 
@@ -284,7 +387,13 @@ mod tests {
 
         // Commit
         let result = cp.process_programming(37, &mut config);
-        assert_eq!(result, Some(CommandResult::ProgrammingCommit { position: 5, value: 200 }));
+        assert_eq!(
+            result,
+            Some(CommandResult::ProgrammingCommit {
+                position: 5,
+                value: 200
+            })
+        );
         assert_eq!(cp.programming_mode, 0);
         assert_eq!(config.as_bytes()[5], 200);
     }
@@ -293,8 +402,18 @@ mod tests {
     fn command_6_requests_esc_info() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
         for _ in 0..6 {
-            let r = cp.process(6, true, false, &mut config, &mut forward, &mut edt_armed, false);
-            if r == CommandResult::SendEscInfo { break; }
+            let r = cp.process(
+                6,
+                true,
+                false,
+                &mut config,
+                &mut forward,
+                &mut edt_armed,
+                false,
+            );
+            if r == CommandResult::SendEscInfo {
+                break;
+            }
         }
         // Last call should return SendEscInfo
     }
@@ -302,14 +421,30 @@ mod tests {
     #[test]
     fn ignores_when_running() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
-        let r = cp.process(1, true, true, &mut config, &mut forward, &mut edt_armed, false);
+        let r = cp.process(
+            1,
+            true,
+            true,
+            &mut config,
+            &mut forward,
+            &mut edt_armed,
+            false,
+        );
         assert_eq!(r, CommandResult::None);
     }
 
     #[test]
     fn ignores_when_not_armed() {
         let (mut cp, mut config, mut forward, mut edt_armed) = setup();
-        let r = cp.process(1, false, false, &mut config, &mut forward, &mut edt_armed, false);
+        let r = cp.process(
+            1,
+            false,
+            false,
+            &mut config,
+            &mut forward,
+            &mut edt_armed,
+            false,
+        );
         assert_eq!(r, CommandResult::None);
     }
 }

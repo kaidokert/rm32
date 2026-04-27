@@ -2,7 +2,7 @@
 
 /// Commutation state
 pub struct Commutation {
-    pub step: u8,         // 1-6
+    pub step: u8, // 1-6
     pub forward: bool,
     pub rising: bool,
     pub desync_check: bool,
@@ -129,7 +129,9 @@ mod tests {
         assert!(c.desync_check);
         c.desync_check = false;
         // Another full cycle
-        for _ in 0..6 { c.advance(); }
+        for _ in 0..6 {
+            c.advance();
+        }
         assert!(c.desync_check);
     }
 

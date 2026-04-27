@@ -93,12 +93,18 @@ mod tests {
     }
 
     impl FakePin {
-        fn new() -> Self { Self { call_count: 0 } }
+        fn new() -> Self {
+            Self { call_count: 0 }
+        }
     }
 
     impl WS2812Pin for FakePin {
-        fn set_high(&mut self) { self.call_count += 1; }
-        fn set_low(&mut self) { self.call_count += 1; }
+        fn set_high(&mut self) {
+            self.call_count += 1;
+        }
+        fn set_low(&mut self) {
+            self.call_count += 1;
+        }
         fn delay_ns(&mut self, _ns: u32) {}
     }
 

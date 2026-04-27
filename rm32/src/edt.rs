@@ -22,8 +22,7 @@ pub const EDT_DEINIT_FRAME: u16 = 0xEFF;
 
 /// EDT scheduler state.
 /// Manages the interleaving of eRPM and extended data frames.
-#[derive(Clone)]
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct EdtScheduler {
     /// Frame counter (increments each telemetry response)
     pub counter: u16,
@@ -36,7 +35,6 @@ pub struct EdtScheduler {
     /// Pending deinit frame to send
     pub send_deinit: bool,
 }
-
 
 /// What the scheduler decided to send this frame.
 pub enum EdtFrame {
@@ -161,7 +159,10 @@ mod tests {
         s.counter = u16::MAX;
 
         // First: extended (current at counter=0)
-        assert!(matches!(s.next_frame(1000, 16800, 25), EdtFrame::Extended(_)));
+        assert!(matches!(
+            s.next_frame(1000, 16800, 25),
+            EdtFrame::Extended(_)
+        ));
         // Next: forced eRPM
         assert!(matches!(s.next_frame(1000, 16800, 25), EdtFrame::Erpm));
     }

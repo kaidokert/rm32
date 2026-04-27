@@ -24,9 +24,7 @@ impl MotorState {
         }
 
         // Advance level conversion
-        if cfg.advance_level > 42
-            || (cfg.advance_level < 10 && cfg.advance_level > 3)
-        {
+        if cfg.advance_level > 42 || (cfg.advance_level < 10 && cfg.advance_level > 3) {
             self.bemf.temp_advance = 16;
         }
         if cfg.advance_level < 4 {
