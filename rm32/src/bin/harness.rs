@@ -135,8 +135,8 @@ impl Harness {
     /// Build a DShot frame in the DMA buffer.
     fn build_dshot_frame(&mut self, value: u16) {
         let mut bits = [0u8; 16];
-        for i in 0..11 {
-            bits[i] = ((value >> (10 - i)) & 1) as u8;
+        for (i, bit) in bits[..11].iter_mut().enumerate() {
+            *bit = ((value >> (10 - i)) & 1) as u8;
         }
         bits[11] = 0;
         let crc = (bits[0] ^ bits[4] ^ bits[8]) << 3
@@ -149,9 +149,9 @@ impl Harness {
         bits[15] = crc & 1;
 
         let mut base = 1000u32;
-        for i in 0..16 {
+        for (i, &bit) in bits.iter().enumerate() {
             self.dma_buffer[i * 2] = base;
-            self.dma_buffer[i * 2 + 1] = base + if bits[i] != 0 { 22 } else { 10 };
+            self.dma_buffer[i * 2 + 1] = base + if bit != 0 { 22 } else { 10 };
             base += 32;
         }
     }
@@ -453,8 +453,8 @@ fn main() {
             harness.state.load_settings();
             println!("ok");
             io::stdout().flush().unwrap();
-        } else if line.starts_with("config ") {
-            harness.parse_kvs(&line[7..]);
+        } else if let Some(rest) = line.strip_prefix("config ") {
+            harness.parse_kvs(rest);
             println!("ok");
             io::stdout().flush().unwrap();
         } else if let Some(rest) = line.strip_prefix("ticks ") {

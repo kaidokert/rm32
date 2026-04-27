@@ -357,9 +357,7 @@ fn main() -> ! {
                     sys.delay_micros(delay_us as u32);
                 }
                 SineStepResult::Changeover { commutation_interval, .. } => {
-                    shared.set_stepper_sine(false);
-                    shared.set_running(true);
-                    shared.set_old_routine(true);
+                    shared.transition(rm32::motor_mode::MotorEvent::ExitSine);
                     shared.set_commutation_interval(commutation_interval);
                     shared.set_zero_crosses(20);
                 }

@@ -26,9 +26,6 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> GenericCapture<D, T, P> {
         }
     }
 
-    pub fn is_output(&self) -> bool { self.out_put }
-    pub fn dma_buffer(&self) -> &[u32; 64] { &self.dma_buf }
-    pub fn gcr_buffer(&mut self) -> &mut [u32; 37] { &mut self.gcr_buf }
 }
 
 impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, T, P> {
@@ -62,4 +59,7 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, 
     fn set_pull_up(&mut self) { self.pin.set_pull_up(); }
     fn set_pull_down(&mut self) { self.pin.set_pull_down(); }
     fn set_pull_none(&mut self) { self.pin.set_pull_none(); }
+    fn dma_buffer(&self) -> &[u32; 64] { &self.dma_buf }
+    fn gcr_buffer(&mut self) -> &mut [u32; 37] { &mut self.gcr_buf }
+    fn is_output(&self) -> bool { self.out_put }
 }

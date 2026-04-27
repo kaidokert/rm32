@@ -3,7 +3,7 @@
 //! On real hardware, this is implemented via atomics (SharedState).
 //! For testing, TestShared implements it with Cell fields.
 
-use crate::motor_mode::MotorMode;
+use crate::motor_mode::{MotorEvent, MotorMode};
 
 /// Communication interface between ISR and main loop contexts.
 /// Provides access to shared motor state that both contexts need.
@@ -11,6 +11,14 @@ pub trait SharedComm {
     // Motor mode (replaces armed/running/old_routine/stepper_sine bools)
     fn motor_mode(&self) -> MotorMode;
     fn set_motor_mode(&self, mode: MotorMode);
+
+    /// Apply a state transition event atomically.
+    fn transition(&self, event: MotorEvent) {
+        let new = self.motor_mode().transition(event);
+        if new != self.motor_mode() {
+            self.set_motor_mode(new);
+        }
+    }
 
     // Convenience accessors derived from motor_mode
     fn armed(&self) -> bool {

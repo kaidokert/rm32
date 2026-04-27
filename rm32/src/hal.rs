@@ -80,6 +80,12 @@ pub trait InputCapture {
     fn set_pull_none(&mut self);
     /// Set inverted input polarity (for boards with signal inversion).
     fn set_inverted(&mut self, _inverted: bool) {}
+    /// Access the DMA receive buffer (DShot/servo frames).
+    fn dma_buffer(&self) -> &[u32; 64];
+    /// Access the GCR encode buffer (bidirectional DShot telemetry).
+    fn gcr_buffer(&mut self) -> &mut [u32; 37];
+    /// Whether the input is currently in output mode (bidir DShot TX).
+    fn is_output(&self) -> bool;
 }
 
 /// ADC readings (voltage, current, temperature)

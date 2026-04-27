@@ -103,9 +103,9 @@ impl MainState {
                 if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
                     || shared.commutation_interval() > 1000
                 {
-                    shared.set_running(false);
+                    shared.transition(rm32::motor_mode::MotorEvent::StopMotor);
                 }
-                shared.set_old_routine(true);
+                shared.transition(rm32::motor_mode::MotorEvent::DesyncFallback);
             }
             self.desync_check = false;
             self.last_average_interval = self.average_interval;
@@ -114,7 +114,7 @@ impl MainState {
         // Signal timeout
         if shared.signal_timeout() > 10000
             && shared.armed() {
-                shared.set_armed(false);
+                shared.transition(rm32::motor_mode::MotorEvent::Disarm);
                 shared.set_input_set(false);
             }
 
@@ -139,8 +139,7 @@ impl MainState {
             let lvc_limit = if shared.stepper_sine() { LVC_STARTUP_THRESHOLD } else { LVC_NORMAL_THRESHOLD };
             if self.protection.low_voltage_count > lvc_limit {
                 self.protection.low_voltage_cutoff = true;
-                shared.set_armed(false);
-                shared.set_running(false);
+                shared.transition(rm32::motor_mode::MotorEvent::Disarm);
             }
         }
 

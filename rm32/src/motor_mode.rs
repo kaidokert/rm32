@@ -47,6 +47,47 @@ impl MotorMode {
     }
 }
 
+/// Motor state transition events.
+/// Centralizes all valid state changes — call `MotorMode::transition()` instead
+/// of imperatively setting individual flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MotorEvent {
+    /// Input detected, zero throttle confirmed → Disarmed→Armed
+    Arm,
+    /// Safety disarm (timeout, error, LVC) → Any→Disarmed
+    Disarm,
+    /// Throttle applied → Armed→OldRoutine
+    StartMotor,
+    /// Throttle zero or desync → Running/OldRoutine→Armed
+    StopMotor,
+    /// Enter sinusoidal startup → Armed→StepperSine
+    EnterSine,
+    /// Sine changeover → StepperSine→OldRoutine
+    ExitSine,
+    /// Enough zero-crosses → OldRoutine→Running
+    BemfLocked,
+    /// Desync fallback → Running→OldRoutine
+    DesyncFallback,
+}
+
+impl MotorMode {
+    /// Apply a state transition event. Returns the new mode.
+    /// Invalid transitions are silently ignored (returns self unchanged).
+    pub fn transition(self, event: MotorEvent) -> Self {
+        match (self, event) {
+            (Self::Disarmed, MotorEvent::Arm) => Self::Armed,
+            (_, MotorEvent::Disarm) => Self::Disarmed,
+            (Self::Armed, MotorEvent::StartMotor) => Self::OldRoutine,
+            (Self::OldRoutine | Self::Running, MotorEvent::StopMotor) => Self::Armed,
+            (Self::Armed, MotorEvent::EnterSine) => Self::StepperSine,
+            (Self::StepperSine, MotorEvent::ExitSine) => Self::OldRoutine,
+            (Self::OldRoutine, MotorEvent::BemfLocked) => Self::Running,
+            (Self::Running, MotorEvent::DesyncFallback) => Self::OldRoutine,
+            _ => self, // invalid transition — no change
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +121,72 @@ mod tests {
     #[test]
     fn invalid_defaults_to_disarmed() {
         assert_eq!(MotorMode::from_u8(255), MotorMode::Disarmed);
+    }
+
+    // --- Transition tests ---
+
+    #[test]
+    fn transition_arm_from_disarmed() {
+        assert_eq!(MotorMode::Disarmed.transition(MotorEvent::Arm), MotorMode::Armed);
+    }
+
+    #[test]
+    fn transition_arm_ignored_when_armed() {
+        assert_eq!(MotorMode::Armed.transition(MotorEvent::Arm), MotorMode::Armed);
+    }
+
+    #[test]
+    fn transition_disarm_from_any() {
+        assert_eq!(MotorMode::Running.transition(MotorEvent::Disarm), MotorMode::Disarmed);
+        assert_eq!(MotorMode::Armed.transition(MotorEvent::Disarm), MotorMode::Disarmed);
+        assert_eq!(MotorMode::StepperSine.transition(MotorEvent::Disarm), MotorMode::Disarmed);
+    }
+
+    #[test]
+    fn transition_start_motor() {
+        assert_eq!(MotorMode::Armed.transition(MotorEvent::StartMotor), MotorMode::OldRoutine);
+        // Can't start from Disarmed
+        assert_eq!(MotorMode::Disarmed.transition(MotorEvent::StartMotor), MotorMode::Disarmed);
+    }
+
+    #[test]
+    fn transition_stop_motor() {
+        assert_eq!(MotorMode::Running.transition(MotorEvent::StopMotor), MotorMode::Armed);
+        assert_eq!(MotorMode::OldRoutine.transition(MotorEvent::StopMotor), MotorMode::Armed);
+    }
+
+    #[test]
+    fn transition_bemf_locked() {
+        assert_eq!(MotorMode::OldRoutine.transition(MotorEvent::BemfLocked), MotorMode::Running);
+        // Not from Running
+        assert_eq!(MotorMode::Running.transition(MotorEvent::BemfLocked), MotorMode::Running);
+    }
+
+    #[test]
+    fn transition_sine_flow() {
+        let m = MotorMode::Armed.transition(MotorEvent::EnterSine);
+        assert_eq!(m, MotorMode::StepperSine);
+        let m = m.transition(MotorEvent::ExitSine);
+        assert_eq!(m, MotorMode::OldRoutine);
+    }
+
+    #[test]
+    fn transition_desync_fallback() {
+        assert_eq!(MotorMode::Running.transition(MotorEvent::DesyncFallback), MotorMode::OldRoutine);
+    }
+
+    #[test]
+    fn transition_full_lifecycle() {
+        let m = MotorMode::Disarmed;
+        let m = m.transition(MotorEvent::Arm);
+        assert_eq!(m, MotorMode::Armed);
+        let m = m.transition(MotorEvent::StartMotor);
+        assert_eq!(m, MotorMode::OldRoutine);
+        let m = m.transition(MotorEvent::BemfLocked);
+        assert_eq!(m, MotorMode::Running);
+        let m = m.transition(MotorEvent::StopMotor);
+        assert_eq!(m, MotorMode::Armed);
+        let m = m.transition(MotorEvent::Disarm);
+        assert_eq!(m, MotorMode::Disarmed);
     }
 }

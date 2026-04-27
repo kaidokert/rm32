@@ -66,8 +66,9 @@ pub mod g431 {
     const LINE_21: u32 = 1 << 21;
     const LINE_22: u32 = 1 << 22;
 
-    // ISR-local shared state: which COMP and EXTI line are active.
-    // Safe because all access is from the same ISR priority level (single-core Cortex-M).
+    // SAFETY: ISR-local shared state — only accessed from COMP ISR and commutation
+    // ISR handlers which run at the same NVIC priority (no preemption between them).
+    // Single-core Cortex-M guarantees no concurrent access.
     static mut ACTIVE_CSR: u32 = COMP2_CSR;
     static mut ACTIVE_LINE: u32 = LINE_22;
 

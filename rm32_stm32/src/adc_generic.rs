@@ -9,15 +9,16 @@ use crate::adc_hal::{AdcOps, TempCalibration};
 use crate::dma_buf::DmaBuf;
 use crate::regs::InitError;
 
-/// Generic ADC reader. The DMA buffer is a static DmaBuf (circular DMA requirement).
-pub struct GenericAdc<A: AdcOps> {
+/// Generic ADC reader parameterized over buffer size.
+/// N=3 for single-ADC (temp, voltage, current), N=2 for dual-ADC per-unit.
+pub struct GenericAdc<A: AdcOps, const N: usize = 3> {
     ops: A,
-    buf: &'static DmaBuf<u16, 3>,
+    buf: &'static DmaBuf<u16, N>,
     temp_cal: TempCalibration,
 }
 
-impl<A: AdcOps> GenericAdc<A> {
-    pub fn new(ops: A, buf: &'static DmaBuf<u16, 3>, temp_cal: TempCalibration) -> Self {
+impl<A: AdcOps, const N: usize> GenericAdc<A, N> {
+    pub fn new(ops: A, buf: &'static DmaBuf<u16, N>, temp_cal: TempCalibration) -> Self {
         Self { ops, buf, temp_cal }
     }
 
@@ -26,12 +27,12 @@ impl<A: AdcOps> GenericAdc<A> {
     }
 
     /// Create a handle without re-initializing hardware.
-    pub fn post_init(ops: A, buf: &'static DmaBuf<u16, 3>, temp_cal: TempCalibration) -> Self {
+    pub fn post_init(ops: A, buf: &'static DmaBuf<u16, N>, temp_cal: TempCalibration) -> Self {
         Self { ops, buf, temp_cal }
     }
 }
 
-impl<A: AdcOps> Adc for GenericAdc<A> {
+impl<A: AdcOps> Adc for GenericAdc<A, 3> {
     fn start_conversion(&mut self) {
         self.ops.start_conversion();
     }

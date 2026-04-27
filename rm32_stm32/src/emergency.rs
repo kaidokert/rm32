@@ -11,6 +11,9 @@ pub struct G0AEmergencyOff;
 impl rm32::hal::EmergencyOff for G0AEmergencyOff {
     fn emergency_off() {
         const BSRR: u32 = 0x18;
+        // SAFETY: BSRR is a write-only, bit-atomic register.
+        // Writing reset bits forces GPIO outputs low regardless of peripheral state.
+        // No read-modify-write — safe from any context including NMI.
         unsafe {
             // Reset PA7/8/9/10 (high-side FETs off)
             ((periph_addr::GPIOA + BSRR) as *mut u32).write_volatile(

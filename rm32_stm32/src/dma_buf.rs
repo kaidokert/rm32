@@ -17,7 +17,9 @@ use core::cell::UnsafeCell;
 /// - This is safe on single-core Cortex-M where ISR and main don't overlap
 pub struct DmaBuf<T, const N: usize>(UnsafeCell<[T; N]>);
 
-// Safe to share across contexts: single-core, access is sequenced by DMA TC interrupt
+// SAFETY: Single-core Cortex-M. DMA writes and software reads are sequenced by the
+// DMA Transfer Complete interrupt — software only reads after DMA has finished writing.
+// No concurrent access occurs.
 unsafe impl<T, const N: usize> Sync for DmaBuf<T, N> {}
 
 impl<T: Copy + Default, const N: usize> Default for DmaBuf<T, N> {
@@ -28,8 +30,8 @@ impl<T: Copy + Default, const N: usize> Default for DmaBuf<T, N> {
 
 impl<T: Copy + Default, const N: usize> DmaBuf<T, N> {
     pub const fn new() -> Self {
-        // const-init with zeros (works for u16, u32 which are Copy+Default)
-        // Using a manual zero array since Default isn't const
+        // SAFETY: T is Copy+Default (u16/u32), so zeroed memory is a valid value.
+        // core::mem::zeroed is used instead of Default::default() because Default isn't const.
         Self(UnsafeCell::new(unsafe { core::mem::zeroed() }))
     }
 
@@ -40,6 +42,7 @@ impl<T: Copy + Default, const N: usize> DmaBuf<T, N> {
 
     /// Read buffer contents. Only call when DMA is not actively writing.
     pub fn read(&self) -> &[T; N] {
+        // SAFETY: Caller ensures DMA is not writing (called after TC interrupt).
         unsafe { &*self.0.get() }
     }
 }

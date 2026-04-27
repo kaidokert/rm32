@@ -5,11 +5,35 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, IsrState};
+use rm32::hal::InputCapture;
 
-/// Single-core ISR-local cell. Safe because:
-/// - Only accessed from ISR context (same priority level, no preemption)
-/// - Single-core Cortex-M guarantees no concurrent access
+/// Single-core ISR-local cell for zero-overhead mutable ISR state.
+///
+/// # Safety invariants for `Sync` impl
+///
+/// This type wraps `UnsafeCell<Option<IsrState>>` and implements `Sync`
+/// (required for `static` placement). This is sound because:
+///
+/// 1. **Single writer**: Only called from ISR handlers that share the same
+///    NVIC priority level. Cortex-M's priority-based preemption model
+///    guarantees that equal-priority ISRs cannot preempt each other.
+///
+/// 2. **Single core**: All STM32 targets (G071/F051/L431/G431) are
+///    single-core. No other hart can access this cell.
+///
+/// 3. **No main-loop access**: The main loop communicates via `SharedState`
+///    atomics, never touching `ISR_LOCAL`.
+///
+/// 4. **Init-once**: `get()` lazily initializes from `take_isr_state()`
+///    exactly once (first ISR invocation). Subsequent calls return the
+///    same `&mut`. The `Option` transitions None→Some exactly once.
+///
+/// If any of these invariants change (e.g., adding a higher-priority ISR
+/// that accesses motor state), this must be replaced with
+/// `cortex_m::interrupt::Mutex<RefCell<...>>`.
 struct IsrCell(core::cell::UnsafeCell<Option<IsrState>>);
+
+// SAFETY: See struct-level doc. Single-core + same-priority ISR = exclusive access.
 unsafe impl Sync for IsrCell {}
 
 impl IsrCell {
@@ -18,8 +42,10 @@ impl IsrCell {
     /// Get or initialize the ISR state.
     /// If never initialized, enters emergency shutdown (all FETs off).
     #[inline(always)]
-    #[allow(clippy::mut_from_ref)] // Intentional: UnsafeCell interior mutability for ISR-local state
+    #[allow(clippy::mut_from_ref)]
     fn get(&self) -> &mut IsrState {
+        // SAFETY: Called only from ISR context at a single priority level.
+        // No concurrent access possible (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };
         opt.get_or_insert_with(|| {
             match isr::take_isr_state() {
@@ -98,16 +124,9 @@ pub fn handle_dma_tc() {
 
     if shared.armed() && shared.dshot_telemetry() {
         if state.hal.input.is_output() {
-            use rm32::hal::InputCapture;
+
             state.hal.input.receive_dshot_dma();
         } else {
-            #[cfg(feature = "stm32g071")]
-            let gcr = state.hal.input.gcr_buffer();
-            #[cfg(feature = "stm32f051")]
-            let gcr = state.hal.input.gcr_buffer();
-            #[cfg(feature = "stm32l431")]
-            let gcr = state.hal.input.gcr_buffer();
-            #[cfg(feature = "stm32g431")]
             let gcr = state.hal.input.gcr_buffer();
 
             // EDT: decide whether to send eRPM or extended data frame
@@ -124,7 +143,7 @@ pub fn handle_dma_tc() {
             rm32::dshot::encode_gcr_frame(
                 value_12bit, gcr, 7, crate::config::GCR_SHIFT,
             );
-            use rm32::hal::InputCapture;
+
             state.hal.input.send_dshot_dma();
         }
     }
@@ -135,19 +154,9 @@ pub fn handle_exti_frame() {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
-    #[cfg(feature = "stm32g071")]
-    let buf = state.hal.input.dma_buffer();
-    #[cfg(feature = "stm32f051")]
-    let buf = state.hal.input.dma_buffer();
-    #[cfg(feature = "stm32l431")]
-    let buf = state.hal.input.dma_buffer();
-    #[cfg(feature = "stm32g431")]
     let buf = state.hal.input.dma_buffer();
 
-    let pin_high = {
-        use rm32::hal::InputCapture;
-        state.hal.input.input_pin_state()
-    };
+    let pin_high = state.hal.input.input_pin_state();
 
     let mut zic = shared.zero_input_count();
     let actions = state.transfer.process(

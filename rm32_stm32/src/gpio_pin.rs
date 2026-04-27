@@ -28,7 +28,10 @@ pub trait GpioPin {
     /// Set GPIO mode for this pin (output, alternate, etc).
     #[inline(always)]
     fn set_mode(mode: u32) {
-        let moder = Self::PORT as *mut u32; // MODER at offset 0x00
+        // SAFETY: PORT is a valid GPIO base address (from periph_addr).
+        // MODER is at offset 0x00 on all STM32 families.
+        // Read-modify-write is safe: called from ISR at fixed priority (no preemption).
+        let moder = Self::PORT as *mut u32;
         unsafe {
             let val = moder.read_volatile();
             moder.write_volatile((val & !Self::MODER_MASK) | (mode << Self::MODER_OFFSET));
@@ -38,12 +41,14 @@ pub trait GpioPin {
     /// Set pin high via BSRR (atomic, write-only).
     #[inline(always)]
     fn set_high() {
+        // SAFETY: BSRR at offset 0x18 is write-only, bit-atomic — no read-modify-write needed.
         unsafe { ((Self::PORT + 0x18) as *mut u32).write_volatile(Self::BSRR_SET); }
     }
 
     /// Set pin low via BSRR reset bits (atomic, write-only).
     #[inline(always)]
     fn set_low() {
+        // SAFETY: BSRR at offset 0x18 is write-only, bit-atomic.
         unsafe { ((Self::PORT + 0x18) as *mut u32).write_volatile(Self::BSRR_RESET); }
     }
 }

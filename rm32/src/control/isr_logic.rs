@@ -10,6 +10,7 @@ use crate::constants::*;
 use crate::control::state::{BemfState, DutyState};
 use crate::functions::map;
 use crate::hal;
+use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
 
 /// Counters and config owned exclusively by the ISR tick.
@@ -53,7 +54,7 @@ pub fn ten_khz_tick(
             ) as u16;
             shared.set_duty_cycle_setpoint(setpoint);
             if !shared.running() {
-                shared.set_running(true);
+                shared.transition(MotorEvent::StartMotor);
                 duty.last = duty.min_startup;
                 let step = commutation.advance();
                 phase.com_step(step);
@@ -87,7 +88,7 @@ pub fn ten_khz_tick(
         if shared.input_set() && shared.adjusted_input() == 0 {
             counters.armed_timeout_count += 1;
             if counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
-                shared.set_armed(true);
+                shared.transition(MotorEvent::Arm);
                 counters.armed_timeout_count = 0;
             }
         } else {
@@ -179,7 +180,7 @@ fn bemf_polling(
         let zc = shared.zero_crosses();
         let ci = shared.commutation_interval();
         if zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
-            shared.set_old_routine(false);
+            shared.transition(MotorEvent::BemfLocked);
             comp.enable_interrupts();
         }
     }
