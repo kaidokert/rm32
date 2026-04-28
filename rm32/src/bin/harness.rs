@@ -479,6 +479,55 @@ fn main() {
             }
             harness.do_tick();
             harness.print_state();
+        } else if let Some(rest) = line.strip_prefix("gcr_encode ") {
+            // gcr_encode <com_time> [padding=<N>]
+            let mut com_time: u16 = 0;
+            let mut padding: usize = 7;
+            for token in rest.split_whitespace() {
+                if let Some(val) = token.strip_prefix("padding=") {
+                    padding = val.parse().unwrap_or(7);
+                } else {
+                    com_time = token.parse().unwrap_or(0);
+                }
+            }
+            let running = harness.state.running;
+            let value = dshot::erpm_to_12bit(com_time, running);
+            let mut gcr = [0u32; 37];
+            dshot::encode_gcr_frame(value, &mut gcr, padding, dshot::GCR_SHIFT_F0);
+            // Reconstruct dshot_full_number (value<<4 | checksum) for output parity with C
+            let mut csum = 0u16;
+            let mut cd = value;
+            for _ in 0..3 {
+                csum ^= cd;
+                cd >>= 4;
+            }
+            csum = !csum & 0xF;
+            let dshot_full = (value << 4) | csum;
+            // Find shift_amount from erpm encoding
+            let shift = if !running {
+                7
+            } else {
+                let mut s = 0u8;
+                for i in (9..=15).rev() {
+                    if com_time >> i == 1 {
+                        s = (i + 1 - 9) as u8;
+                        break;
+                    }
+                }
+                s
+            };
+            print!("gcr=");
+            for (i, val) in gcr.iter().enumerate() {
+                if i > 0 {
+                    print!(",");
+                }
+                print!("{}", val);
+            }
+            println!(
+                " shift={} dshot_full={} padding={}",
+                shift, dshot_full, padding
+            );
+            io::stdout().flush().unwrap();
         } else {
             eprintln!("harness: unknown command '{}'", line);
         }

@@ -325,4 +325,121 @@ mod tests {
         encode_telemetry(30000, true, &mut gcr, 0);
         // Large period: nonzero shift
     }
+
+    // --- Golden vector tests: verified against C firmware (MCU_F051, gcr_shift=6, padding=7) ---
+
+    /// Helper: encode with C harness parameters (F051 path, padding=7).
+    fn encode_c_compat(com_time: u16) -> [u32; 37] {
+        let mut gcr = [0u32; 37];
+        encode_telemetry_with_shift(com_time, true, &mut gcr, 7, GCR_SHIFT_F0);
+        gcr
+    }
+
+    #[test]
+    fn gcr_golden_com500_shift0() {
+        let gcr = encode_c_compat(500);
+        assert_eq!(erpm_to_12bit(500, true), 500); // shift=0, raw value
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 64, 64, 0, 64, 64, 0, 64, 0, 64, 0, 64, 0, 0, 64, 0,
+                0, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com1000_shift1() {
+        let gcr = encode_c_compat(1000);
+        assert_eq!(erpm_to_12bit(1000, true), 1012); // shift=1
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 64, 0, 64, 0, 64, 0, 64, 64, 0, 64,
+                64, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com65535_shift7() {
+        let gcr = encode_c_compat(65535);
+        assert_eq!(erpm_to_12bit(65535, true), 4095); // shift=7, max
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0, 64, 0, 64, 64, 0, 64, 0, 64, 64, 0, 64, 0, 64,
+                0, 64, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com100_shift0() {
+        let gcr = encode_c_compat(100);
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 64, 64, 64, 0, 64, 64, 0, 64, 64, 0, 64, 0, 0, 64,
+                64, 0, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com30000_shift6() {
+        let gcr = encode_c_compat(30000);
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0, 64, 64, 0, 0, 64, 0, 0, 64, 0, 64, 0, 0, 64, 64,
+                0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com200_shift0() {
+        let gcr = encode_c_compat(200);
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 64, 64, 64, 0, 64, 0, 64, 0, 0, 64, 0, 0, 64, 64,
+                64, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com10000_shift5() {
+        let gcr = encode_c_compat(10000);
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 64, 0, 0, 64, 0, 64, 64, 64, 0, 64, 0, 64, 64, 0, 0, 0,
+                64, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_com1_shift0() {
+        let gcr = encode_c_compat(1);
+        assert_eq!(
+            gcr,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 64, 64, 64, 0, 64, 0, 0, 0, 64, 0, 64, 64, 0, 64,
+                64, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+    }
+
+    #[test]
+    fn gcr_golden_not_running() {
+        // Not running forces com_time to 65535 regardless of input
+        let mut gcr = [0u32; 37];
+        encode_telemetry_with_shift(500, false, &mut gcr, 7, GCR_SHIFT_F0);
+        let expected = encode_c_compat(65535); // same as max
+        assert_eq!(gcr, expected);
+    }
 }
