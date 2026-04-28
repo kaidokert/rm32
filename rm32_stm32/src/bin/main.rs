@@ -24,7 +24,8 @@ use rm32_stm32::mcu::{Chip, ChipConfig};
 // Override with: BOARD=boards/my_board.yaml cargo build
 include!(concat!(env!("OUT_DIR"), "/board_config.rs"));
 
-use panic_halt as _; // Standard panic handler: halts the CPU
+// Panic handler in rm32_stm32::panic — forces all FETs off before halting.
+// Replaces panic_halt which halts without safing hardware.
 
 #[entry]
 fn main() -> ! {

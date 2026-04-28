@@ -8,7 +8,6 @@ rm32 = { path = "../rm32" }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 embedded-hal = "1.0"
-panic-halt = "1.0"
 portable-atomic = { version = "1", default-features = false, features = ["critical-section"] }
 
 # MCU-specific HAL crates (only one active at a time)

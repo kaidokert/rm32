@@ -23,6 +23,8 @@ pub mod gpio_regs;
 pub mod init;
 pub mod isr;
 pub mod isr_handlers;
+#[cfg(not(test))]
+mod panic;
 pub mod phase;
 pub mod regs;
 pub mod stub;

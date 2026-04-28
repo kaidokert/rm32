@@ -43,23 +43,15 @@ impl IsrCell {
     }
 
     /// Get or initialize the ISR state.
-    /// If never initialized, enters emergency shutdown (all FETs off).
+    /// Panics if state was never initialized — the project-wide panic handler
+    /// in `panic.rs` forces all FETs off before halting.
     #[inline]
     #[allow(clippy::mut_from_ref)]
     fn get(&self) -> &mut TargetIsrState {
         // SAFETY: Called only from ISR context at a single priority level.
         // No concurrent access possible (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };
-        opt.get_or_insert_with(|| match isr::take_isr_state() {
-            Some(s) => s,
-            None => {
-                use rm32::hal::EmergencyOff;
-                crate::emergency::G0AEmergencyOff::emergency_off();
-                loop {
-                    cortex_m::asm::nop();
-                }
-            }
-        })
+        opt.get_or_insert_with(|| isr::take_isr_state().expect("ISR state not initialized"))
     }
 }
 
