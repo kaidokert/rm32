@@ -16,7 +16,7 @@ ticks 5 | throttle=0 | prop_brake_active=1
 
 # Reset for next test
 config running=0 prop_brake_active=0
-config eeprom.brake_on_stop=0 eeprom.comp_pwm=0 eeprom.brake_on_stop=1
+config eeprom.brake_on_stop=1 eeprom.comp_pwm=0
 
 # With brake_on_stop and non-comp_pwm, zero throttle should brake
 config eeprom.comp_pwm=0

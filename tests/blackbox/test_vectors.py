@@ -25,8 +25,15 @@ def harness():
 
 
 def get_vector_files():
-    """Discover all .txt vector files."""
-    return sorted(VECTORS_DIR.glob("*.txt"))
+    """Discover all .txt vector files.
+
+    Fails fast when no vectors are discovered so missing test data
+    (e.g. due to path typos or CI misconfiguration) cannot silently
+    skip the parametrized tests.
+    """
+    files = sorted(VECTORS_DIR.glob("*.txt"))
+    assert files, f"No vector files found in {VECTORS_DIR!s}"
+    return files
 
 
 # Vectors with known Rust vs C behavioral differences (pending investigation)

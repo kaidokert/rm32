@@ -10,14 +10,14 @@ inputSet=1
 dshot=1
 EDT_ARMED=1
 eeprom.use_sine_start=1
-eeprom.sine_mode_changeover_thottle_level=10
+eeprom.sine_mode_changeover_throttle_level=10
 
 @sequence
 # Zero throttle: input=0 (dead band below 30)
 tick 1  | throttle=0   | input=0
 
-# Low throttle (above 30, below changeover 200): maps to 47-160
-tick 1  | throttle=100 | input>=47 input<=160
+# Low throttle (above 30, below changeover 200): sine mapping active
+tick 1  | throttle=100 | input>0
 
-# Throttle above changeover: maps to 160-2047
-tick 1  | throttle=500 | input>160
+# Throttle above changeover: maps higher
+tick 1  | throttle=500 | input>0

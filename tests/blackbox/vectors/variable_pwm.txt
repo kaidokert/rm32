@@ -14,8 +14,8 @@ eeprom.variable_pwm=1
 @sequence
 # Fast commutation: tim1_arr should be lower
 config commutation_interval=100
-tick 1  | throttle=1000 |
+tick 1  | throttle=1000 | pwm_arr>0
 
 # Slow commutation: tim1_arr should be higher
 config commutation_interval=200
-tick 1  | throttle=1000 |
+tick 1  | throttle=1000 | pwm_arr>0

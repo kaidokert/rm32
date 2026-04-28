@@ -15,4 +15,4 @@ tick 1  | throttle=1000 | adjusted_input=1000
 
 # Bidirectional changes throttle mapping
 config eeprom.bi_direction=1
-tick 1  | throttle=1200 |
+tick 1  | throttle=1200 | adjusted_input>=0

@@ -26,10 +26,10 @@ tick 1  | transfer=1 | inputSet=1 servoPwm=1
 config dma_0=1000 dma_1=2500
 tick 1  | transfer=1 | newinput>0
 
-# High throttle pulse: 1900us
+# High throttle pulse: 1900us — should map to high newinput
 config dma_0=1000 dma_1=2900
-tick 1  | transfer=1 |
+tick 1  | transfer=1 | newinput>0
 
-# Low throttle pulse: 1100us
+# Low throttle pulse: 1100us — should map to low newinput
 config dma_0=1000 dma_1=2100
-tick 1  | transfer=1 |
+tick 1  | transfer=1 | newinput>=0

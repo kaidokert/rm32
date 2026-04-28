@@ -20,9 +20,12 @@ class AM32Harness:
 
     def __init__(self, exe_path=None):
         if exe_path is None:
-            # Default: look relative to this file
+            # Default: look for Rust harness relative to this file
             repo = Path(__file__).resolve().parent.parent.parent
-            exe_path = repo / "build" / "am32_harness"
+            exe_path = repo / "target" / "release" / "rm32_harness"
+            if not exe_path.exists():
+                # Fallback: C harness
+                exe_path = repo / "build" / "am32_harness"
         self.exe_path = str(exe_path)
         self.proc = None
 
@@ -38,13 +41,14 @@ class AM32Harness:
             [self.exe_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,  # line buffered
         )
         # Wait for ready marker
         line = self.proc.stdout.readline().strip()
-        assert line == "ready", f"Expected 'ready', got '{line}'"
+        if line != "ready":
+            raise RuntimeError(f"Expected 'ready', got '{line}'")
 
     def stop(self):
         if self.proc:
@@ -79,19 +83,22 @@ class AM32Harness:
         """Reset all firmware state to init values."""
         self._send("reset")
         line = self._recv()
-        assert line == "reset", f"Expected 'reset', got '{line}'"
+        if line != "reset":
+            raise RuntimeError(f"Expected 'reset', got '{line}'")
 
     def config(self, **kwargs):
         """Set config values (eeprom fields or state overrides)."""
         self._send(f"config {self._kvargs(**kwargs)}")
         line = self._recv()
-        assert line == "ok", f"Expected 'ok', got '{line}'"
+        if line != "ok":
+            raise RuntimeError(f"Expected 'ok', got '{line}'")
 
     def load_eeprom(self):
         """Call loadEEpromSettings() to apply eeprom config."""
         self._send("load_eeprom")
         line = self._recv()
-        assert line == "ok", f"Expected 'ok', got '{line}'"
+        if line != "ok":
+            raise RuntimeError(f"Expected 'ok', got '{line}'")
 
     def state(self):
         """Query current state without ticking."""
@@ -129,7 +136,8 @@ class AM32Harness:
         self.config(inputSet=1, dshot=1 if input_type == "dshot" else 0,
                     zero_input_count=31)
         state = self.ticks(20001, throttle=0)
-        assert state["armed"] == 1, f"Failed to arm after 20001 ticks: armed={state['armed']}"
+        if state["armed"] != 1:
+            raise RuntimeError(f"Failed to arm after 20001 ticks: armed={state['armed']}")
         return state
 
 
@@ -157,7 +165,7 @@ def run_test_vectors(harness, vectors_file):
     config_lines = []
     sequence_lines = []
 
-    with open(vectors_file) as f:
+    with open(vectors_file, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -176,8 +184,19 @@ def run_test_vectors(harness, vectors_file):
     # Apply config
     harness.reset()
     for cl in config_lines:
+        if "=" not in cl:
+            continue
         k, v = cl.split("=", 1)
         harness.config(**{k.strip(): v.strip()})
+
+    # Operator dispatch table
+    ops = {
+        "=": lambda a, b: a == b,
+        ">": lambda a, b: a > b,
+        "<": lambda a, b: a < b,
+        ">=": lambda a, b: a >= b,
+        "<=": lambda a, b: a <= b,
+    }
 
     # Run sequence
     results = []
@@ -240,21 +259,9 @@ def run_test_vectors(harness, vectors_file):
                 except ValueError:
                     expected = expected_str
 
-                if op == "=" and not (actual == expected):
+                if not ops[op](actual, expected):
                     raise AssertionError(
-                        f"tick={state.get('tick')}: {key}={actual}, expected {key}={expected}")
-                elif op == ">" and not (actual > expected):
-                    raise AssertionError(
-                        f"tick={state.get('tick')}: {key}={actual}, expected {key}>{expected}")
-                elif op == "<" and not (actual < expected):
-                    raise AssertionError(
-                        f"tick={state.get('tick')}: {key}={actual}, expected {key}<{expected}")
-                elif op == ">=" and not (actual >= expected):
-                    raise AssertionError(
-                        f"tick={state.get('tick')}: {key}={actual}, expected {key}>={expected}")
-                elif op == "<=" and not (actual <= expected):
-                    raise AssertionError(
-                        f"tick={state.get('tick')}: {key}={actual}, expected {key}<={expected}")
+                        f"tick={state.get('tick')}: {key}={actual}, expected {key}{op}{expected}")
 
         results.append(state)
 

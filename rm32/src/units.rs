@@ -60,11 +60,7 @@ impl TimerTicks {
     /// Convert to eRPM (in units of 100 eRPM).
     /// Formula: 600000 / ticks (when ticks = e_com_time)
     pub fn to_erpm_100(self) -> u16 {
-        if self.0 > 0 {
-            (600000 / self.0) as u16
-        } else {
-            0
-        }
+        (600000u32.checked_div(self.0).unwrap_or(0)) as u16
     }
 }
 
