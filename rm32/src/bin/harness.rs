@@ -14,7 +14,6 @@ use rm32::dshot;
 use rm32::hal;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
-use rm32::signal;
 use std::io::{self, BufRead, Write};
 
 // --- Mock HAL (same as harness.rs) ---
@@ -164,11 +163,16 @@ struct Harness {
     do_transfer: bool,
     dma_buffer: [u32; 64],
 
-    // Input processing (uses library function)
+    // Input processing (uses library functions)
     input_state: InputState,
+    transfer: rm32::transfer::TransferState,
+    cmd_proc: rm32::dshot_commands::CommandProcessor,
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
+    frametime_low: u16,
+    frametime_high: u16,
+    zero_input_count: u16,
 }
 
 impl Harness {
@@ -203,9 +207,14 @@ impl Harness {
             do_transfer: false,
             dma_buffer: [0; 64],
             input_state: InputState::new(),
+            transfer: rm32::transfer::TransferState::default(),
+            cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
             dshot: false,
             servo_pwm: false,
             edt_armed: false,
+            frametime_low: 400,
+            frametime_high: 600,
+            zero_input_count: 0,
             adc: MockAdc {
                 voltage: 0,
                 current: 0,
@@ -278,64 +287,71 @@ impl Harness {
     }
 
     fn handle_transfer(&mut self) {
-        if self.shared.input_set() {
-            if self.dshot {
-                let buf: [u32; 32] = self.dma_buffer[..32].try_into().unwrap();
-                let frame = dshot::decode_frame(&buf, 400, 600, false);
-                match frame {
-                    dshot::DshotFrame::Throttle { value, telemetry } => {
-                        if self.edt_armed && value > 47 {
-                            self.shared.set_newinput(value);
-                        } else if value == 0 {
-                            self.shared.set_newinput(0);
-                        }
-                        if telemetry {
-                            self.shared.set_send_telemetry(true);
-                        }
-                        // Reset signal timeout via shared
-                        // (SharedState doesn't have direct set, use workaround)
-                    }
-                    dshot::DshotFrame::Command { cmd, .. } => {
-                        self.shared.set_newinput(0);
-                        match cmd {
-                            7 => {
-                                self.config.dir_reversed = 0;
-                                self.commutation.forward = true;
-                            }
-                            8 => {
-                                self.config.dir_reversed = 1;
-                                self.commutation.forward = false;
-                            }
-                            9 => self.config.bi_direction = 0,
-                            10 => self.config.bi_direction = 1,
-                            20 => {
-                                self.commutation.forward = self.config.dir_reversed == 0;
-                            }
-                            21 => {
-                                self.commutation.forward = self.config.dir_reversed != 0;
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            } else if self.servo_pwm {
-                let pulse = self.dma_buffer[1].saturating_sub(self.dma_buffer[0]) as u16;
-                if pulse > 800 && pulse < 2200 {
-                    let val = signal::compute_servo_unidirectional(pulse, 1100, 1900);
-                    self.shared.set_newinput(val);
-                }
+        // Use library TransferState for all input processing
+        let actions = self.transfer.process(
+            &self.dma_buffer,
+            self.shared.input_set(),
+            self.dshot,
+            self.servo_pwm,
+            false, // dshot_telemetry
+            self.shared.armed(),
+            false, // input_pin_high
+            self.shared.adjusted_input(),
+            self.shared.newinput(),
+            self.config.bi_direction != 0,
+            self.config.disable_stick_calibration != 0,
+            &mut self.zero_input_count,
+            self.frametime_low,
+            self.frametime_high,
+        );
+
+        // Apply transfer actions
+        if actions.input_detected {
+            if actions.input_is_dshot {
+                self.dshot = true;
             }
-        } else {
-            let sig = signal::detect_input(&self.dma_buffer[..32], 48);
-            match sig {
-                signal::SignalType::Dshot600 | signal::SignalType::Dshot300 => {
-                    self.dshot = true;
-                    self.shared.set_input_set(true);
+            if actions.input_is_servo {
+                self.servo_pwm = true;
+            }
+            self.shared.set_input_set(true);
+        }
+
+        if let Some(v) = actions.newinput
+            && (self.edt_armed || v == 0)
+        {
+            self.shared.set_newinput(v);
+        }
+        if actions.send_telemetry {
+            self.shared.set_send_telemetry(true);
+        }
+        if actions.signal_timeout_reset {
+            self.shared.set_signal_timeout(0);
+        }
+        if let Some(fl) = actions.frametime_low {
+            self.frametime_low = fl;
+        }
+        if let Some(fh) = actions.frametime_high {
+            self.frametime_high = fh;
+        }
+
+        // Dispatch DShot commands via library CommandProcessor
+        if actions.dshot_command > 0 {
+            use rm32::dshot_commands::CommandResult;
+            let result = self.cmd_proc.process(
+                actions.dshot_command,
+                self.shared.armed(),
+                self.shared.running(),
+                &mut self.config,
+                &mut self.commutation.forward,
+                &mut self.edt_armed,
+                false, // edt_arm_enable
+            );
+            match result {
+                CommandResult::SaveSettings => {
+                    self.shared.set_save_settings_flag(true);
                 }
-                signal::SignalType::ServoPwm => {
-                    self.servo_pwm = true;
-                    self.shared.set_input_set(true);
+                CommandResult::SendEscInfo => {
+                    self.shared.set_send_esc_info_flag(true);
                 }
                 _ => {}
             }
