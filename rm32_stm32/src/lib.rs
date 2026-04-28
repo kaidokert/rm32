@@ -26,6 +26,7 @@ pub mod capture_generic;
 pub mod comp_hal;
 pub mod adc_hal;
 pub mod adc_generic;
+pub mod telem_hal;
 pub mod isr;
 pub mod isr_handlers;
 pub mod init;
@@ -42,17 +43,17 @@ pub mod interrupts_l431;
 
 // G071-specific peripheral modules
 #[cfg(feature = "stm32g071")]
-pub mod pwm;
+pub mod pwm_g071;
 #[cfg(feature = "stm32g071")]
-pub mod system;
+pub mod system_g071;
 #[cfg(feature = "stm32g071")]
-pub mod input_capture;
+pub mod input_capture_g071;
 #[cfg(feature = "stm32g071")]
-pub mod comp_init;
+pub mod comp_init_g071;
 #[cfg(feature = "stm32g071")]
-pub mod telemetry_uart;
+pub mod telemetry_uart_g071;
 #[cfg(feature = "stm32g071")]
-pub mod adc;
+pub mod adc_g071;
 
 // F051-specific peripheral modules
 #[cfg(feature = "stm32f051")]

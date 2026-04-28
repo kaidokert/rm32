@@ -58,7 +58,7 @@ pub struct InitResult<PWM: PwmOutput, SYS: System> {
 // STM32G071
 // ============================================================
 #[cfg(feature = "stm32g071")]
-pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
+pub fn init() -> InitResult<crate::pwm_g071::Tim1Pwm, crate::system_g071::SystemControl> {
     use stm32g0xx_hal::prelude::*;
     use stm32g0xx_hal::stm32;
     use stm32g0xx_hal::rcc::Config as RccConfig;
@@ -70,29 +70,29 @@ pub fn init() -> InitResult<crate::pwm::Tim1Pwm, crate::system::SystemControl> {
     let gpioa = dp.GPIOA.split(&mut rcc);
     let _gpiob = dp.GPIOB.split(&mut rcc);
 
-    let pwm = crate::pwm::Tim1Pwm::new(
+    let pwm = crate::pwm_g071::Tim1Pwm::new(
         dp.TIM1, gpioa.pa8, gpioa.pa9, gpioa.pa10,
         Hertz::from_raw(24_000), &mut rcc,
         rm32::board::BoardConfig::DEFAULT.dead_time,
     );
     let phase = G0APhaseDriver::new(false);
-    let sys = crate::system::SystemControl::new(dp.IWDG);
-    crate::comp_init::init_comp2();
+    let sys = crate::system_g071::SystemControl::new(dp.IWDG);
+    crate::comp_init_g071::init_comp2();
     let comp = crate::comparator::g071::new_comparator();
     let interval = Tim2Interval::new();
     let com_timer = Tim14Com::new();
 
     // DShot input capture
     {
-        crate::input_capture::init_g071();
-        let mut input = crate::input_capture::new_capture();
+        crate::input_capture_g071::init_g071();
+        let mut input = crate::input_capture_g071::new_capture();
         // Hardware init done by init_*() above
         use rm32::hal::InputCapture;
         input.receive_dshot_dma();
     }
-    let adc = crate::adc::new_adc();
+    let adc = crate::adc_g071::new_adc();
     let _ = adc.init();
-    let _ = crate::telemetry_uart::TelemUart::init();
+    let _ = crate::telemetry_uart_g071::TelemUart::init();
 
     // TIM6: 20kHz
     {
@@ -460,15 +460,15 @@ pub struct G431Pwm { _private: () }
 #[cfg(feature = "stm32g431")]
 impl PwmOutput for G431Pwm {
     fn set_prescaler(&mut self, psc: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.psc().write(|w| w.bits(psc as u32)); }
     }
     fn set_auto_reload(&mut self, arr: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.arr().write(|w| w.bits(arr as u32)); }
     }
     fn set_duty_all(&mut self, duty: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe {
             tim1.ccr1().write(|w| w.bits(duty as u32));
             tim1.ccr2().write(|w| w.bits(duty as u32));
@@ -476,23 +476,23 @@ impl PwmOutput for G431Pwm {
         }
     }
     fn set_compare1(&mut self, val: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.ccr1().write(|w| w.bits(val as u32)); }
     }
     fn set_compare2(&mut self, val: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.ccr2().write(|w| w.bits(val as u32)); }
     }
     fn set_compare3(&mut self, val: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.ccr3().write(|w| w.bits(val as u32)); }
     }
     fn generate_update_event(&mut self) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe { tim1.egr().write(|w| w.ug().set_bit()); }
     }
     fn set_dead_time_override(&mut self, dead_time: u16) {
-        let tim1 = unsafe { &*stm32g4::stm32g431::TIM1::PTR };
+        let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe {
             tim1.bdtr().modify(|r, w| w.bits((r.bits() & !0xFF) | (dead_time as u32 & 0xFF)));
         }
@@ -521,7 +521,7 @@ impl System for G431System {
 
 #[cfg(feature = "stm32g431")]
 pub fn init() -> InitResult<G431Pwm, G431System> {
-    use stm32g4::stm32g431 as pac;
+    use stm32g4xx_hal::stm32 as pac;
 
     let rcc = unsafe { &*pac::RCC::PTR };
     let flash = unsafe { &*pac::FLASH::PTR };

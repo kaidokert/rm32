@@ -88,7 +88,7 @@ fn main() -> ! {
             phase,
             #[cfg(feature = "stm32g071")]
             input: {
-                let mut ic = rm32_stm32::input_capture::new_capture();
+                let mut ic = rm32_stm32::input_capture_g071::new_capture();
                 use rm32::hal::InputCapture;
                 ic.set_inverted(BOARD.inverted_input);
                 ic.receive_dshot_dma();
@@ -302,8 +302,8 @@ fn main() -> ! {
     // --- ADC + Telemetry (already initialized by init(), create handles) ---
     #[cfg(feature = "stm32g071")]
     let (mut adc, mut telem) = (
-        rm32_stm32::adc::post_init(),
-        rm32_stm32::telemetry_uart::TelemUart::post_init(),
+        rm32_stm32::adc_g071::post_init(),
+        rm32_stm32::telemetry_uart_g071::TelemUart::post_init(),
     );
     #[cfg(feature = "stm32f051")]
     let (mut adc, mut telem) = (

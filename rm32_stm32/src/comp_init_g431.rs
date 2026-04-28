@@ -5,7 +5,7 @@
 //!   COMP2: INP=PA3(IO2), INM per step — EXTI22
 //! BEMF inputs: PA0(INM IO2), PA4(INM IO1), PA5(INM IO1)
 
-use stm32g4::stm32g431 as pac;
+use crate::pac;
 
 /// Initialize COMP1 and COMP2 for BEMF sensing on G431.
 pub fn init_comp() {

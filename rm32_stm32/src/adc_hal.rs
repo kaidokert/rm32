@@ -1,16 +1,43 @@
-//! Abstraction over MCU-specific ADC register access.
+//! ADC driver abstraction — "our own HAL" for ADC init across STM32 families.
+//!
+//! The `AdcPeripheral` trait splits the monolithic init sequence into discrete
+//! operations. Each MCU implements the register-level details; the shared
+//! init sequence in `adc_generic.rs` calls them in the correct order.
 
 use crate::regs::InitError;
 
-/// ADC peripheral operations (MCU-specific).
-pub trait AdcOps {
-    /// Full ADC initialization: clocks, GPIO, DMA, calibration, enable.
-    fn init(&self) -> Result<(), InitError>;
-    /// Trigger a new conversion sequence.
+/// MCU-specific ADC register operations.
+/// Each method maps to one logical step of the ADC init sequence.
+/// The generic driver calls these in order — MCU impls provide register writes.
+pub trait AdcPeripheral {
+    /// Enable ADC + DMA clocks via RCC.
+    fn enable_clocks(&self);
+    /// Configure GPIO pins as analog inputs.
+    fn configure_pins(&self);
+    /// Configure ADC clock source (CKMODE, CCR, etc).
+    fn configure_clock_source(&self);
+    /// Enable temperature sensor channel.
+    fn enable_temp_sensor(&self);
+    /// Setup DMA channel: PAR→ADC_DR, MAR→buf, NDTR=len, circular, 16-bit, enable.
+    fn configure_dma(&self, buf_ptr: *const u16, buf_len: u16);
+    /// Set sampling time for each channel.
+    fn configure_sampling(&self);
+    /// Configure channel sequence (which channels, in what order).
+    fn configure_sequence(&self);
+    /// Enable DMA mode in ADC config register.
+    fn enable_dma_mode(&self);
+    /// Exit deep power-down and enable voltage regulator.
+    /// Default no-op — F051 doesn't have deep power-down.
+    fn power_up(&self) {}
+    /// Run ADC self-calibration.
+    fn calibrate(&self) -> Result<(), InitError>;
+    /// Enable ADC (ADEN + wait ADRDY).
+    fn enable(&self) -> Result<(), InitError>;
+    /// Trigger a new conversion.
     fn start_conversion(&self);
 }
 
-/// Temperature sensor calibration info (MCU-specific).
+/// Temperature sensor calibration info (MCU-specific ROM addresses).
 pub struct TempCalibration {
     pub cal1_addr: u32,
     pub cal2_addr: u32,
@@ -19,17 +46,6 @@ pub struct TempCalibration {
 }
 
 /// Generate ADC boilerplate: DMA buffer static, temp cal const, type alias, constructors.
-/// The `init()` impl is MCU-specific and must be written manually.
-///
-/// Usage:
-/// ```ignore
-/// define_adc_boilerplate!(
-///     ops: MyAdcOps,
-///     type_name: MyAdc,
-///     cal1: 0x1FFF_75A8, cal2: 0x1FFF_75CA,
-///     cal1_temp: 30, cal2_temp: 110,
-/// );
-/// ```
 #[macro_export]
 macro_rules! define_adc_boilerplate {
     (

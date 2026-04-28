@@ -2,7 +2,7 @@
 
 use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
-use stm32g4::stm32g431 as pac;
+use crate::pac;
 
 // --- DMA1 Channel 1 (G431) ---
 pub struct G431Dma;

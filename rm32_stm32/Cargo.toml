@@ -15,7 +15,7 @@ portable-atomic = { version = "1", default-features = false, features = ["critic
 stm32g0xx-hal = { git = "https://github.com/stm32-rs/stm32g0xx-hal", features = ["stm32g071"], optional = true }
 stm32f0xx-hal = { version = "0.18", features = ["stm32f051"], optional = true }
 stm32l4xx-hal = { path = "../ref/stm32l4xx-hal", features = ["stm32l431", "rt"], optional = true }
-stm32g4 = { version = "0.16", features = ["stm32g431", "rt"], optional = true }
+stm32g4xx-hal = { version = "0.1", features = ["stm32g431", "rt"], optional = true }
 
 [[bin]]
 name = "rm32_firmware"
@@ -26,7 +26,7 @@ default = ["stm32g071"]
 stm32g071 = ["dep:stm32g0xx-hal"]
 stm32f051 = ["dep:stm32f0xx-hal"]
 stm32l431 = ["dep:stm32l4xx-hal"]
-stm32g431 = ["dep:stm32g4"]
+stm32g431 = ["dep:stm32g4xx-hal"]
 
 [profile.release]
 opt-level = "s"

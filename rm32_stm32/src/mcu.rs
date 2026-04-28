@@ -15,7 +15,9 @@ pub use stm32l4xx_hal::pac;
 pub use stm32l4xx_hal as hal_impl;
 
 #[cfg(feature = "stm32g431")]
-pub use stm32g4::stm32g431 as pac;
+pub use stm32g4xx_hal::stm32 as pac;
+#[cfg(feature = "stm32g431")]
+pub use stm32g4xx_hal as hal_impl;
 
 #[cfg(feature = "stm32f051")]
 pub use stm32f0xx_hal::pac;

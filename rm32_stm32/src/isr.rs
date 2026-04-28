@@ -23,9 +23,9 @@ use crate::phase::G0APhaseDriver;
 use crate::shared::SharedState;
 
 #[cfg(feature = "stm32g071")]
-use crate::input_capture::DshotCapture;
+use crate::input_capture_g071::DshotCapture;
 #[cfg(feature = "stm32g071")]
-use crate::pwm::Tim1Pwm;
+use crate::pwm_g071::Tim1Pwm;
 
 #[cfg(feature = "stm32f051")]
 use crate::init::F051Pwm;
