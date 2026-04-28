@@ -112,11 +112,9 @@ pub fn init_l431() {
     let rcc = unsafe { &*RCC::ptr() };
     let dma = unsafe { &*DMA1::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
-    unsafe {
-        rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
-        rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
-        rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
-    }
+    rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
+    rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
+    rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
     dma.cselr

@@ -24,11 +24,9 @@ pub struct G431AdcOps;
 impl AdcPeripheral for G431AdcOps {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*pac::RCC::PTR };
-        unsafe {
-            rcc.ahb2enr()
-                .modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit());
-            rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
-        }
+        rcc.ahb2enr()
+            .modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit());
+        rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
     }
 
     fn configure_pins(&self) {
@@ -49,9 +47,7 @@ impl AdcPeripheral for G431AdcOps {
 
     fn enable_temp_sensor(&self) {
         let adc_common = unsafe { &*pac::ADC12_COMMON::PTR };
-        unsafe {
-            adc_common.ccr().modify(|_, w| w.vsensesel().set_bit());
-        }
+        adc_common.ccr().modify(|_, w| w.vsensesel().set_bit());
     }
 
     fn configure_dma(&self, buf_ptr: *const u16, buf_len: u16) {
@@ -73,10 +69,8 @@ impl AdcPeripheral for G431AdcOps {
 
     fn power_up(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe {
-            adc1.cr().modify(|_, w| w.deeppwd().clear_bit());
-            adc1.cr().modify(|_, w| w.advregen().set_bit());
-        }
+        adc1.cr().modify(|_, w| w.deeppwd().clear_bit());
+        adc1.cr().modify(|_, w| w.advregen().set_bit());
         cortex_m::asm::delay(170 * 20);
     }
 
@@ -99,18 +93,14 @@ impl AdcPeripheral for G431AdcOps {
 
     fn enable_dma_mode(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe {
-            adc1.cfgr()
-                .write(|w| w.dmaen().set_bit().dmacfg().set_bit().cont().set_bit());
-        }
+        adc1.cfgr()
+            .write(|w| w.dmaen().set_bit().dmacfg().set_bit().cont().set_bit());
     }
 
     fn calibrate(&self) -> Result<(), InitError> {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe {
-            adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
-            adc1.cr().modify(|_, w| w.adcal().set_bit());
-        }
+        adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
+        adc1.cr().modify(|_, w| w.adcal().set_bit());
         wait_for(
             || unsafe { !(&*pac::ADC1::PTR).cr().read().adcal().bit() },
             100_000,
@@ -122,10 +112,8 @@ impl AdcPeripheral for G431AdcOps {
 
     fn enable(&self) -> Result<(), InitError> {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe {
-            adc1.isr().write(|w| w.adrdy().clear_bit_by_one());
-            adc1.cr().modify(|_, w| w.aden().set_bit());
-        }
+        adc1.isr().write(|w| w.adrdy().clear_bit_by_one());
+        adc1.cr().modify(|_, w| w.aden().set_bit());
         wait_for(
             || unsafe { (&*pac::ADC1::PTR).isr().read().adrdy().bit() },
             100_000,
@@ -135,9 +123,7 @@ impl AdcPeripheral for G431AdcOps {
 
     fn start_conversion(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe {
-            adc1.cr().modify(|_, w| w.adstart().set_bit());
-        }
+        adc1.cr().modify(|_, w| w.adstart().set_bit());
     }
 }
 

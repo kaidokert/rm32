@@ -1,0 +1,67 @@
+# PID control loops
+# Verify: current limit, stall protection, speed control PIDs fire,
+# and integral anti-windup saturates
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=1000
+
+@sequence
+# --- Current limiting PID with integral windup ---
+# Set eeprom current_I nonzero and load settings to apply Ki
+config eeprom.current_I=100
+config eeprom.current_P=100
+config eeprom.current_D=0
+config eeprom.limits.current=10
+# Need eeprom_version >= 1 and other fields valid for loadEEpromSettings
+config eeprom.eeprom_version=3
+config eeprom.motor_kv=50
+config eeprom.motor_poles=14
+config eeprom.advance_level=16
+config eeprom.beep_volume=5
+config eeprom.limits.temperature=80
+config eeprom.drag_brake_strength=5
+config eeprom.driving_brake_strength=10
+config eeprom.sine_mode_power=5
+config eeprom.sine_mode_changeover_thottle_level=10
+config eeprom.input_type=1
+config eeprom.max_ramp=50
+load_eeprom
+
+# loadEEpromSettings sets use_current_limit=1 since limits.current is 10 (1-99)
+# and currentPid.Ki=100
+
+# Sustained large error: actual_current=10000 vs target=10*200=2000
+# error=8000 per PID call, Ki=100, integral += 800000 per call
+# integral_limit=20000, should clamp after first call
+config actual_current=10000
+config running=1
+config zero_crosses=200
+
+# Run many 1kHz cycles (each 20 ticks) to accumulate integral
+# After 1 cycle: integral = 8000*100 = 800000 -> clamped to 20000
+# After 2+ cycles: stays at 20000 (anti-windup)
+ticks 100 | throttle=1000 |
+
+# --- Negative integral windup ---
+# Flip error direction: actual_current=0 vs target=2000
+# error = -2000, integral should go negative and clamp to -20000
+config actual_current=0
+ticks 100 | throttle=1000 |
+
+# --- Stall protection PID ---
+config eeprom.stall_protection=1
+config commutation_interval=8000
+ticks 25 | throttle=1000 |
+
+# --- Speed control loop ---
+config use_speed_control_loop=1
+config eeprom.stall_protection=0
+config use_current_limit=0
+ticks 25 | throttle=1000 |

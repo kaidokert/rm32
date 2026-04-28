@@ -13,7 +13,7 @@ portable-atomic = { version = "1", default-features = false, features = ["critic
 # MCU-specific HAL crates (only one active at a time)
 stm32g0xx-hal = { git = "https://github.com/stm32-rs/stm32g0xx-hal", features = ["stm32g071"], optional = true }
 stm32f0xx-hal = { version = "0.18", features = ["stm32f051"], optional = true }
-stm32l4xx-hal = { path = "../ref/stm32l4xx-hal", features = ["stm32l431", "rt"], optional = true }
+stm32l4xx-hal = { git = "https://github.com/stm32-rs/stm32l4xx-hal", rev = "bf2ded1", features = ["stm32l431", "rt"], optional = true }
 stm32g4xx-hal = { version = "0.1", features = ["stm32g431", "rt"], optional = true }
 
 [[bin]]

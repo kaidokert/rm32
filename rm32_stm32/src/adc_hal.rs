@@ -46,8 +46,11 @@ pub struct TempCalibration {
 }
 
 impl TempCalibration {
-    /// Read calibration values from ROM addresses. Unsafe: raw pointer dereference.
-    /// Call this once during init in the MCU layer.
+    /// Read calibration values from ROM addresses.
+    ///
+    /// # Safety
+    /// `cal1_addr` and `cal2_addr` must point to valid, aligned, read-only
+    /// factory calibration u16 values in ROM (per STM32 datasheet).
     pub unsafe fn from_rom(cal1_addr: u32, cal2_addr: u32, cal1_temp: i32, cal2_temp: i32) -> Self {
         // SAFETY: Caller guarantees cal1_addr and cal2_addr point to valid,
         // aligned, read-only factory calibration data in ROM (system memory).
@@ -73,9 +76,9 @@ macro_rules! define_adc_boilerplate {
         static ADC_DMA_BUF: $crate::dma_buf::DmaBuf<u16, 3> = $crate::dma_buf::DmaBuf::new();
 
         fn temp_cal() -> $crate::adc_hal::TempCalibration {
-            // SAFETY: Reading ROM calibration values at known addresses.
-            // This is the only place unsafe pointer dereference happens for temp cal.
-            unsafe { $crate::adc_hal::TempCalibration::from_rom($cal1, $cal2, $ct1, $ct2) }
+            let (a1, a2, t1, t2) = ($cal1, $cal2, $ct1, $ct2);
+            // SAFETY: ROM calibration addresses are const per STM32 datasheet.
+            unsafe { $crate::adc_hal::TempCalibration::from_rom(a1, a2, t1, t2) }
         }
 
         pub type $type_name = $crate::adc_generic::GenericAdc<$ops>;

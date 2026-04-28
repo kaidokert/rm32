@@ -1,0 +1,21 @@
+# Temperature limiting
+# Verify: duty_cycle_maximum reduces when temperature exceeds limit
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=1000
+eeprom.limits.temperature=80
+
+@sequence
+# Normal temperature: duty_cycle_maximum should be 2000
+tick 1  | throttle=2047 | duty_cycle_maximum=2000
+
+# Overheat: set degrees_celsius above limit
+config degrees_celsius=85
+tick 1  | throttle=2047 | duty_cycle_maximum<2000

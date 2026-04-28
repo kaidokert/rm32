@@ -135,14 +135,12 @@ pub type F051DshotCapture = GenericCapture<F051Dma, F051Timer, F051Pin>;
 pub fn init_f051() {
     let rcc = unsafe { &*RCC::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
-    unsafe {
-        rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
-        rcc.ahbenr
-            .modify(|_, w| w.dmaen().set_bit().iopaen().set_bit());
+    rcc.apb2enr.modify(|_, w| w.tim15en().set_bit());
+    rcc.ahbenr
+        .modify(|_, w| w.dmaen().set_bit().iopaen().set_bit());
 
-        gpioa.moder.modify(|_, w| w.moder2().alternate());
-        gpioa.afrl.modify(|_, w| w.afrl2().bits(0));
-    }
+    gpioa.moder.modify(|_, w| w.moder2().alternate());
+    gpioa.afrl.modify(|_, w| w.afrl2().bits(0));
 }
 
 pub fn new_capture() -> F051DshotCapture {

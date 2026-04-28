@@ -1,0 +1,38 @@
+# DShot bidirectional telemetry path
+# Lights up: make_dshot_package, transfercomplete telem branches
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+dshot_telemetry=1
+throttle=-1
+
+@sequence
+# With dshot_telemetry=1 and armed=1, transfercomplete enters bidir path:
+# out_put=1 -> receiveDshotDma + compute_dshot_flag=2
+# out_put=0 -> sendDshotDma + compute_dshot_flag=1
+
+# Bidir receive mode: sets compute_dshot_flag=2
+config out_put=1
+tick 1  | transfer=1 |
+
+# Bidir send mode: sets compute_dshot_flag=1
+config out_put=0
+tick 1  | transfer=1 |
+
+# With inputSet=1 and dshot_telemetry=1, non-armed path:
+# out_put=1 -> make_dshot_package + computeDshotDMA + receiveDshotDma
+# out_put=0 -> sendDshotDma
+config armed=0 out_put=1
+tick 1  | transfer=1 |
+
+config out_put=0
+tick 1  | transfer=1 |
+
+# Verify the telem interval path also works (KISS telemetry)
+config armed=1
+config eeprom.telemetry_on_interval=1
+config send_telemetry=1
+tick 1  | throttle=500 | send_telemetry=0

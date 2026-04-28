@@ -53,9 +53,7 @@ impl PwmOutput for Pwm {
     }
     fn generate_update_event(&mut self) {
         let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
-        unsafe {
-            tim1.egr().write(|w| w.ug().set_bit());
-        }
+        tim1.egr().write(|w| w.ug().set_bit());
     }
     fn set_dead_time_override(&mut self, dead_time: u16) {
         let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };

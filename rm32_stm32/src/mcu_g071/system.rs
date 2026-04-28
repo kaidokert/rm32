@@ -34,7 +34,7 @@ impl System for SystemControl {
         unsafe {
             iwdg.kr().write(|w| w.bits(0x5555)); // unlock
             iwdg.pr().write(|w| w.pr().bits(prescaler));
-            iwdg.rlr().write(|w| w.rl().bits(reload as u16));
+            iwdg.rlr().write(|w| w.rl().bits(reload));
             while iwdg.sr().read().bits() & 0x03 != 0 {}
             iwdg.kr().write(|w| w.bits(0xCCCC)); // start
             iwdg.kr().write(|w| w.bits(0xAAAA)); // reload

@@ -1,0 +1,27 @@
+# BEMF timeout dynamic threshold
+# Low throttle (< 150): bemf_timeout = 100 (lenient)
+# High throttle (>= 150): bemf_timeout = 10 (strict)
+# Also: timeout suppressed when zero_crosses > 100 and adjusted_input < 200
+
+@config
+armed=1
+inputSet=1
+dshot=1
+running=1
+old_routine=0
+zero_crosses=200
+
+@sequence
+# High throttle: bemf_timeout_happened should accumulate and potentially trip
+# Pre-set just below the strict threshold (10)
+config bemf_timeout_happened=9
+tick 1 | throttle=500 |
+
+# Low throttle with zc > 100 and adj_input < 200: should suppress timeout
+# Set bemf_timeout_happened high — it should get cleared
+config bemf_timeout_happened=50
+config zero_crosses=150
+tick 1 | throttle=100 |
+
+# Verify still running (timeout was suppressed, not tripped)
+tick 1 | throttle=100 | running=1

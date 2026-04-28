@@ -165,7 +165,7 @@ pub const BOARD: rm32::board::BoardConfig = rm32::board::BoardConfig {{
 
     // Auto-set MCU feature based on YAML (informational — the feature must still
     // be passed via Cargo, but this validates consistency)
-    let expected_feature = format!("stm32{}", board.mcu.replace("stm32", ""));
+    let _expected_feature = format!("stm32{}", board.mcu.replace("stm32", ""));
     println!("cargo:rustc-env=BOARD_MCU={}", board.mcu);
     println!("cargo:rustc-env=BOARD_NAME={}", board.name);
 }

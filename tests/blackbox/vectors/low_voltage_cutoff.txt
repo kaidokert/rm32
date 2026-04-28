@@ -1,0 +1,24 @@
+# Low voltage cutoff (per-cell)
+# Verify: sustained low voltage disarms
+#
+# LVC triggers when low_voltage_count > 10000
+# ADC processes every PID_LOOP_DIVIDER=20 ticks
+# We pre-set low_voltage_count near threshold to avoid 200k ticks
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.low_voltage_cut_off=1
+cell_count=3
+
+@sequence
+# Verify still armed initially
+tick 1  | throttle=500 | armed=1
+
+# Pre-set low_voltage_count just below threshold
+config low_voltage_count=9999
+
+# A few more ADC cycles (20 ticks each) should push it over
+ticks 100 | throttle=500 | armed=0

@@ -1,0 +1,22 @@
+# DShot input via transfercomplete
+# Verify: DShot frames injected through the full decode path
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+throttle=-1
+
+@sequence
+# Inject DShot frame with throttle=0
+tick 1       | dshot_frame=0     | newinput=0
+
+# Inject DShot frame with throttle=500
+tick 1       | dshot_frame=500   | newinput=500 adjusted_input=500
+
+# Inject DShot frame with throttle=1000
+tick 1       | dshot_frame=1000  | newinput=1000 adjusted_input=1000
+
+# Verify PWM output responds
+tick 1       | dshot_frame=1000  | pwm_duty>0

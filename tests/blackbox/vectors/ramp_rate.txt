@@ -1,0 +1,26 @@
+# Ramp rate limiting
+# Verify: duty cycle ramps up gradually, doesn't jump to setpoint
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=1000
+last_duty_cycle=0
+
+@sequence
+# First tick with throttle: duty_cycle_setpoint gets set, ramp starts from 0
+tick 1  | throttle=2047 | duty_cycle_setpoint>0
+
+# Ramp is active: duty should not equal setpoint (proving ramp limiting works)
+tick 1  | throttle=2047 | duty_cycle<2000
+
+# After a few ticks: duty_cycle should be non-zero (motor is trying to start)
+ticks 5 | throttle=2047 | last_duty_cycle>0
+
+# Cut throttle: duty drops
+ticks 5 | throttle=0    | duty_cycle_setpoint=0

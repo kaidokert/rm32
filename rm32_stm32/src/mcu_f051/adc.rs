@@ -16,10 +16,8 @@ pub struct F051AdcOps;
 impl AdcPeripheral for F051AdcOps {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*RCC::ptr() };
-        unsafe {
-            rcc.apb2enr.modify(|_, w| w.adcen().set_bit());
-            rcc.ahbenr.modify(|_, w| w.dmaen().set_bit());
-        }
+        rcc.apb2enr.modify(|_, w| w.adcen().set_bit());
+        rcc.ahbenr.modify(|_, w| w.dmaen().set_bit());
     }
 
     fn configure_pins(&self) {

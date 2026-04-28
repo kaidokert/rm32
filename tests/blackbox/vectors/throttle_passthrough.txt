@@ -1,0 +1,21 @@
+# Unidirectional throttle passthrough
+# Verify: in non-bidirectional mode, newinput maps directly to adjusted_input
+
+@config
+armed=1
+inputSet=1
+dshot=1
+zero_input_count=31
+
+@sequence
+# Zero throttle
+tick 1       | throttle=0    | adjusted_input=0
+
+# Mid throttle
+tick 1       | throttle=1000 | adjusted_input=1000
+
+# Full throttle
+tick 1       | throttle=2047 | adjusted_input=2047
+
+# Back to zero
+tick 1       | throttle=0    | adjusted_input=0
