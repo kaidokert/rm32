@@ -49,6 +49,9 @@ impl TempCalibration {
     /// Read calibration values from ROM addresses. Unsafe: raw pointer dereference.
     /// Call this once during init in the MCU layer.
     pub unsafe fn from_rom(cal1_addr: u32, cal2_addr: u32, cal1_temp: i32, cal2_temp: i32) -> Self {
+        // SAFETY: Caller guarantees cal1_addr and cal2_addr point to valid,
+        // aligned, read-only factory calibration data in ROM (system memory).
+        // These addresses are fixed per STM32 datasheet and always readable.
         Self {
             cal1_val: *(cal1_addr as *const u16),
             cal2_val: *(cal2_addr as *const u16),

@@ -15,7 +15,9 @@ use core::cell::UnsafeCell;
 /// - DMA hardware writes to this buffer via the raw pointer from `as_ptr()`
 /// - Software reads via `as_slice()` only when DMA is not active (between transfers)
 /// - This is safe on single-core Cortex-M where ISR and main don't overlap
-#[repr(align(4))]
+/// Aligned to 32 bytes for cache-line safety on M4 targets with D-cache (G4/F4).
+/// Over-alignment on M0 (which has no cache) is harmless — no size increase for ZST.
+#[repr(align(32))]
 pub struct DmaBuf<T, const N: usize>(UnsafeCell<[T; N]>);
 
 // SAFETY: Single-core Cortex-M. DMA writes and software reads are sequenced by the

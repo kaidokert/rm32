@@ -132,12 +132,16 @@ fn main() -> ! {
         const DEVINFO_MAGIC1: u32 = 0x5925_E3DA;
         const DEVINFO_MAGIC2: u32 = 0x4EB8_63D9;
         const DEVINFO_ADDR: u32 = 0x1000 - 32;
+        // SAFETY: DEVINFO_ADDR points to a fixed bootloader info region in flash
+        // (0x1000 - 32). This is memory-mapped, aligned, and always readable.
         let magic1 = unsafe { (DEVINFO_ADDR as *const u32).read_volatile() };
         let magic2 = unsafe { ((DEVINFO_ADDR + 4) as *const u32).read_volatile() };
         if magic1 == DEVINFO_MAGIC1 && magic2 == DEVINFO_MAGIC2 {
             const DEVICE_32K: u8 = 0x1F; // 32KB flash (F051)
             const DEVICE_64K: u8 = 0x35; // 64KB flash (G071)
             const DEVICE_128K: u8 = 0x2B; // 128KB flash (L431)
+            // SAFETY: Magic validated above, so the bootloader info struct is present.
+            // Offset 12 holds the device code byte; address is in flash, always readable.
             let device_code = unsafe { *((DEVINFO_ADDR + 8 + 4) as *const u8) };
             match device_code {
                 DEVICE_32K => 0x0800_7C00u32,
@@ -161,76 +165,26 @@ fn main() -> ! {
         main_state.config = EepromConfig::default();
     }
     main_state.config.apply_version_defaults();
-    {
-        let cfg = &main_state.config;
-        main_state.current_pid.kp = (cfg.current_p as u32) * 2;
-        main_state.current_pid.ki = cfg.current_i as u32;
-        main_state.current_pid.kd = (cfg.current_d as u32) * 2;
-        main_state.motor_kv = ((cfg.motor_kv as u16) * 40 + 20) / BOARD.kv_divider.max(1) as u16;
-        main_state.low_cell_volt_cutoff = cfg.low_cell_volt_cutoff as u16 + 250;
-    }
 
-    // Startup duty cycle from EEPROM (matches C: minimum_duty_cycle*10 + startup_power)
-    let minimum_duty_cycle = {
-        let mdc = main_state.config.minimum_duty_cycle;
-        if mdc > 0 && mdc < 51 {
-            mdc as u16 * 10
-        } else {
-            0
-        }
-    };
-    let min_startup_duty = {
-        let sp = main_state.config.startup_power;
-        if sp > 49 && sp < 151 {
-            minimum_duty_cycle + sp as u16
-        } else {
-            minimum_duty_cycle
-        }
-    };
-    // Startup boost: extra duty for heavy props (gated by board config)
-    let (min_startup_duty, minimum_duty_cycle, startup_max_duty) = if BOARD.startup_boost {
-        let pf = main_state.config.pwm_frequency;
-        (
-            min_startup_duty + 200 + (pf as u16 * 100 / 24),
-            minimum_duty_cycle + 50 + (pf as u16 * 50 / 24),
-            minimum_duty_cycle + 400,
-        )
-    } else {
-        (
-            min_startup_duty,
-            minimum_duty_cycle,
-            minimum_duty_cycle + 400,
-        )
-    };
+    // Derive motor configuration from EEPROM + board (all math now in rm32, host-testable)
+    let motor_cfg = main_state.config.derive_motor_config(
+        Chip::TIM1_AUTORELOAD,
+        BOARD.dead_time,
+        BOARD.kv_divider,
+        BOARD.startup_boost,
+    );
+    let minimum_duty_cycle = motor_cfg.minimum_duty;
+    let min_startup_duty = motor_cfg.min_startup_duty;
+    let startup_max_duty = motor_cfg.startup_max_duty;
+    let timer1_max_arr = motor_cfg.timer1_max_arr;
+    let dead_time_override = motor_cfg.dead_time_override;
 
-    // KV-based threshold scaling
-    let _reverse_speed_threshold =
-        rm32::functions::map(main_state.motor_kv as i32, 300, 3000, 1000, 500) as u16;
-
-    // PWM frequency → timer1_max_arr
-    let timer1_max_arr = {
-        let pf = main_state.config.pwm_frequency;
-        if pf > 7 && pf < 145 {
-            let divider = pf as u32 * 100 / 6;
-            (Chip::TIM1_AUTORELOAD as u32 * 400 / divider) as u16
-        } else {
-            Chip::TIM1_AUTORELOAD
-        }
-    };
-
-    // Dead-time override from driving_brake_strength
-    let dead_time_override = {
-        let mut dbs = main_state.config.driving_brake_strength;
-        if dbs == 0 || dbs > 9 {
-            dbs = 10;
-        }
-        if dbs < 10 {
-            let dto = BOARD.dead_time as u16 + (150 - dbs as u16 * 10);
-            dto.min(200)
-        } else {
-            0
-        }
-    };
+    // Apply derived motor config to main state and PID controllers
+    main_state.current_pid.kp = motor_cfg.current_kp;
+    main_state.current_pid.ki = motor_cfg.current_ki;
+    main_state.current_pid.kd = motor_cfg.current_kd;
+    main_state.motor_kv = motor_cfg.motor_kv;
+    main_state.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
 
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {
@@ -244,11 +198,10 @@ fn main() -> ! {
         isr.duty.startup_max = startup_max_duty;
         // Apply servo EEPROM calibration to transfer state
         if isr.config.eeprom_version > 0 {
-            let cfg = &isr.config;
-            isr.transfer.servo.low_threshold = (cfg.servo_low_threshold as u16) * 2 + 750;
-            isr.transfer.servo.high_threshold = (cfg.servo_high_threshold as u16) * 2 + 1750;
-            isr.transfer.servo.neutral = cfg.servo_neutral as u16 + 1374;
-            isr.transfer.servo.dead_band = cfg.servo_dead_band;
+            isr.transfer.servo.low_threshold = motor_cfg.servo_low;
+            isr.transfer.servo.high_threshold = motor_cfg.servo_high;
+            isr.transfer.servo.neutral = motor_cfg.servo_neutral;
+            isr.transfer.servo.dead_band = isr.config.servo_dead_band;
         }
         // Apply dead-time override to duty thresholds
         if dead_time_override > 0 {
@@ -275,6 +228,8 @@ fn main() -> ! {
     };
 
     // --- Enable global interrupts ---
+    // SAFETY: All ISR state has been initialized and moved to globals above.
+    // NVIC priorities are configured. It is now safe to take interrupts.
     unsafe { cortex_m::interrupt::enable() };
 
     // --- Main loop ---

@@ -90,6 +90,8 @@ impl<F: FlashPeripheral> Flash for FlashStorage<F> {
     fn read(&self, address: u32, buf: &mut [u8]) {
         // Flash is memory-mapped — just read directly
         for (i, byte) in buf.iter_mut().enumerate() {
+            // SAFETY: Flash memory is memory-mapped and always readable on STM32.
+            // The address range is validated by the caller (EEPROM_START within flash).
             *byte = unsafe { *((address + i as u32) as *const u8) };
         }
     }

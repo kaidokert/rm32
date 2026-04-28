@@ -71,6 +71,11 @@ pub const BEMF_TIMEOUT_STRICT: u8 = 10;
 /// Throttle level below which the lenient BEMF timeout is used.
 pub const BEMF_LENIENT_THROTTLE: u16 = 150;
 
+/// BEMF timeout fault latch value. When bemf_timeout_happened exceeds the
+/// threshold, it's set to this sentinel (> any threshold) to indicate a
+/// latched stuck-rotor fault that persists until motor conditions clear it.
+pub const BEMF_FAULT_LATCHED: u8 = 102;
+
 /// Fixed-point shift for commutation advance timing.
 /// `advance = (temp_advance * commutation_interval) >> ADVANCE_SHIFT`
 /// With ADVANCE_SHIFT=6, each unit of temp_advance ≈ 360°/64 ≈ 5.6° of advance.

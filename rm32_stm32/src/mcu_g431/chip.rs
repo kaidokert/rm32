@@ -22,12 +22,16 @@ pub use super::flash::FlashStorage;
 
 /// Enable TIM2 peripheral clock.
 pub fn enable_tim2_clock() {
+    // SAFETY: Single-core MCU, called during init before interrupts are enabled.
+    // RCC is a single-owner peripheral; no concurrent access.
     let rcc = unsafe { &*pac::RCC::PTR };
     rcc.apb1enr1().modify(|_, w| w.tim2en().set_bit()); // TIM2EN
 }
 
 /// Enable commutation timer (TIM16) peripheral clock.
 pub fn enable_com_timer_clock() {
+    // SAFETY: Single-core MCU, called during init before interrupts are enabled.
+    // RCC is a single-owner peripheral; no concurrent access.
     let rcc = unsafe { &*pac::RCC::PTR };
     rcc.apb2enr().modify(|_, w| w.tim16en().set_bit()); // TIM16EN
 }

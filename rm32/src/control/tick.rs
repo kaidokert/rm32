@@ -139,7 +139,7 @@ impl MotorState {
             hal.all_off();
             hal.mask_interrupts();
             self.input.input = 0;
-            self.protection.bemf_timeout_happened = 102;
+            self.protection.bemf_timeout_happened = crate::constants::BEMF_FAULT_LATCHED;
             return;
         }
 

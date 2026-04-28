@@ -201,6 +201,119 @@ impl EepromConfig {
     const ZEROED: Self = unsafe { core::mem::zeroed() };
 }
 
+/// Derived motor configuration — computed from EepromConfig + BoardConfig.
+/// All the math that was in main.rs, now testable on host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MotorConfig {
+    /// Base minimum duty cycle (EEPROM minimum_duty_cycle * 10)
+    pub minimum_duty: u16,
+    /// Minimum startup duty (minimum_duty + startup_power)
+    pub min_startup_duty: u16,
+    /// Maximum duty during startup ramp
+    pub startup_max_duty: u16,
+    /// TIM1 auto-reload value for requested PWM frequency
+    pub timer1_max_arr: u16,
+    /// Dead-time override from driving_brake_strength (0 = no override)
+    pub dead_time_override: u16,
+    /// Current PID gains (scaled from EEPROM)
+    pub current_kp: u32,
+    pub current_ki: u32,
+    pub current_kd: u32,
+    /// Motor KV (scaled from EEPROM, adjusted by board KV divider)
+    pub motor_kv: u16,
+    /// Low cell voltage cutoff in millivolts
+    pub low_cell_volt_cutoff: u16,
+    /// Servo calibration
+    pub servo_low: u16,
+    pub servo_high: u16,
+    pub servo_neutral: u16,
+}
+
+impl EepromConfig {
+    /// Derive motor configuration from EEPROM settings and board hardware.
+    ///
+    /// `default_arr`: TIM1 auto-reload at default 24kHz (MCU-specific: CPU_MHZ*1e6/24000-1)
+    /// `dead_time`: board dead-time from YAML
+    /// `kv_divider`: board KV divider (1=normal, 2=3-cell max, 16=1-2 cell max)
+    /// `startup_boost`: board flag for heavy-prop startup boost
+    pub fn derive_motor_config(
+        &self,
+        default_arr: u16,
+        dead_time: u8,
+        kv_divider: u8,
+        startup_boost: bool,
+    ) -> MotorConfig {
+        // Base minimum duty from EEPROM
+        let mdc = self.minimum_duty_cycle;
+        let minimum_duty_base = if mdc > 0 && mdc < 51 {
+            mdc as u16 * 10
+        } else {
+            0
+        };
+
+        // Startup power adds to minimum duty
+        let sp = self.startup_power;
+        let min_startup_base = if sp > 49 && sp < 151 {
+            minimum_duty_base + sp as u16
+        } else {
+            minimum_duty_base
+        };
+
+        // Startup boost: extra duty for heavy props
+        let (min_startup_duty, minimum_duty, startup_max_duty) = if startup_boost {
+            let pf = self.pwm_frequency;
+            (
+                min_startup_base + 200 + (pf as u16 * 100 / 24),
+                minimum_duty_base + 50 + (pf as u16 * 50 / 24),
+                minimum_duty_base + 400,
+            )
+        } else {
+            (min_startup_base, minimum_duty_base, minimum_duty_base + 400)
+        };
+
+        // PWM frequency → timer1_max_arr
+        let pf = self.pwm_frequency;
+        let timer1_max_arr = if pf > 7 && pf < 145 {
+            let divider = pf as u32 * 100 / 6;
+            (default_arr as u32 * 400 / divider) as u16
+        } else {
+            default_arr
+        };
+
+        // Dead-time override from driving_brake_strength
+        let dead_time_override = {
+            let mut dbs = self.driving_brake_strength;
+            if dbs == 0 || dbs > 9 {
+                dbs = 10;
+            }
+            if dbs < 10 {
+                let dto = dead_time as u16 + (150 - dbs as u16 * 10);
+                dto.min(200)
+            } else {
+                0
+            }
+        };
+
+        // PID gains
+        let kv_div = kv_divider.max(1) as u16;
+        MotorConfig {
+            minimum_duty,
+            min_startup_duty,
+            startup_max_duty,
+            timer1_max_arr,
+            dead_time_override,
+            current_kp: (self.current_p as u32) * 2,
+            current_ki: self.current_i as u32,
+            current_kd: (self.current_d as u32) * 2,
+            motor_kv: ((self.motor_kv as u16) * 40 + 20) / kv_div,
+            low_cell_volt_cutoff: self.low_cell_volt_cutoff as u16 + 250,
+            servo_low: (self.servo_low_threshold as u16) * 2 + 750,
+            servo_high: (self.servo_high_threshold as u16) * 2 + 1750,
+            servo_neutral: self.servo_neutral as u16 + 1374,
+        }
+    }
+}
+
 impl Default for EepromConfig {
     fn default() -> Self {
         Self::ZEROED
@@ -260,6 +373,82 @@ mod tests {
         cfg.max_ramp = 42; // custom value
         cfg.apply_version_defaults();
         assert_eq!(cfg.max_ramp, 42); // should NOT be overwritten
+    }
+
+    // --- MotorConfig derivation tests ---
+
+    #[test]
+    fn motor_config_default_eeprom() {
+        let cfg = EepromConfig::default();
+        let mc = cfg.derive_motor_config(2999, 60, 1, false);
+        // Zero EEPROM → minimum_duty=0, startup_power=0 → all duty=0
+        assert_eq!(mc.minimum_duty, 0);
+        assert_eq!(mc.min_startup_duty, 0);
+        assert_eq!(mc.startup_max_duty, 400);
+        // pwm_frequency=0 → default ARR
+        assert_eq!(mc.timer1_max_arr, 2999);
+        // driving_brake_strength=0 → dbs=10 → no override
+        assert_eq!(mc.dead_time_override, 0);
+    }
+
+    #[test]
+    fn motor_config_typical_values() {
+        let mut cfg = EepromConfig::default();
+        cfg.minimum_duty_cycle = 5; // 5*10 = 50
+        cfg.startup_power = 100; // 50+100 = 150
+        cfg.pwm_frequency = 24; // 24kHz default → ARR unchanged
+        let mc = cfg.derive_motor_config(2999, 60, 1, false);
+        assert_eq!(mc.minimum_duty, 50);
+        assert_eq!(mc.min_startup_duty, 150);
+        assert_eq!(mc.timer1_max_arr, 2999);
+    }
+
+    #[test]
+    fn motor_config_startup_boost() {
+        let mut cfg = EepromConfig::default();
+        cfg.minimum_duty_cycle = 5;
+        cfg.startup_power = 100;
+        cfg.pwm_frequency = 24;
+        let mc = cfg.derive_motor_config(2999, 60, 1, true);
+        // With boost: extra 200 + pf*100/24 = 200+100 = 300 added to startup
+        assert!(mc.min_startup_duty > 150);
+        assert!(mc.minimum_duty > 50);
+    }
+
+    #[test]
+    fn motor_config_pwm_frequency_scaling() {
+        let mut cfg = EepromConfig::default();
+        cfg.pwm_frequency = 48; // 48kHz → ARR should be ~half
+        let mc = cfg.derive_motor_config(2999, 60, 1, false);
+        assert!(mc.timer1_max_arr < 2999);
+        assert!(mc.timer1_max_arr > 1000);
+    }
+
+    #[test]
+    fn motor_config_dead_time_override() {
+        let mut cfg = EepromConfig::default();
+        cfg.driving_brake_strength = 5;
+        let mc = cfg.derive_motor_config(2999, 60, 1, false);
+        // dbs=5 → dto = 60 + (150 - 50) = 160
+        assert_eq!(mc.dead_time_override, 160);
+    }
+
+    #[test]
+    fn motor_config_kv_divider() {
+        let mut cfg = EepromConfig::default();
+        cfg.motor_kv = 50; // 50*40+20 = 2020
+        let mc1 = cfg.derive_motor_config(2999, 60, 1, false);
+        let mc2 = cfg.derive_motor_config(2999, 60, 2, false);
+        assert_eq!(mc1.motor_kv, 2020);
+        assert_eq!(mc2.motor_kv, 1010);
+    }
+
+    #[test]
+    fn motor_config_out_of_range_mdc_is_zero() {
+        let mut cfg = EepromConfig::default();
+        cfg.minimum_duty_cycle = 55; // > 50 → clamped to 0
+        let mc = cfg.derive_motor_config(2999, 60, 1, false);
+        assert_eq!(mc.minimum_duty, 0);
     }
 
     #[test]
