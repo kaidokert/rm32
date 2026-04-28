@@ -4,14 +4,14 @@
 //! `#[interrupt]` wrappers in `interrupts_g071.rs` / `interrupts_f051.rs`
 //! just clear the flag and call these.
 
-use crate::isr::{self, IsrState};
+use crate::isr::{self, TargetIsrState};
 use rm32::hal::InputCapture;
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
 ///
 /// # Safety invariants for `Sync` impl
 ///
-/// This type wraps `UnsafeCell<Option<IsrState>>` and implements `Sync`
+/// This type wraps `UnsafeCell<Option<TargetIsrState>>` and implements `Sync`
 /// (required for `static` placement). This is sound because:
 ///
 /// 1. **Single writer**: Only called from ISR handlers that share the same
@@ -31,7 +31,7 @@ use rm32::hal::InputCapture;
 /// If any of these invariants change (e.g., adding a higher-priority ISR
 /// that accesses motor state), this must be replaced with
 /// `cortex_m::interrupt::Mutex<RefCell<...>>`.
-struct IsrCell(core::cell::UnsafeCell<Option<IsrState>>);
+struct IsrCell(core::cell::UnsafeCell<Option<TargetIsrState>>);
 
 // SAFETY: See struct-level doc. Single-core + same-priority ISR = exclusive access.
 unsafe impl Sync for IsrCell {}
@@ -43,7 +43,7 @@ impl IsrCell {
     /// If never initialized, enters emergency shutdown (all FETs off).
     #[inline(always)]
     #[allow(clippy::mut_from_ref)]
-    fn get(&self) -> &mut IsrState {
+    fn get(&self) -> &mut TargetIsrState {
         // SAFETY: Called only from ISR context at a single priority level.
         // No concurrent access possible (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };

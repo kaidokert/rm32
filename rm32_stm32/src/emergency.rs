@@ -3,7 +3,8 @@
 //! Uses GpioPort trait for safe BSRR writes — no raw pointers at call site.
 //! Safe to call from any context, including ISR with missing state.
 
-use crate::gpio_regs::{GpioPort, PortA, PortB};
+use crate::gpio_regs::GpioPort;
+use crate::mcu::{PortA, PortB};
 
 /// G0_A / F0_A / L4_N pin layout emergency shutdown.
 pub struct G0AEmergencyOff;

@@ -1,4 +1,7 @@
 //! ISR-exclusive state and interrupt handlers.
+//!
+//! `IsrHal` and `IsrState` are generic over HAL types — no cfg blocks.
+//! The concrete target type is resolved via `TargetIsrState` alias.
 
 use core::cell::RefCell;
 use cortex_m::interrupt::Mutex;
@@ -8,67 +11,36 @@ use rm32::control::state::{BemfState, DutyState};
 use rm32::crsf::CrsfParser;
 use rm32::dshot_commands::CommandProcessor;
 use rm32::edt::EdtScheduler;
+use rm32::hal;
 use rm32::transfer::TransferState;
 
-#[cfg(feature = "stm32g071")]
-use crate::comparator::g071::G071BemfComparator as BemfComp;
-#[cfg(feature = "stm32f051")]
-use crate::comparator::f051::F051BemfComparator as BemfComp;
-#[cfg(feature = "stm32l431")]
-use crate::comparator::l431::L431BemfComparator as BemfComp;
-#[cfg(feature = "stm32g431")]
-use crate::comparator::g431::G431BemfComparator as BemfComp;
-use crate::timer::{Tim2Interval, Tim14Com};
-use crate::phase::G0APhaseDriver;
 use crate::shared::SharedState;
 
-#[cfg(feature = "stm32g071")]
-use crate::input_capture_g071::DshotCapture;
-#[cfg(feature = "stm32g071")]
-use crate::pwm_g071::Tim1Pwm;
-
-#[cfg(feature = "stm32f051")]
-use crate::init::F051Pwm;
-#[cfg(feature = "stm32l431")]
-use crate::init::L431Pwm;
-#[cfg(feature = "stm32g431")]
-use crate::init::G431Pwm;
-
-/// ISR-exclusive hardware — MCU-generic via cfg.
-pub struct IsrHal {
-    #[cfg(feature = "stm32g071")]
-    pub pwm: Tim1Pwm,
-    #[cfg(feature = "stm32f051")]
-    pub pwm: F051Pwm,
-    #[cfg(feature = "stm32l431")]
-    pub pwm: L431Pwm,
-    #[cfg(feature = "stm32g431")]
-    pub pwm: G431Pwm,
-
-    pub comp: BemfComp,
-    pub interval: Tim2Interval,
-    pub com_timer: Tim14Com,
-    pub phase: G0APhaseDriver,
-
-    #[cfg(feature = "stm32g071")]
-    pub input: DshotCapture,
-
-    #[cfg(feature = "stm32f051")]
-    pub input: crate::input_capture_f051::F051DshotCapture,
-
-    #[cfg(feature = "stm32l431")]
-    pub input: crate::input_capture_l431::L431DshotCapture,
-
-    #[cfg(feature = "stm32g431")]
-    pub input: crate::input_capture_g431::G431DshotCapture,
+/// ISR-exclusive hardware — generic over all HAL peripherals.
+/// Zero cfg blocks. Concrete types resolved by `TargetIsrHal` alias.
+pub struct IsrHal<P, I, C, IT, CT, PH>
+where
+    P: hal::PwmOutput,
+    I: hal::InputCapture,
+    C: hal::Comparator,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    pub pwm: P,
+    pub input: I,
+    pub comp: C,
+    pub interval: IT,
+    pub com_timer: CT,
+    pub phase: PH,
 }
 
-/// ISR-exclusive state.
-pub struct IsrState {
+/// ISR-exclusive state — generic over hardware.
+pub struct IsrState<H> {
     pub commutation: Commutation,
     pub bemf: BemfState,
     pub duty: DutyState,
-    pub hal: IsrHal,
+    pub hal: H,
     pub cmd: CommandProcessor,
     pub edt: EdtScheduler,
     pub crsf: CrsfParser,
@@ -85,23 +57,33 @@ pub struct IsrState {
     pub voltage_based_ramp: bool,
 }
 
-static ISR_STATE: Mutex<RefCell<Option<IsrState>>> = Mutex::new(RefCell::new(None));
+// Target-specific type alias — defined in mcu_xxx/chip.rs, re-exported via mcu::*.
+pub use crate::mcu::TargetIsrHal;
+
+/// Concrete ISR state for the selected target.
+pub type TargetIsrState = IsrState<TargetIsrHal>;
+
+// ============================================================
+// Global state + accessors
+// ============================================================
+
+static ISR_STATE: Mutex<RefCell<Option<TargetIsrState>>> = Mutex::new(RefCell::new(None));
 static SHARED: SharedState = SharedState::new();
 
 pub fn shared() -> &'static SharedState { &SHARED }
 
-pub fn init_isr_state(state: IsrState) {
+pub fn init_isr_state(state: TargetIsrState) {
     cortex_m::interrupt::free(|cs| {
         ISR_STATE.borrow(cs).replace(Some(state));
     });
 }
 
-pub fn take_isr_state() -> Option<IsrState> {
+pub fn take_isr_state() -> Option<TargetIsrState> {
     cortex_m::interrupt::free(|cs| ISR_STATE.borrow(cs).borrow_mut().take())
 }
 
 /// Access ISR state in a critical section (before interrupts take it).
-pub fn with_isr_state(f: impl FnOnce(&mut IsrState)) {
+pub fn with_isr_state(f: impl FnOnce(&mut TargetIsrState)) {
     cortex_m::interrupt::free(|cs| {
         if let Some(ref mut state) = *ISR_STATE.borrow(cs).borrow_mut() {
             f(state);

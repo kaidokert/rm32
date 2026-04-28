@@ -46,7 +46,8 @@ pub struct GpioBPin {
 impl GpioBPin {
     /// Create a GPIOB output pin. Configures MODER as output, OSPEEDR as high speed.
     pub fn new(pin: u8) -> Self {
-        use crate::gpio_regs::{GpioPort as _, PortB};
+        use crate::gpio_regs::GpioPort as _;
+        use crate::mcu::PortB;
         let offset = pin as u32 * 2;
         PortB::modify_moder(|v| (v & !(0b11 << offset)) | (0b01 << offset));
         // Set high speed (OSPEEDR)
@@ -65,12 +66,14 @@ impl embedded_hal::digital::ErrorType for GpioBPin {
 
 impl OutputPin for GpioBPin {
     fn set_high(&mut self) -> Result<(), Self::Error> {
-        use crate::gpio_regs::{GpioPort, PortB};
+        use crate::gpio_regs::GpioPort;
+        use crate::mcu::PortB;
         PortB::write_bsrr(self.set_mask);
         Ok(())
     }
     fn set_low(&mut self) -> Result<(), Self::Error> {
-        use crate::gpio_regs::{GpioPort, PortB};
+        use crate::gpio_regs::GpioPort;
+        use crate::mcu::PortB;
         PortB::write_bsrr(self.reset_mask);
         Ok(())
     }

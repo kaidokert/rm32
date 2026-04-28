@@ -4,7 +4,8 @@
 //! All register access via `GpioPort` trait — zero `unsafe` at call sites,
 //! zero runtime overhead (static dispatch, monomorphized to constants).
 
-use crate::gpio_regs::{GpioPort, PortA, PortB};
+use crate::gpio_regs::GpioPort;
+use crate::mcu::{PortA, PortB};
 
 /// A GPIO pin known at compile time.
 pub trait GpioPin {

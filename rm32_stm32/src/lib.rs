@@ -1,6 +1,7 @@
 //! RM32 STM32 HAL implementation.
 //!
-//! Supports STM32G071 and STM32F051 via feature flags.
+//! Supports STM32G071, STM32F051, STM32L431, STM32G431 via feature flags.
+//! MCU-specific configuration is centralized in `mcu.rs`.
 
 #![no_std]
 
@@ -8,7 +9,7 @@ pub mod mcu;
 pub use mcu::pac;
 pub use mcu::config;
 
-// Shared across MCUs
+// --- Shared across all MCUs (zero cfg) ---
 pub mod comparator;
 pub mod timer;
 pub mod phase;
@@ -17,7 +18,6 @@ pub mod main_loop;
 pub mod flash;
 pub mod regs;
 pub mod emergency;
-pub mod periph_addr;
 pub mod gpio_regs;
 pub mod gpio_pin;
 pub mod dma_buf;
@@ -33,56 +33,12 @@ pub mod init;
 pub mod stub;
 pub mod ws2812_hal;
 
-// MCU-specific ISR vectors
+// --- MCU-specific peripheral modules (one cfg per chip) ---
 #[cfg(feature = "stm32g071")]
-pub mod interrupts_g071;
+pub mod mcu_g071;
 #[cfg(feature = "stm32f051")]
-pub mod interrupts_f051;
+pub mod mcu_f051;
 #[cfg(feature = "stm32l431")]
-pub mod interrupts_l431;
-
-// G071-specific peripheral modules
-#[cfg(feature = "stm32g071")]
-pub mod pwm_g071;
-#[cfg(feature = "stm32g071")]
-pub mod system_g071;
-#[cfg(feature = "stm32g071")]
-pub mod input_capture_g071;
-#[cfg(feature = "stm32g071")]
-pub mod comp_init_g071;
-#[cfg(feature = "stm32g071")]
-pub mod telemetry_uart_g071;
-#[cfg(feature = "stm32g071")]
-pub mod adc_g071;
-
-// F051-specific peripheral modules
-#[cfg(feature = "stm32f051")]
-pub mod input_capture_f051;
-#[cfg(feature = "stm32f051")]
-pub mod comp_init_f051;
-#[cfg(feature = "stm32f051")]
-pub mod telemetry_uart_f051;
-#[cfg(feature = "stm32f051")]
-pub mod adc_f051;
-
-// L431-specific peripheral modules
-#[cfg(feature = "stm32l431")]
-pub mod input_capture_l431;
-#[cfg(feature = "stm32l431")]
-pub mod comp_init_l431;
-#[cfg(feature = "stm32l431")]
-pub mod telemetry_uart_l431;
-#[cfg(feature = "stm32l431")]
-pub mod adc_l431;
-
-// G431-specific peripheral modules
+pub mod mcu_l431;
 #[cfg(feature = "stm32g431")]
-pub mod input_capture_g431;
-#[cfg(feature = "stm32g431")]
-pub mod comp_init_g431;
-#[cfg(feature = "stm32g431")]
-pub mod telemetry_uart_g431;
-#[cfg(feature = "stm32g431")]
-pub mod adc_g431;
-#[cfg(feature = "stm32g431")]
-pub mod interrupts_g431;
+pub mod mcu_g431;

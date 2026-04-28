@@ -4,18 +4,16 @@
 //! TIM14: Commutation timer — one-shot at 2MHz
 //! PSC derived from MCU config to achieve 2MHz regardless of clock speed.
 
-use crate::pac;
-use crate::pac::RCC;
 use rm32::hal::{IntervalTimer, ComTimer};
 
 /// PAC-based timer register access. Bridges method vs field accessor styles.
 /// G071/G431 use method accessors: tim.cr1(), tim.sr(), etc.
 /// F051/L431 use field accessors: tim.cr1, tim.sr, etc.
 
+#[macro_export]
 macro_rules! define_timer_ops {
     (method, $mod_name:ident, $pac_periph:path) => {
-        mod $mod_name {
-            use super::pac;
+        pub mod $mod_name {
             macro_rules! tim { () => { unsafe { &*<$pac_periph>::PTR } } }
             #[inline(always)]
             pub unsafe fn read_cr1() -> u32 { tim!().cr1().read().bits() }
@@ -44,8 +42,7 @@ macro_rules! define_timer_ops {
         }
     };
     (field, $mod_name:ident, $pac_periph:path) => {
-        mod $mod_name {
-            use super::pac;
+        pub mod $mod_name {
             macro_rules! tim { () => { unsafe { &*<$pac_periph>::PTR } } }
             #[inline(always)]
             pub unsafe fn read_cr1() -> u32 { tim!().cr1.read().bits() }
@@ -75,21 +72,8 @@ macro_rules! define_timer_ops {
     };
 }
 
-// TIM2: method-style on G071/G431, field-style on F051/L431
-#[cfg(any(feature = "stm32g071", feature = "stm32g431"))]
-define_timer_ops!(method, tim2_ops, pac::TIM2);
-#[cfg(any(feature = "stm32f051", feature = "stm32l431"))]
-define_timer_ops!(field, tim2_ops, pac::TIM2);
-
-// Commutation timer: TIM14 on G071/F051, TIM16 on L431/G431
-#[cfg(feature = "stm32g071")]
-define_timer_ops!(method, com_tim_ops, pac::TIM14);
-#[cfg(feature = "stm32g431")]
-define_timer_ops!(method, com_tim_ops, pac::TIM16);
-#[cfg(feature = "stm32f051")]
-define_timer_ops!(field, com_tim_ops, pac::TIM14);
-#[cfg(feature = "stm32l431")]
-define_timer_ops!(field, com_tim_ops, pac::TIM16);
+// Timer ops (tim2_ops, com_tim_ops) defined in mcu_xxx/chip.rs, re-exported via mcu::*.
+use crate::mcu::{tim2_ops, com_tim_ops};
 
 /// TIM2 as free-running interval timer (2MHz, 0.5us/tick).
 pub struct Tim2Interval {
@@ -105,14 +89,7 @@ impl Default for Tim2Interval {
 impl Tim2Interval {
     pub fn new() -> Self {
         // Enable TIM2 clock
-        #[allow(unused_variables)] // Used via PAC on all MCU variants
-        let rcc = unsafe { &*RCC::ptr() };
-        #[cfg(feature = "stm32g071")]
-        rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
-        #[cfg(feature = "stm32f051")]
-        rcc.apb1enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
-        #[cfg(feature = "stm32l431")]
-        rcc.apb1enr1.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
+        crate::mcu::enable_tim2_clock();
 
         unsafe {
             tim2_ops::modify_cr1(|v| v & !(1 << 0)); // CEN=0
@@ -149,15 +126,7 @@ impl Default for Tim14Com {
 
 impl Tim14Com {
     pub fn new() -> Self {
-        // Enable TIM14 clock
-        #[allow(unused_variables)] // Used via PAC on all MCU variants
-        let rcc = unsafe { &*RCC::ptr() };
-        #[cfg(feature = "stm32g071")]
-        rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN
-        #[cfg(feature = "stm32f051")]
-        rcc.apb1enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 8)) }); // TIM14EN
-        #[cfg(feature = "stm32l431")]
-        rcc.apb2enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 17)) }); // TIM16EN
+        crate::mcu::enable_com_timer_clock();
 
         unsafe {
             com_tim_ops::write_psc(crate::config::TIMER_PSC as u32);

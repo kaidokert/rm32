@@ -14,8 +14,9 @@ use rm32::config::EepromConfig;
 use rm32::pid::Pid;
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
 
-use rm32_stm32::isr::{self, IsrState, IsrHal};
-use rm32_stm32::flash::FlashStorage;
+use rm32_stm32::isr::{self, IsrState};
+use rm32_stm32::init::InitResult;
+use rm32_stm32::mcu::FlashStorage;
 use rm32_stm32::main_loop::MainState;
 use rm32_stm32::config;
 
@@ -33,7 +34,7 @@ use panic_halt as _; // Standard panic handler: halts the CPU
 #[entry]
 fn main() -> ! {
     // --- MCU-specific init (clocks, GPIO, peripherals, NVIC) ---
-    let p = rm32_stm32::init::init();
+    let InitResult { mut hal, mut sys, mut adc, mut telem } = rm32_stm32::init::init(BOARD.dead_time);
 
     // --- WS2812 LED: boot indicator (dim red) ---
     let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
@@ -44,81 +45,36 @@ fn main() -> ! {
     }
 
     // --- Startup tune (before peripherals move to ISR) ---
-    let mut pwm = p.pwm;
-    let mut phase = if BOARD.bridge_enable {
-        rm32_stm32::phase::G0APhaseDriver::new_bridge(false)
-    } else {
-        p.phase
-    };
-    let mut sys = p.sys;
+    if BOARD.bridge_enable {
+        hal.phase = rm32_stm32::phase::G0APhaseDriver::new_bridge(false);
+    }
     {
         use rm32::sounds::Sounds;
         let sounds = Sounds::new(config::TIM1_AUTORELOAD);
-        sounds.play_startup(&mut pwm, &mut phase, &mut sys);
+        sounds.play_startup(&mut hal.pwm, &mut hal.phase, &mut sys);
     }
 
     // --- RPM pulse output (debug): configure GPIO before phase moves to ISR ---
     if BOARD.pulse_output {
-        phase.enable_pulse_output::<rm32_stm32::gpio_pin::PB10>();
+        hal.phase.enable_pulse_output::<rm32_stm32::gpio_pin::PB10>();
     }
 
     // --- Start IWDG watchdog (after startup tune, matching C sequencing) ---
-    #[cfg(feature = "stm32g071")]
-    sys.start_watchdog(0, 4095);   // prescaler /4, reload 4095 → ~410ms
+    sys.start_watchdog(config::WDG_PRESCALER, config::WDG_RELOAD);
 
-    #[cfg(feature = "stm32f051")]
-    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
-
-    #[cfg(feature = "stm32l431")]
-    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
-
-    #[cfg(feature = "stm32g431")]
-    sys.start_watchdog(2, 4000);   // prescaler /16, reload 4000 → ~1600ms
+    // --- Configure input capture inversion before moving to ISR ---
+    {
+        use rm32::hal::InputCapture;
+        hal.input.set_inverted(BOARD.inverted_input);
+        hal.input.receive_dshot_dma();
+    }
 
     // --- Build ISR state and move to global ---
     let isr_state = IsrState {
         commutation: Commutation::new(),
         bemf: BemfState::default(),
         duty: DutyState::default(),
-        hal: IsrHal {
-            pwm,
-            comp: p.comp,
-            interval: p.interval,
-            com_timer: p.com_timer,
-            phase,
-            #[cfg(feature = "stm32g071")]
-            input: {
-                let mut ic = rm32_stm32::input_capture_g071::new_capture();
-                use rm32::hal::InputCapture;
-                ic.set_inverted(BOARD.inverted_input);
-                ic.receive_dshot_dma();
-                ic
-            },
-            #[cfg(feature = "stm32f051")]
-            input: {
-                let mut ic = rm32_stm32::input_capture_f051::new_capture();
-                use rm32::hal::InputCapture;
-                ic.set_inverted(BOARD.inverted_input);
-                ic.receive_dshot_dma();
-                ic
-            },
-            #[cfg(feature = "stm32l431")]
-            input: {
-                let mut ic = rm32_stm32::input_capture_l431::new_capture();
-                use rm32::hal::InputCapture;
-                ic.set_inverted(BOARD.inverted_input);
-                ic.receive_dshot_dma();
-                ic
-            },
-            #[cfg(feature = "stm32g431")]
-            input: {
-                let mut ic = rm32_stm32::input_capture_g431::new_capture();
-                use rm32::hal::InputCapture;
-                ic.set_inverted(BOARD.inverted_input);
-                ic.receive_dshot_dma();
-                ic
-            },
-        },
+        hal,
         cmd: rm32::dshot_commands::CommandProcessor::default(),
         edt: rm32::edt::EdtScheduler::default(),
         crsf: rm32::crsf::CrsfParser::new(),
@@ -299,27 +255,7 @@ fn main() -> ! {
         });
     }
 
-    // --- ADC + Telemetry (already initialized by init(), create handles) ---
-    #[cfg(feature = "stm32g071")]
-    let (mut adc, mut telem) = (
-        rm32_stm32::adc_g071::post_init(),
-        rm32_stm32::telemetry_uart_g071::TelemUart::post_init(),
-    );
-    #[cfg(feature = "stm32f051")]
-    let (mut adc, mut telem) = (
-        rm32_stm32::adc_f051::post_init(),
-        rm32_stm32::telemetry_uart_f051::F051TelemUart::post_init(),
-    );
-    #[cfg(feature = "stm32l431")]
-    let (mut adc, mut telem) = (
-        rm32_stm32::adc_l431::post_init(),
-        rm32_stm32::telemetry_uart_l431::L431TelemUart::post_init(),
-    );
-    #[cfg(feature = "stm32g431")]
-    let (mut adc, mut telem) = (
-        rm32_stm32::adc_g431::post_init(),
-        rm32_stm32::telemetry_uart_g431::G431TelemUart::post_init(),
-    );
+    // --- ADC + Telemetry (returned from init()) ---
 
     // --- Sine mode state ---
     let mut sine_positions = rm32::sine::PhasePositions { a: 0, b: 120, c: 240 };
@@ -397,31 +333,14 @@ fn main() -> ! {
             }
         }
 
-        // Dynamic interrupt priority swap (L431 only — M4F has preemption)
-        // Low eRPM: DShot DMA > commutation (don't drop input frames)
-        // High eRPM: commutation > DShot (don't miss commutation steps)
         // Dynamic IRQ priority: swap DShot DMA vs commutation priority based on RPM.
         // Low eRPM: DShot DMA > commutation (don't drop input frames)
         // High eRPM: commutation > DShot (don't miss commutation steps)
-        #[cfg(feature = "stm32l431")]
-        {
-            use stm32l4xx_hal::pac::Interrupt;
-            const DSHOT_PRIORITY_THRESHOLD: u32 = 60;
-            let nvic = unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
-            if shared.dshot_telemetry() && shared.commutation_interval() > DSHOT_PRIORITY_THRESHOLD {
-                unsafe {
-                    nvic.set_priority(Interrupt::DMA1_CH5, 0);
-                    nvic.set_priority(Interrupt::TIM1_UP_TIM16, 1);
-                    nvic.set_priority(Interrupt::COMP, 1);
-                }
-            } else {
-                unsafe {
-                    nvic.set_priority(Interrupt::DMA1_CH5, 1);
-                    nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0);
-                    nvic.set_priority(Interrupt::COMP, 0);
-                }
-            }
-        }
+        // No-op on most MCUs; L431 (M4F with preemption) does the actual swap.
+        rm32_stm32::mcu::adjust_irq_priorities(
+            shared.commutation_interval(),
+            shared.dshot_telemetry(),
+        );
 
         // EEPROM save on DShot command
         if shared.save_settings_flag() {
