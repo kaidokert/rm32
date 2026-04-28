@@ -8,13 +8,12 @@ use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::context::MotorContext;
 use rm32::control::isr_logic::{self, TickCounters};
-use rm32::control::shared_impl::TestShared;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
 use rm32::input_mapping;
 use rm32::motor_mode::MotorMode;
-use rm32::shared_comm::SharedComm;
+use rm32::shared_state::SharedState;
 use rm32::signal;
 use std::io::{self, BufRead, Write};
 
@@ -114,16 +113,49 @@ impl hal::MotorHal for MockMotorHal {
     }
 }
 
+// --- Mock ADC/Telem for MainState::tick() ---
+
+struct MockAdc {
+    voltage: u16,
+    current: u16,
+    temperature: i16, // degrees C directly (bypasses real ADC calc)
+}
+impl hal::Adc for MockAdc {
+    fn start_conversion(&mut self) {}
+    fn raw_voltage(&self) -> u16 {
+        self.voltage
+    }
+    fn raw_current(&self) -> u16 {
+        self.current
+    }
+    fn raw_temperature(&self) -> u16 {
+        0
+    }
+    fn calc_temperature(&self, _raw: u16) -> rm32::units::DegreesCelsius {
+        rm32::units::DegreesCelsius(self.temperature)
+    }
+}
+
+struct MockTelem;
+impl hal::TelemetryUart for MockTelem {
+    fn send_dma(&mut self, _data: &[u8]) {}
+}
+
 // --- Harness state ---
 
 struct Harness {
-    shared: TestShared,
+    shared: SharedState,
     commutation: Commutation,
     bemf: BemfState,
     duty: DutyState,
     config: EepromConfig,
     counters: TickCounters,
     hal: MockMotorHal,
+    adc: MockAdc,
+    telem: MockTelem,
+
+    // Main-loop state (uses real MainState)
+    main: rm32::main_state::MainState,
 
     // Harness-level state
     tick_count: u32,
@@ -132,22 +164,21 @@ struct Harness {
     do_transfer: bool,
     dma_buffer: [u32; 64],
 
-    // Input state (replaces MotorState.input)
-    input: u16, // mapped throttle (after set_input mapping)
+    // Input state
+    input: u16,
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
 
     // Bidirectional state
     prop_brake_active: bool,
-    #[allow(dead_code)] // TODO: wire up RC-car reverse path
     return_to_center: bool,
 }
 
 impl Harness {
     fn new() -> Self {
         Self {
-            shared: TestShared::new(),
+            shared: SharedState::new(),
             commutation: Commutation::new(),
             bemf: BemfState::default(),
             duty: DutyState::default(),
@@ -181,6 +212,47 @@ impl Harness {
             edt_armed: false,
             prop_brake_active: false,
             return_to_center: false,
+            adc: MockAdc {
+                voltage: 0,
+                current: 0,
+                temperature: 25,
+            },
+            telem: MockTelem,
+            main: rm32::main_state::MainState {
+                protection: rm32::control::state::ProtectionState::default(),
+                measurements: rm32::control::state::Measurements::default(),
+                telemetry: rm32::control::state::TelemetryState::default(),
+                config: EepromConfig::default(),
+                current_pid: rm32::pid::Pid::new(400, 0, 1000, 20000, 100000),
+                speed_pid: rm32::pid::Pid::new(10, 0, 100, 10000, 50000),
+                stall_pid: rm32::pid::Pid::new(1, 0, 50, 10000, 50000),
+                e_rpm: 0,
+                average_interval: 0,
+                last_average_interval: 0,
+                commutation_intervals: [0; 6],
+                cell_count: 0,
+                motor_kv: 2000,
+                low_cell_volt_cutoff: 330,
+                voltage_divider: 110,
+                millivolt_per_amp: 20,
+                current_offset: 0,
+                stall_protection_adjust: 0,
+                stall_protect_target_interval: 6500,
+                use_speed_control_loop: false,
+                speed_input_override: 0,
+                target_e_com_time: 0,
+                desync_check: false,
+                current_filter: rm32::current::CurrentFilter::new(),
+                voltage_filter: rm32::filter::EwmaPow2::new(),
+                last_armed: false,
+                just_armed: false,
+                use_ntc: false,
+                led: rm32::main_state::NoLed,
+                led_counter: 0,
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+                ten_khz_counter: 0,
+            },
         }
     }
 
@@ -227,7 +299,7 @@ impl Harness {
                             self.shared.set_send_telemetry(true);
                         }
                         // Reset signal timeout via shared
-                        // (TestShared doesn't have direct set, use workaround)
+                        // (SharedState doesn't have direct set, use workaround)
                     }
                     dshot::DshotFrame::Command { cmd, .. } => {
                         self.shared.set_newinput(0);
@@ -280,7 +352,7 @@ impl Harness {
         // Apply persistent throttle
         if self.has_throttle {
             self.shared.set_newinput(self.throttle_value);
-            self.shared.signal_timeout.set(0);
+            self.shared.set_signal_timeout(0);
         }
 
         // Advance interval timer
@@ -292,40 +364,84 @@ impl Harness {
             self.do_transfer = false;
         }
 
-        // Bidirectional throttle mapping (replaces set_input bidir logic)
+        // --- set_input equivalent ---
+
+        // Bidirectional throttle mapping
         let newinput = self.shared.newinput();
         if self.config.bi_direction != 0 {
-            let r = input_mapping::dshot_bidir(
-                newinput,
-                self.commutation.forward,
-                self.config.dir_reversed != 0,
-                self.shared.commutation_interval(),
-                self.duty.cycle,
-                self.shared.stepper_sine(),
-                1500, // reverse_speed_threshold
-            );
-            self.shared.set_adjusted_input(r.adjusted);
-            if r.reverse {
-                self.commutation.forward = !self.commutation.forward;
-                self.shared.set_zero_crosses(0);
-                self.shared.set_old_routine(true);
+            if self.dshot {
+                if self.config.rc_car_reverse != 0 {
+                    let r = input_mapping::dshot_rc_car(
+                        newinput,
+                        self.commutation.forward,
+                        self.config.dir_reversed != 0,
+                        self.prop_brake_active,
+                        self.return_to_center,
+                    );
+                    self.shared.set_adjusted_input(r.adjusted);
+                    if r.reverse {
+                        self.commutation.forward = !self.commutation.forward;
+                        self.prop_brake_active = false;
+                        self.return_to_center = false;
+                    }
+                    self.prop_brake_active = r.prop_brake;
+                    if newinput <= 47 && self.prop_brake_active {
+                        self.prop_brake_active = false;
+                        self.return_to_center = true;
+                    }
+                } else {
+                    let r = input_mapping::dshot_bidir(
+                        newinput,
+                        self.commutation.forward,
+                        self.config.dir_reversed != 0,
+                        self.shared.commutation_interval(),
+                        self.duty.cycle,
+                        self.shared.stepper_sine(),
+                        1500,
+                    );
+                    self.shared.set_adjusted_input(r.adjusted);
+                    if r.reverse {
+                        self.commutation.forward = !self.commutation.forward;
+                        self.shared.set_zero_crosses(0);
+                        self.shared.set_old_routine(true);
+                    }
+                }
+            } else {
+                self.shared.set_adjusted_input(newinput);
             }
         } else {
             self.shared.set_adjusted_input(newinput);
         }
 
-        // Sine start throttle mapping
-        if self.config.use_sine_start != 0 {
-            let mapped = input_mapping::sine_start_map(
-                self.shared.adjusted_input(),
-                self.config.sine_mode_changeover_throttle_level,
-            );
-            self.input = mapped;
+        // BEMF timeout protection
+        if self.main.protection.bemf_timeout_happened > self.main.protection.bemf_timeout
+            && self.config.stuck_rotor_protection != 0
+        {
+            self.input = 0;
+            self.main.protection.bemf_timeout_happened = rm32::constants::BEMF_FAULT_LATCHED;
         } else {
-            self.input = self.shared.adjusted_input();
+            // Sine start throttle mapping
+            if self.config.use_sine_start != 0 {
+                self.input = input_mapping::sine_start_map(
+                    self.shared.adjusted_input(),
+                    self.config.sine_mode_changeover_throttle_level,
+                );
+            } else {
+                self.input = self.shared.adjusted_input();
+            }
         }
 
-        // ISR tick (arming, throttle→setpoint, ramp, PWM output)
+        // Brake logic (set_input low-input path)
+        if self.shared.armed()
+            && !self.shared.stepper_sine()
+            && self.input < 47
+            && self.config.brake_on_stop == 1
+            && self.config.comp_pwm != 0
+        {
+            self.prop_brake_active = true;
+        }
+
+        // --- ISR tick ---
         let mut ctx = MotorContext {
             commutation: &mut self.commutation,
             bemf: &mut self.bemf,
@@ -336,6 +452,31 @@ impl Harness {
             hal: &mut self.hal,
         };
         isr_logic::ten_khz_tick(&mut ctx);
+
+        // --- main_loop: call real MainState::tick() ---
+        self.main.config = self.config;
+        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
+
+        // Sync main→ISR published state
+        // MainState publishes via SharedComm, but harness2 needs to apply to local state
+        let duty_max = self.shared.duty_maximum();
+        if duty_max != 0 {
+            self.duty.maximum = duty_max;
+        }
+        let arr = self.shared.tim1_arr();
+        if arr != 0 {
+            self.counters.tim1_arr = arr;
+        }
+        self.bemf.filter_level = self.shared.filter_level();
+        let min_counts = self.shared.min_bemf_counts();
+        self.bemf.min_counts_up = min_counts;
+        self.bemf.min_counts_down = min_counts;
+
+        // Sync desync_check from commutation
+        if self.commutation.desync_check {
+            self.main.desync_check = true;
+            self.commutation.desync_check = false;
+        }
 
         self.tick_count += 1;
     }
@@ -363,11 +504,11 @@ impl Harness {
             self.commutation.forward as i32,
             self.duty.cycle,
             self.shared.duty_cycle_setpoint(),
-            0u16, // adjusted_duty_cycle not computed in isr_logic path
+            self.duty.adjusted,
             self.shared.commutation_interval(),
-            0u32, // average_interval computed in main_state
+            self.main.average_interval,
             self.shared.e_com_time(),
-            0u16, // e_rpm computed in main_state
+            self.main.e_rpm,
             self.shared.zero_crosses(),
             self.input,
             self.shared.adjusted_input(),
@@ -379,9 +520,9 @@ impl Harness {
             self.shared.stepper_sine() as i32,
             self.shared.signal_timeout(),
             self.counters.armed_timeout_count,
-            0u16, // battery_voltage from main_state
-            0i16, // actual_current from main_state
-            0i16, // degrees_celsius from main_state
+            self.main.measurements.battery_voltage.0,
+            self.main.measurements.actual_current.0,
+            self.main.measurements.degrees_celsius.0,
             self.duty.last,
             self.prop_brake_active as i32,
             self.shared.input_set() as i32,
@@ -446,16 +587,25 @@ impl Harness {
             // Direct state overrides
             "armed" => {
                 if v != 0 {
-                    self.shared.mode.set(MotorMode::Armed);
+                    // Preserve running state if already running
+                    if !self.shared.armed() {
+                        if self.shared.running() {
+                            // Already running — keep running mode
+                        } else {
+                            self.shared.set_motor_mode(MotorMode::Armed);
+                        }
+                    }
                 } else {
-                    self.shared.mode.set(MotorMode::Disarmed);
+                    self.shared.set_motor_mode(MotorMode::Disarmed);
                 }
             }
             "running" => {
                 if v != 0 {
-                    self.shared.mode.set(MotorMode::OldRoutine);
+                    self.shared.set_motor_mode(MotorMode::OldRoutine);
                 } else if self.shared.armed() {
-                    self.shared.mode.set(MotorMode::Armed);
+                    self.shared.set_motor_mode(MotorMode::Armed);
+                } else {
+                    self.shared.set_motor_mode(MotorMode::Disarmed);
                 }
             }
             "inputSet" => self.shared.set_input_set(v != 0),
@@ -466,31 +616,37 @@ impl Harness {
             "old_routine" => self.shared.set_old_routine(v != 0),
             "zero_crosses" => self.shared.set_zero_crosses(v as u32),
             "commutation_interval" => self.shared.set_commutation_interval(v as u32),
-            "zero_input_count" => {} // not in TestShared
+            "zero_input_count" => {} // not in SharedState
             "EDT_ARMED" => self.edt_armed = v != 0,
             "EDT_ARM_ENABLE" => {}
             "dshot_telemetry" => {}
-            "signaltimeout" => self.shared.signal_timeout.set(v as u16),
-            "cell_count" => {}
-            "battery_voltage" => {}
-            "degrees_celsius" => {}
-            "actual_current" => {}
-            "bemf_timeout_happened" => {}
-            "bemf_timeout" => {}
+            "signaltimeout" => self.shared.set_signal_timeout(v as u16),
+            "cell_count" => self.main.cell_count = v as u8,
+            "battery_voltage" => {
+                self.main.measurements.battery_voltage = rm32::units::MilliVolts(v as u16);
+            }
+            "degrees_celsius" => {
+                self.adc.temperature = v as i16;
+            }
+            "actual_current" => {
+                self.main.measurements.actual_current = rm32::units::MilliAmps(v as i16);
+            }
+            "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8,
+            "bemf_timeout" => self.main.protection.bemf_timeout = v as u8,
             "prop_brake_active" => self.prop_brake_active = v != 0,
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.last = v as u16,
             "use_current_limit" => {}
-            "use_speed_control_loop" => {}
+            "use_speed_control_loop" => self.main.use_speed_control_loop = v != 0,
             "send_esc_info_flag" => {}
             "send_telemetry" => self.shared.set_send_telemetry(v != 0),
-            "low_voltage_count" => {}
+            "low_voltage_count" => self.main.protection.low_voltage_count = v as u16,
             "out_put" => {}
             "duty_cycle" => self.duty.cycle = v as u16,
             "adjusted_input" => self.shared.set_adjusted_input(v as u16),
-            "desync_check" => {}
-            "average_interval" => {}
-            "last_average_interval" => {}
+            "desync_check" => self.main.desync_check = v != 0,
+            "average_interval" => self.main.average_interval = v as u32,
+            "last_average_interval" => self.main.last_average_interval = v as u32,
             "process_adc" => {}
             // Calibration state (not implemented in v2)
             "calibration_required"
