@@ -1,0 +1,5 @@
+name: "TBS 12S G071"
+mcu: stm32g071
+dead_time: 80
+voltage_divider: 210
+millivolt_per_amp: 25

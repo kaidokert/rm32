@@ -1,0 +1,4 @@
+name: "G071 PWM_EN"
+mcu: stm32g071
+dead_time: 60
+bridge_enable: true

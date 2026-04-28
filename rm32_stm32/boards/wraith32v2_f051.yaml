@@ -1,0 +1,5 @@
+name: "Wraith32 V2"
+mcu: stm32f051
+dead_time: 45
+current_adc_channel: 6
+voltage_adc_channel: 3

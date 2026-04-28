@@ -1,0 +1,5 @@
+name: "TBS 4N1 G071"
+mcu: stm32g071
+dead_time: 60
+current_adc_channel: 5
+voltage_adc_channel: 6

@@ -1,0 +1,6 @@
+name: "iFlight F051"
+mcu: stm32f051
+dead_time: 45
+millivolt_per_amp: 30
+current_adc_channel: 6
+voltage_adc_channel: 3

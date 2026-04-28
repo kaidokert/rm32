@@ -1,0 +1,8 @@
+name: "VimDrones L4"
+mcu: stm32l431
+dead_time: 60
+voltage_divider: 210
+millivolt_per_amp: 8
+current_offset: 498
+current_adc_channel: 8
+voltage_adc_channel: 11

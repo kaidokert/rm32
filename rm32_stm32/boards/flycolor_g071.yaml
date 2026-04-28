@@ -1,0 +1,3 @@
+name: "Flycolor G071"
+mcu: stm32g071
+dead_time: 40
