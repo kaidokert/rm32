@@ -7,11 +7,11 @@
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::context::MotorContext;
+use rm32::control::input::{self, InputState};
 use rm32::control::isr_logic::{self, TickCounters};
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
-use rm32::input_mapping;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 use rm32::signal;
@@ -164,15 +164,11 @@ struct Harness {
     do_transfer: bool,
     dma_buffer: [u32; 64],
 
-    // Input state
-    input: u16,
+    // Input processing (uses library function)
+    input_state: InputState,
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
-
-    // Bidirectional state
-    prop_brake_active: bool,
-    return_to_center: bool,
 }
 
 impl Harness {
@@ -206,12 +202,10 @@ impl Harness {
             throttle_value: 0,
             do_transfer: false,
             dma_buffer: [0; 64],
-            input: 0,
+            input_state: InputState::new(),
             dshot: false,
             servo_pwm: false,
             edt_armed: false,
-            prop_brake_active: false,
-            return_to_center: false,
             adc: MockAdc {
                 voltage: 0,
                 current: 0,
@@ -364,85 +358,16 @@ impl Harness {
             self.do_transfer = false;
         }
 
-        // --- set_input equivalent ---
-
-        // Bidirectional throttle mapping
-        let newinput = self.shared.newinput();
-        if self.config.bi_direction != 0 {
-            if self.dshot {
-                if self.config.rc_car_reverse != 0 {
-                    let r = input_mapping::dshot_rc_car(
-                        newinput,
-                        self.commutation.forward,
-                        self.config.dir_reversed != 0,
-                        self.prop_brake_active,
-                        self.return_to_center,
-                    );
-                    self.shared.set_newinput(r.adjusted);
-                    if r.reverse {
-                        self.commutation.forward = !self.commutation.forward;
-                        self.return_to_center = false;
-                    }
-                    if r.prop_brake {
-                        self.prop_brake_active = true;
-                    }
-                    // Zero input with active brake → clear brake, enable return_to_center
-                    if newinput <= 47 && self.prop_brake_active {
-                        self.prop_brake_active = false;
-                        self.return_to_center = true;
-                    }
-                } else {
-                    let r = input_mapping::dshot_bidir(
-                        newinput,
-                        self.commutation.forward,
-                        self.config.dir_reversed != 0,
-                        self.shared.commutation_interval(),
-                        self.duty.cycle,
-                        self.shared.stepper_sine(),
-                        1500,
-                    );
-                    // Set newinput to mapped value so ten_khz_tick sees it
-                    self.shared.set_newinput(r.adjusted);
-                    if r.reverse {
-                        self.commutation.forward = !self.commutation.forward;
-                        self.shared.set_zero_crosses(0);
-                        self.shared.set_old_routine(true);
-                    }
-                }
-            } else {
-                self.shared.set_adjusted_input(newinput);
-            }
-        } else {
-            self.shared.set_adjusted_input(newinput);
-        }
-
-        // BEMF timeout protection
-        if self.main.protection.bemf_timeout_happened > self.main.protection.bemf_timeout
-            && self.config.stuck_rotor_protection != 0
-        {
-            self.input = 0;
-            self.main.protection.bemf_timeout_happened = rm32::constants::BEMF_FAULT_LATCHED;
-        } else {
-            // Sine start throttle mapping
-            if self.config.use_sine_start != 0 {
-                self.input = input_mapping::sine_start_map(
-                    self.shared.adjusted_input(),
-                    self.config.sine_mode_changeover_throttle_level,
-                );
-            } else {
-                self.input = self.shared.adjusted_input();
-            }
-        }
-
-        // Brake logic (set_input low-input path)
-        if self.shared.armed()
-            && !self.shared.stepper_sine()
-            && self.input < 47
-            && self.config.brake_on_stop == 1
-            && self.config.comp_pwm != 0
-        {
-            self.prop_brake_active = true;
-        }
+        // --- Input processing pipeline (library function) ---
+        input::process_input(
+            &self.shared,
+            &mut self.commutation,
+            &self.config,
+            &self.duty,
+            &mut self.main.protection,
+            &mut self.input_state,
+            self.dshot,
+        );
 
         // --- ISR tick ---
         let mut ctx = MotorContext {
@@ -513,7 +438,7 @@ impl Harness {
             self.shared.e_com_time(),
             self.main.e_rpm,
             self.shared.zero_crosses(),
-            self.input,
+            self.input_state.input,
             self.shared.adjusted_input(),
             self.shared.newinput(),
             self.bemf.counter,
@@ -527,7 +452,7 @@ impl Harness {
             self.main.measurements.actual_current.0,
             self.main.measurements.degrees_celsius.0,
             self.duty.last,
-            self.prop_brake_active as i32,
+            self.input_state.prop_brake_active as i32,
             self.shared.input_set() as i32,
             self.dshot as i32,
             self.servo_pwm as i32,
@@ -642,7 +567,7 @@ impl Harness {
             }
             "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8,
             "bemf_timeout" => self.main.protection.bemf_timeout = v as u8,
-            "prop_brake_active" => self.prop_brake_active = v != 0,
+            "prop_brake_active" => self.input_state.prop_brake_active = v != 0,
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.last = v as u16,
             "use_current_limit" => {}
