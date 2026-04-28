@@ -22,6 +22,7 @@ pub mod filter;
 pub mod fixed_mode;
 pub mod functions;
 pub mod hal;
+pub mod input_mapping;
 pub mod main_state;
 pub mod motor_mode;
 pub mod ntc;
