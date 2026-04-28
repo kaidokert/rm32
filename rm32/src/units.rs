@@ -73,17 +73,29 @@ impl TimerTicks {
 #[repr(transparent)]
 pub struct AdcCount(pub u16);
 
+use fixed::types::U16F16;
+
+/// Millivolts per ADC count: 3300 / 4095 ≈ 0.8059 mV/count.
+/// As fixed-point, this replaces the fragile `* 3300 / 4095` integer chain.
+const MV_PER_COUNT: U16F16 = U16F16::from_bits((3300u64 * 65536 / 4095) as u32);
+
+/// Current sense scaling: 3300 / 41 ≈ 80.49 (C uses integer truncation to 80).
+/// We match C's integer behavior: 3300/41 = 80 (truncated).
+const CURRENT_MV_SCALE: i32 = 3300 / 41; // = 80, matches C
+
 impl AdcCount {
     /// Convert to millivolts given a voltage divider ratio.
-    /// Formula: count * 3300 / 4095 * divider / 100
+    /// Uses fixed-point MV_PER_COUNT constant — overflow-safe single multiply.
     pub fn to_millivolts(self, voltage_divider: u16) -> MilliVolts {
-        MilliVolts((self.0 as u32 * 3300 / 4095 * voltage_divider as u32 / 100) as u16)
+        let mv_raw = MV_PER_COUNT * U16F16::from_num(self.0);
+        let scaled = mv_raw.to_num::<u32>() * voltage_divider as u32 / 100;
+        MilliVolts(scaled as u16)
     }
 
     /// Convert to milliamps given offset and sensitivity.
-    /// Formula: (count * 3300/41 - offset*100) / mv_per_amp
+    /// Formula: (count * 80 - offset * 100) / mv_per_amp
     pub fn to_milliamps(self, current_offset: i16, mv_per_amp: u16) -> MilliAmps {
-        let mv = (self.0 as i32) * 3300 / 41 - (current_offset as i32) * 100;
+        let mv = (self.0 as i32) * CURRENT_MV_SCALE - (current_offset as i32) * 100;
         if mv_per_amp > 0 {
             MilliAmps((mv / mv_per_amp as i32) as i16)
         } else {

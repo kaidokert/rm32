@@ -33,6 +33,17 @@ pub static PWM_SIN: [i16; 360] = [
 /// `timer1_max_arr`: TIM1 auto-reload value
 /// `sine_mode_power`: power scaling 1-10 (10 = full, for non-gimbal sine startup)
 /// `gimbal_mode`: if true, uses full power (no sine_mode_power scaling)
+/// Sine table amplitude scaling factor.
+const SINE_AMPLITUDE_SCALE: i32 = 2;
+/// Duty cycle normalization (maps sine range to timer ARR).
+const DUTY_NORMALIZATION: i32 = 2000;
+/// Power scaling base (power is 1-10, divided by this for 10%-100%).
+const POWER_SCALE_BASE: i32 = 10;
+/// Sine divider for non-gimbal mode (halves amplitude).
+const SINE_DIVIDER_NORMAL: i32 = 2;
+/// Sine divider for gimbal mode (full amplitude).
+const SINE_DIVIDER_GIMBAL: i32 = 1;
+
 pub fn sine_drive(
     positions: &PhasePositions,
     gate_drive_offset: i16,
@@ -42,15 +53,22 @@ pub fn sine_drive(
 ) -> (u16, u16, u16) {
     let arr = timer1_max_arr as i32;
     let power = if gimbal_mode {
-        10
+        POWER_SCALE_BASE
     } else {
         sine_mode_power.max(1) as i32
     };
-    let divider = if gimbal_mode { 1i32 } else { 2 }; // SINE_DIVIDER
+    let divider = if gimbal_mode {
+        SINE_DIVIDER_GIMBAL
+    } else {
+        SINE_DIVIDER_NORMAL
+    };
 
     let compute = |pos: i16| -> u16 {
         let sin_val = PWM_SIN[pos as usize] as i32;
-        let duty = ((2 * sin_val / divider + gate_drive_offset as i32) * arr / 2000) * power / 10;
+        let duty = ((SINE_AMPLITUDE_SCALE * sin_val / divider + gate_drive_offset as i32) * arr
+            / DUTY_NORMALIZATION)
+            * power
+            / POWER_SCALE_BASE;
         duty.max(0) as u16
     };
 
