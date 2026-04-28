@@ -195,7 +195,9 @@ const VERSION_DEFAULTS: EepromConfig = {
 };
 
 impl EepromConfig {
-    /// Const zero-init. Safe: bytemuck::Zeroable guarantees all-zeros is valid.
+    /// Const zero-init.
+    /// SAFETY: bytemuck::Zeroable derive proves all-zeros is a valid bit pattern.
+    /// Using mem::zeroed() because Zeroable::zeroed() is not const fn.
     const ZEROED: Self = unsafe { core::mem::zeroed() };
 }
 

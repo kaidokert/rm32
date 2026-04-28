@@ -5,8 +5,8 @@
 
 use crate::adc_hal::AdcPeripheral;
 use crate::dma_buf::DmaBuf;
-use crate::regs::{InitError, wait_for};
 use crate::pac;
+use crate::regs::{InitError, wait_for};
 
 crate::define_adc_boilerplate!(
     ops: G431AdcOps,
@@ -25,24 +25,33 @@ impl AdcPeripheral for G431AdcOps {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*pac::RCC::PTR };
         unsafe {
-            rcc.ahb2enr().modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit());
+            rcc.ahb2enr()
+                .modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit());
             rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
         }
     }
 
     fn configure_pins(&self) {
         let gpioa = unsafe { &*pac::GPIOA::PTR };
-        unsafe { gpioa.moder().modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11)); }
+        unsafe {
+            gpioa
+                .moder()
+                .modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));
+        }
     }
 
     fn configure_clock_source(&self) {
         let adc_common = unsafe { &*pac::ADC12_COMMON::PTR };
-        unsafe { adc_common.ccr().modify(|_, w| w.ckmode().bits(0b11)); } // PCLK/4
+        unsafe {
+            adc_common.ccr().modify(|_, w| w.ckmode().bits(0b11));
+        } // PCLK/4
     }
 
     fn enable_temp_sensor(&self) {
         let adc_common = unsafe { &*pac::ADC12_COMMON::PTR };
-        unsafe { adc_common.ccr().modify(|_, w| w.vsensesel().set_bit()); }
+        unsafe {
+            adc_common.ccr().modify(|_, w| w.vsensesel().set_bit());
+        }
     }
 
     fn configure_dma(&self, buf_ptr: *const u16, buf_len: u16) {
@@ -56,7 +65,8 @@ impl AdcPeripheral for G431AdcOps {
             ch2.par().write(|w| w.bits(adc1.dr().as_ptr() as u32));
             ch2.mar().write(|w| w.bits(buf_ptr as u32));
             ch2.ndtr().write(|w| w.bits(buf_len as u32));
-            ch2.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch2.cr()
+                .write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
             ch2.cr().modify(|r, w| w.bits(r.bits() | 1));
         }
     }
@@ -81,12 +91,18 @@ impl AdcPeripheral for G431AdcOps {
     fn configure_sequence(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
         // 3 conversions: TEMPSENSOR(16), voltage(13), current(5)
-        unsafe { adc1.sqr1().write(|w| w.bits((2 << 0) | (16 << 6) | (13 << 12) | (5 << 18))); }
+        unsafe {
+            adc1.sqr1()
+                .write(|w| w.bits((2 << 0) | (16 << 6) | (13 << 12) | (5 << 18)));
+        }
     }
 
     fn enable_dma_mode(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe { adc1.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit().cont().set_bit()); }
+        unsafe {
+            adc1.cfgr()
+                .write(|w| w.dmaen().set_bit().dmacfg().set_bit().cont().set_bit());
+        }
     }
 
     fn calibrate(&self) -> Result<(), InitError> {
@@ -95,7 +111,11 @@ impl AdcPeripheral for G431AdcOps {
             adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
             adc1.cr().modify(|_, w| w.adcal().set_bit());
         }
-        wait_for(|| unsafe { !(&*pac::ADC1::PTR).cr().read().adcal().bit() }, 100_000, "ADC cal")?;
+        wait_for(
+            || unsafe { !(&*pac::ADC1::PTR).cr().read().adcal().bit() },
+            100_000,
+            "ADC cal",
+        )?;
         cortex_m::asm::delay(170 * 20);
         Ok(())
     }
@@ -106,12 +126,18 @@ impl AdcPeripheral for G431AdcOps {
             adc1.isr().write(|w| w.adrdy().clear_bit_by_one());
             adc1.cr().modify(|_, w| w.aden().set_bit());
         }
-        wait_for(|| unsafe { (&*pac::ADC1::PTR).isr().read().adrdy().bit() }, 100_000, "ADC ready")
+        wait_for(
+            || unsafe { (&*pac::ADC1::PTR).isr().read().adrdy().bit() },
+            100_000,
+            "ADC ready",
+        )
     }
 
     fn start_conversion(&self) {
         let adc1 = unsafe { &*pac::ADC1::PTR };
-        unsafe { adc1.cr().modify(|_, w| w.adstart().set_bit()); }
+        unsafe {
+            adc1.cr().modify(|_, w| w.adstart().set_bit());
+        }
     }
 }
 
@@ -133,11 +159,22 @@ impl G431DualAdc {
         let dmamux = unsafe { &*pac::DMAMUX::PTR };
 
         unsafe {
-            rcc.ahb2enr().modify(|_, w| w.adc12en().set_bit().gpioaen().set_bit().gpioben().set_bit());
+            rcc.ahb2enr().modify(|_, w| {
+                w.adc12en()
+                    .set_bit()
+                    .gpioaen()
+                    .set_bit()
+                    .gpioben()
+                    .set_bit()
+            });
             rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
-            gpioa.moder().modify(|_, w| w.moder6().bits(0b11).moder7().bits(0b11));
+            gpioa
+                .moder()
+                .modify(|_, w| w.moder6().bits(0b11).moder7().bits(0b11));
             gpiob.moder().modify(|_, w| w.moder1().bits(0b11));
-            adc_common.ccr().write(|w| w.ckmode().bits(0b11).vsensesel().set_bit());
+            adc_common
+                .ccr()
+                .write(|w| w.ckmode().bits(0b11).vsensesel().set_bit());
 
             // DMA1 CH2 → ADC1
             dmamux.ccr(1).write(|w| w.dmareq_id().bits(5));
@@ -146,7 +183,8 @@ impl G431DualAdc {
             ch2.par().write(|w| w.bits(adc1.dr().as_ptr() as u32));
             ch2.mar().write(|w| w.bits(ADC1_DMA_BUF.as_ptr() as u32));
             ch2.ndtr().write(|w| w.bits(2));
-            ch2.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch2.cr()
+                .write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
             ch2.cr().modify(|r, w| w.bits(r.bits() | 1));
 
             // DMA1 CH4 → ADC2
@@ -156,7 +194,8 @@ impl G431DualAdc {
             ch4.par().write(|w| w.bits(adc2.dr().as_ptr() as u32));
             ch4.mar().write(|w| w.bits(ADC2_DMA_BUF.as_ptr() as u32));
             ch4.ndtr().write(|w| w.bits(2));
-            ch4.cr().write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
+            ch4.cr()
+                .write(|w| w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)));
             ch4.cr().modify(|r, w| w.bits(r.bits() | 1));
 
             // ADC1: TEMPSENSOR(16) + NTC(12)
@@ -164,8 +203,10 @@ impl G431DualAdc {
             adc1.cr().modify(|_, w| w.advregen().set_bit());
             cortex_m::asm::delay(170 * 20);
             adc1.smpr2().write(|w| w.bits(0b100 << 6));
-            adc1.sqr1().write(|w| w.bits((1 << 0) | (16 << 6) | (12 << 12)));
-            adc1.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit());
+            adc1.sqr1()
+                .write(|w| w.bits((1 << 0) | (16 << 6) | (12 << 12)));
+            adc1.cfgr()
+                .write(|w| w.dmaen().set_bit().dmacfg().set_bit());
             adc1.cr().modify(|_, w| w.adcaldif().clear_bit());
             adc1.cr().modify(|_, w| w.adcal().set_bit());
             wait_for(|| !adc1.cr().read().adcal().bit(), 100_000, "ADC1 cal")?;
@@ -179,8 +220,10 @@ impl G431DualAdc {
             adc2.cr().modify(|_, w| w.advregen().set_bit());
             cortex_m::asm::delay(170 * 20);
             adc2.smpr1().write(|w| w.bits((0b010 << 9) | (0b100 << 12)));
-            adc2.sqr1().write(|w| w.bits((1 << 0) | (3 << 6) | (4 << 12)));
-            adc2.cfgr().write(|w| w.dmaen().set_bit().dmacfg().set_bit());
+            adc2.sqr1()
+                .write(|w| w.bits((1 << 0) | (3 << 6) | (4 << 12)));
+            adc2.cfgr()
+                .write(|w| w.dmaen().set_bit().dmacfg().set_bit());
             adc2.cr().modify(|_, w| w.adcaldif().clear_bit());
             adc2.cr().modify(|_, w| w.adcal().set_bit());
             wait_for(|| !adc2.cr().read().adcal().bit(), 100_000, "ADC2 cal")?;
@@ -192,20 +235,35 @@ impl G431DualAdc {
         Ok(Self)
     }
 
-    pub fn post_init() -> Self { Self }
+    pub fn post_init() -> Self {
+        Self
+    }
 }
 
 impl rm32::hal::Adc for G431DualAdc {
     fn start_conversion(&mut self) {
-        unsafe { (&*pac::ADC1::PTR).cr().modify(|_, w| w.adstart().set_bit()); }
+        unsafe {
+            (&*pac::ADC1::PTR).cr().modify(|_, w| w.adstart().set_bit());
+        }
     }
     fn start_conversion_2(&mut self) {
-        unsafe { (&*pac::ADC2::PTR).cr().modify(|_, w| w.adstart().set_bit()); }
+        unsafe {
+            (&*pac::ADC2::PTR).cr().modify(|_, w| w.adstart().set_bit());
+        }
     }
-    fn raw_temperature(&self) -> u16 { ADC1_DMA_BUF.read()[0] }
-    fn raw_voltage(&self) -> u16 { ADC2_DMA_BUF.read()[0] }
-    fn raw_current(&self) -> u16 { ADC2_DMA_BUF.read()[1] }
+    fn raw_temperature(&self) -> u16 {
+        ADC1_DMA_BUF.read()[0]
+    }
+    fn raw_voltage(&self) -> u16 {
+        ADC2_DMA_BUF.read()[0]
+    }
+    fn raw_current(&self) -> u16 {
+        ADC2_DMA_BUF.read()[1]
+    }
     fn calc_temperature(&self, raw: u16) -> rm32::units::DegreesCelsius {
-        rm32::units::calc_temperature_from_cal(raw, 0x1FFF_75A8, 0x1FFF_75CA, 30, 110)
+        // SAFETY: Reading ROM calibration values at known addresses.
+        let cal1 = unsafe { *(0x1FFF_75A8u32 as *const u16) };
+        let cal2 = unsafe { *(0x1FFF_75CAu32 as *const u16) };
+        rm32::units::calc_temperature_pure(raw, cal1, cal2, 30, 110)
     }
 }

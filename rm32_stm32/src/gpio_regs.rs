@@ -23,52 +23,64 @@ macro_rules! define_port {
     (method, $name:ident, $pac_periph:path) => {
         pub struct $name;
         impl $crate::gpio_regs::GpioPort for $name {
-            #[inline(always)]
+            #[inline]
             fn write_bsrr(val: u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
-                unsafe { gpio.bsrr().as_ptr().write_volatile(val); }
+                unsafe {
+                    gpio.bsrr().as_ptr().write_volatile(val);
+                }
             }
-            #[inline(always)]
+            #[inline]
             fn modify_moder(f: impl FnOnce(u32) -> u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
                 let ptr = gpio.moder().as_ptr();
-                unsafe { ptr.write_volatile(f(ptr.read_volatile())); }
+                unsafe {
+                    ptr.write_volatile(f(ptr.read_volatile()));
+                }
             }
-            #[inline(always)]
+            #[inline]
             fn read_odr() -> u32 {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
                 unsafe { gpio.odr().as_ptr().read_volatile() }
             }
-            #[inline(always)]
+            #[inline]
             fn write_odr(val: u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
-                unsafe { (gpio.odr().as_ptr() as *mut u32).write_volatile(val); }
+                unsafe {
+                    (gpio.odr().as_ptr() as *mut u32).write_volatile(val);
+                }
             }
         }
     };
     (field, $name:ident, $pac_periph:path) => {
         pub struct $name;
         impl $crate::gpio_regs::GpioPort for $name {
-            #[inline(always)]
+            #[inline]
             fn write_bsrr(val: u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
-                unsafe { (gpio.bsrr.as_ptr() as *mut u32).write_volatile(val); }
+                unsafe {
+                    (gpio.bsrr.as_ptr() as *mut u32).write_volatile(val);
+                }
             }
-            #[inline(always)]
+            #[inline]
             fn modify_moder(f: impl FnOnce(u32) -> u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
                 let ptr = gpio.moder.as_ptr();
-                unsafe { (ptr as *mut u32).write_volatile(f(ptr.read_volatile())); }
+                unsafe {
+                    (ptr as *mut u32).write_volatile(f(ptr.read_volatile()));
+                }
             }
-            #[inline(always)]
+            #[inline]
             fn read_odr() -> u32 {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
                 unsafe { gpio.odr.as_ptr().read_volatile() }
             }
-            #[inline(always)]
+            #[inline]
             fn write_odr(val: u32) {
                 let gpio = unsafe { &*<$pac_periph>::PTR };
-                unsafe { (gpio.odr.as_ptr() as *mut u32).write_volatile(val); }
+                unsafe {
+                    (gpio.odr.as_ptr() as *mut u32).write_volatile(val);
+                }
             }
         }
     };

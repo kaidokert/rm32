@@ -25,19 +25,19 @@ pub trait GpioPin {
 
     /// Set GPIO mode for this pin (output, alternate, etc).
     /// Safe: GpioPort handles the unsafe register access internally.
-    #[inline(always)]
+    #[inline]
     fn set_mode(mode: u32) {
         Self::Port::modify_moder(|v| (v & !Self::MODER_MASK) | (mode << Self::MODER_OFFSET));
     }
 
     /// Set pin high via BSRR (atomic, write-only).
-    #[inline(always)]
+    #[inline]
     fn set_high() {
         Self::Port::write_bsrr(Self::BSRR_SET);
     }
 
     /// Set pin low via BSRR reset bits (atomic, write-only).
-    #[inline(always)]
+    #[inline]
     fn set_low() {
         Self::Port::write_bsrr(Self::BSRR_RESET);
     }
@@ -55,10 +55,10 @@ macro_rules! gpio_pin {
     };
 }
 
-gpio_pin!(PA7,  PortA, 7);
-gpio_pin!(PA8,  PortA, 8);
-gpio_pin!(PA9,  PortA, 9);
+gpio_pin!(PA7, PortA, 7);
+gpio_pin!(PA8, PortA, 8);
+gpio_pin!(PA9, PortA, 9);
 gpio_pin!(PA10, PortA, 10);
-gpio_pin!(PB0,  PortB, 0);
-gpio_pin!(PB1,  PortB, 1);
+gpio_pin!(PB0, PortB, 0);
+gpio_pin!(PB1, PortB, 1);
 gpio_pin!(PB10, PortB, 10);

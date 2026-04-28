@@ -9,38 +9,38 @@
 use cortex_m_rt::entry;
 
 use rm32::commutation::Commutation;
-use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, TelemetryState};
 use rm32::config::EepromConfig;
-use rm32::pid::Pid;
+use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, TelemetryState};
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
+use rm32::pid::Pid;
 
-use rm32_stm32::isr::{self, IsrState};
-use rm32_stm32::init::InitResult;
-use rm32_stm32::mcu::FlashStorage;
-use rm32_stm32::main_loop::MainState;
 use rm32_stm32::config;
+use rm32_stm32::init::InitResult;
+use rm32_stm32::isr::{self, IsrState};
+use rm32_stm32::main_loop::MainState;
+use rm32_stm32::mcu::FlashStorage;
 
-#[cfg(feature = "stm32g071")]
-const BOARD: rm32::board::BoardConfig = rm32::board::GEN_64K_G071;
-#[cfg(feature = "stm32f051")]
-const BOARD: rm32::board::BoardConfig = rm32::board::SISKIN_F051;
-#[cfg(feature = "stm32l431")]
-const BOARD: rm32::board::BoardConfig = rm32::board::NEUTRON_L431;
-#[cfg(feature = "stm32g431")]
-const BOARD: rm32::board::BoardConfig = rm32::board::PROTONDRIVE_G431;
+// Board configuration generated from YAML by build.rs.
+// Override with: BOARD=boards/my_board.yaml cargo build
+include!(concat!(env!("OUT_DIR"), "/board_config.rs"));
 
 use panic_halt as _; // Standard panic handler: halts the CPU
 
 #[entry]
 fn main() -> ! {
     // --- MCU-specific init (clocks, GPIO, peripherals, NVIC) ---
-    let InitResult { mut hal, mut sys, mut adc, mut telem } = rm32_stm32::init::init(BOARD.dead_time);
+    let InitResult {
+        mut hal,
+        mut sys,
+        mut adc,
+        mut telem,
+    } = rm32_stm32::init::init(BOARD.dead_time);
 
     // --- WS2812 LED: boot indicator (dim red) ---
     let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
     let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(led_pin, config::CPU_FREQUENCY_MHZ);
     if BOARD.has_led {
-        use rm32::ws2812::{send_status, LedStatus};
+        use rm32::ws2812::{LedStatus, send_status};
         cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Boot));
     }
 
@@ -56,7 +56,8 @@ fn main() -> ! {
 
     // --- RPM pulse output (debug): configure GPIO before phase moves to ISR ---
     if BOARD.pulse_output {
-        hal.phase.enable_pulse_output::<rm32_stm32::gpio_pin::PB10>();
+        hal.phase
+            .enable_pulse_output::<rm32_stm32::gpio_pin::PB10>();
     }
 
     // --- Start IWDG watchdog (after startup tune, matching C sequencing) ---
@@ -134,8 +135,8 @@ fn main() -> ! {
         let magic1 = unsafe { (DEVINFO_ADDR as *const u32).read_volatile() };
         let magic2 = unsafe { ((DEVINFO_ADDR + 4) as *const u32).read_volatile() };
         if magic1 == DEVINFO_MAGIC1 && magic2 == DEVINFO_MAGIC2 {
-            const DEVICE_32K: u8 = 0x1F;  // 32KB flash (F051)
-            const DEVICE_64K: u8 = 0x35;  // 64KB flash (G071)
+            const DEVICE_32K: u8 = 0x1F; // 32KB flash (F051)
+            const DEVICE_64K: u8 = 0x35; // 64KB flash (G071)
             const DEVICE_128K: u8 = 0x2B; // 128KB flash (L431)
             let device_code = unsafe { *((DEVINFO_ADDR + 8 + 4) as *const u8) };
             match device_code {
@@ -172,7 +173,11 @@ fn main() -> ! {
     // Startup duty cycle from EEPROM (matches C: minimum_duty_cycle*10 + startup_power)
     let minimum_duty_cycle = {
         let mdc = main_state.config.minimum_duty_cycle;
-        if mdc > 0 && mdc < 51 { mdc as u16 * 10 } else { 0 }
+        if mdc > 0 && mdc < 51 {
+            mdc as u16 * 10
+        } else {
+            0
+        }
     };
     let min_startup_duty = {
         let sp = main_state.config.startup_power;
@@ -191,13 +196,16 @@ fn main() -> ! {
             minimum_duty_cycle + 400,
         )
     } else {
-        (min_startup_duty, minimum_duty_cycle, minimum_duty_cycle + 400)
+        (
+            min_startup_duty,
+            minimum_duty_cycle,
+            minimum_duty_cycle + 400,
+        )
     };
 
     // KV-based threshold scaling
-    let _reverse_speed_threshold = rm32::functions::map(
-        main_state.motor_kv as i32, 300, 3000, 1000, 500,
-    ) as u16;
+    let _reverse_speed_threshold =
+        rm32::functions::map(main_state.motor_kv as i32, 300, 3000, 1000, 500) as u16;
 
     // PWM frequency → timer1_max_arr
     let timer1_max_arr = {
@@ -213,7 +221,9 @@ fn main() -> ! {
     // Dead-time override from driving_brake_strength
     let dead_time_override = {
         let mut dbs = main_state.config.driving_brake_strength;
-        if dbs == 0 || dbs > 9 { dbs = 10; }
+        if dbs == 0 || dbs > 9 {
+            dbs = 10;
+        }
         if dbs < 10 {
             let dto = BOARD.dead_time as u16 + (150 - dbs as u16 * 10);
             dto.min(200)
@@ -258,7 +268,11 @@ fn main() -> ! {
     // --- ADC + Telemetry (returned from init()) ---
 
     // --- Sine mode state ---
-    let mut sine_positions = rm32::sine::PhasePositions { a: 0, b: 120, c: 240 };
+    let mut sine_positions = rm32::sine::PhasePositions {
+        a: 0,
+        b: 120,
+        c: 240,
+    };
 
     // --- Enable global interrupts ---
     unsafe { cortex_m::interrupt::enable() };
@@ -268,7 +282,7 @@ fn main() -> ! {
     loop {
         // Sine mode: step phases when stepper_sine is active
         if shared.stepper_sine() {
-            use rm32::sine::{sine_step, SineStepResult};
+            use rm32::sine::{SineStepResult, sine_step};
             let (result, (ch1, ch2, ch3)) = sine_step(
                 &mut sine_positions,
                 shared.newinput(),
@@ -290,7 +304,10 @@ fn main() -> ! {
                 SineStepResult::Continue(delay_us) => {
                     sys.delay_micros(delay_us as u32);
                 }
-                SineStepResult::Changeover { commutation_interval, .. } => {
+                SineStepResult::Changeover {
+                    commutation_interval,
+                    ..
+                } => {
                     shared.transition(rm32::motor_mode::MotorEvent::ExitSine);
                     shared.set_commutation_interval(commutation_interval);
                     shared.set_zero_crosses(20);
@@ -318,7 +335,7 @@ fn main() -> ! {
             });
 
             if BOARD.has_led {
-                use rm32::ws2812::{send_status, LedStatus};
+                use rm32::ws2812::{LedStatus, send_status};
                 cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
             }
         }
@@ -327,8 +344,9 @@ fn main() -> ! {
         if BOARD.has_led {
             // Error LED on BEMF timeout (stuck rotor)
             if main_state.protection.bemf_timeout_happened > main_state.protection.bemf_timeout
-                && main_state.config.stuck_rotor_protection != 0 {
-                use rm32::ws2812::{send_status, LedStatus};
+                && main_state.config.stuck_rotor_protection != 0
+            {
+                use rm32::ws2812::{LedStatus, send_status};
                 cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Error));
             }
         }

@@ -37,23 +37,25 @@ struct IsrCell(core::cell::UnsafeCell<Option<TargetIsrState>>);
 unsafe impl Sync for IsrCell {}
 
 impl IsrCell {
-    const fn new() -> Self { Self(core::cell::UnsafeCell::new(None)) }
+    const fn new() -> Self {
+        Self(core::cell::UnsafeCell::new(None))
+    }
 
     /// Get or initialize the ISR state.
     /// If never initialized, enters emergency shutdown (all FETs off).
-    #[inline(always)]
+    #[inline]
     #[allow(clippy::mut_from_ref)]
     fn get(&self) -> &mut TargetIsrState {
         // SAFETY: Called only from ISR context at a single priority level.
         // No concurrent access possible (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };
-        opt.get_or_insert_with(|| {
-            match isr::take_isr_state() {
-                Some(s) => s,
-                None => {
-                    use rm32::hal::EmergencyOff;
-                    crate::emergency::G0AEmergencyOff::emergency_off();
-                    loop { cortex_m::asm::nop(); }
+        opt.get_or_insert_with(|| match isr::take_isr_state() {
+            Some(s) => s,
+            None => {
+                use rm32::hal::EmergencyOff;
+                crate::emergency::G0AEmergencyOff::emergency_off();
+                loop {
+                    cortex_m::asm::nop();
                 }
             }
         })
@@ -126,7 +128,6 @@ pub fn handle_dma_tc() {
 
     if shared.armed() && shared.dshot_telemetry() {
         if state.hal.input.is_output() {
-
             state.hal.input.receive_dshot_dma();
         } else {
             let gcr = state.hal.input.gcr_buffer();
@@ -142,9 +143,7 @@ pub fn handle_dma_tc() {
                     rm32::dshot::erpm_to_12bit(shared.e_com_time() as u16, shared.running())
                 }
             };
-            rm32::dshot::encode_gcr_frame(
-                value_12bit, gcr, 7, crate::config::GCR_SHIFT,
-            );
+            rm32::dshot::encode_gcr_frame(value_12bit, gcr, 7, crate::config::GCR_SHIFT);
 
             state.hal.input.send_dshot_dma();
         }
@@ -162,24 +161,47 @@ pub fn handle_exti_frame() {
 
     let mut zic = shared.zero_input_count();
     let actions = state.transfer.process(
-        buf, shared.input_set(), shared.dshot(), shared.servo_pwm(),
+        buf,
+        shared.input_set(),
+        shared.dshot(),
+        shared.servo_pwm(),
         shared.dshot_telemetry(),
-        shared.armed(), pin_high, shared.adjusted_input(), shared.newinput(),
-        state.config.bi_direction != 0, state.config.disable_stick_calibration != 0,
-        &mut zic, state.frametime_low, state.frametime_high,
+        shared.armed(),
+        pin_high,
+        shared.adjusted_input(),
+        shared.newinput(),
+        state.config.bi_direction != 0,
+        state.config.disable_stick_calibration != 0,
+        &mut zic,
+        state.frametime_low,
+        state.frametime_high,
     );
     shared.set_zero_input_count(zic);
 
-    if let Some(v) = actions.newinput { shared.set_newinput(v); }
-    if actions.send_telemetry { shared.set_send_telemetry(true); }
-    if actions.signal_timeout_reset { shared.set_signal_timeout(0); }
+    if let Some(v) = actions.newinput {
+        shared.set_newinput(v);
+    }
+    if actions.send_telemetry {
+        shared.set_send_telemetry(true);
+    }
+    if actions.signal_timeout_reset {
+        shared.set_signal_timeout(0);
+    }
     if actions.input_detected {
         shared.set_input_set(true);
-        if actions.input_is_dshot { shared.set_dshot(true); }
-        if actions.input_is_servo { shared.set_servo_pwm(true); }
+        if actions.input_is_dshot {
+            shared.set_dshot(true);
+        }
+        if actions.input_is_servo {
+            shared.set_servo_pwm(true);
+        }
     }
-    if let Some(fth) = actions.frametime_high { state.frametime_high = fth; }
-    if let Some(ftl) = actions.frametime_low { state.frametime_low = ftl; }
+    if let Some(fth) = actions.frametime_high {
+        state.frametime_high = fth;
+    }
+    if let Some(ftl) = actions.frametime_low {
+        state.frametime_low = ftl;
+    }
 
     // DShot command dispatch
     if actions.dshot_command > 0 {

@@ -37,12 +37,25 @@ pub trait AdcPeripheral {
     fn start_conversion(&self);
 }
 
-/// Temperature sensor calibration info (MCU-specific ROM addresses).
+/// Temperature sensor calibration values (read from ROM at init time).
 pub struct TempCalibration {
-    pub cal1_addr: u32,
-    pub cal2_addr: u32,
+    pub cal1_val: u16,
+    pub cal2_val: u16,
     pub cal1_temp: i32,
     pub cal2_temp: i32,
+}
+
+impl TempCalibration {
+    /// Read calibration values from ROM addresses. Unsafe: raw pointer dereference.
+    /// Call this once during init in the MCU layer.
+    pub unsafe fn from_rom(cal1_addr: u32, cal2_addr: u32, cal1_temp: i32, cal2_temp: i32) -> Self {
+        Self {
+            cal1_val: *(cal1_addr as *const u16),
+            cal2_val: *(cal2_addr as *const u16),
+            cal1_temp,
+            cal2_temp,
+        }
+    }
 }
 
 /// Generate ADC boilerplate: DMA buffer static, temp cal const, type alias, constructors.
@@ -56,19 +69,20 @@ macro_rules! define_adc_boilerplate {
     ) => {
         static ADC_DMA_BUF: $crate::dma_buf::DmaBuf<u16, 3> = $crate::dma_buf::DmaBuf::new();
 
-        const TEMP_CAL: $crate::adc_hal::TempCalibration = $crate::adc_hal::TempCalibration {
-            cal1_addr: $cal1, cal2_addr: $cal2,
-            cal1_temp: $ct1, cal2_temp: $ct2,
-        };
+        fn temp_cal() -> $crate::adc_hal::TempCalibration {
+            // SAFETY: Reading ROM calibration values at known addresses.
+            // This is the only place unsafe pointer dereference happens for temp cal.
+            unsafe { $crate::adc_hal::TempCalibration::from_rom($cal1, $cal2, $ct1, $ct2) }
+        }
 
         pub type $type_name = $crate::adc_generic::GenericAdc<$ops>;
 
         pub fn new_adc() -> $type_name {
-            $crate::adc_generic::GenericAdc::new($ops, &ADC_DMA_BUF, TEMP_CAL)
+            $crate::adc_generic::GenericAdc::new($ops, &ADC_DMA_BUF, temp_cal())
         }
 
         pub fn post_init() -> $type_name {
-            $crate::adc_generic::GenericAdc::post_init($ops, &ADC_DMA_BUF, TEMP_CAL)
+            $crate::adc_generic::GenericAdc::post_init($ops, &ADC_DMA_BUF, temp_cal())
         }
     };
 }

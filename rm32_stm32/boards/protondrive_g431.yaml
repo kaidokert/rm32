@@ -1,0 +1,10 @@
+name: "ProtonDrive"
+mcu: stm32g431
+dead_time: 80
+voltage_divider: 110
+millivolt_per_amp: 20
+current_offset: 0
+current_adc_channel: 5
+voltage_adc_channel: 13
+stall_protect_interval: 6500
+min_bemf_counts: 2

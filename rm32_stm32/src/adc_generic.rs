@@ -3,11 +3,11 @@
 //! MCU-specific register operations via `AdcPeripheral` trait.
 //! The init sequence is identical across all MCUs — only register writes differ.
 
-use rm32::hal::Adc;
-use rm32::units;
 use crate::adc_hal::{AdcPeripheral, TempCalibration};
 use crate::dma_buf::DmaBuf;
 use crate::regs::InitError;
+use rm32::hal::Adc;
+use rm32::units;
 
 /// Generic ADC reader parameterized over buffer size.
 /// N=3 for single-ADC (temp, voltage, current), N=2 for dual-ADC per-unit.
@@ -50,15 +50,21 @@ impl<A: AdcPeripheral> Adc for GenericAdc<A, 3> {
         self.ops.start_conversion();
     }
 
-    fn raw_current(&self) -> u16 { self.buf.read()[0] }
-    fn raw_voltage(&self) -> u16 { self.buf.read()[1] }
-    fn raw_temperature(&self) -> u16 { self.buf.read()[2] }
+    fn raw_current(&self) -> u16 {
+        self.buf.read()[0]
+    }
+    fn raw_voltage(&self) -> u16 {
+        self.buf.read()[1]
+    }
+    fn raw_temperature(&self) -> u16 {
+        self.buf.read()[2]
+    }
 
     fn calc_temperature(&self, raw: u16) -> units::DegreesCelsius {
-        units::calc_temperature_from_cal(
+        units::calc_temperature_pure(
             raw,
-            self.temp_cal.cal1_addr,
-            self.temp_cal.cal2_addr,
+            self.temp_cal.cal1_val,
+            self.temp_cal.cal2_val,
             self.temp_cal.cal1_temp,
             self.temp_cal.cal2_temp,
         )

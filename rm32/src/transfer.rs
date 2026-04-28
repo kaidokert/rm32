@@ -170,12 +170,16 @@ impl TransferState {
             } else if !disable_stick_cal {
                 *zero_input_count = 0;
                 if adjusted_input > crate::constants::CALIBRATION_MIN_THROTTLE {
-                    if get_abs_dif(adjusted_input as i32, self.last_input as i32) > crate::constants::CALIBRATION_MAX_JITTER {
+                    if get_abs_dif(adjusted_input as i32, self.last_input as i32)
+                        > crate::constants::CALIBRATION_MAX_JITTER
+                    {
                         self.enter_calibration_count = 0;
                     } else {
                         self.enter_calibration_count += 1;
                     }
-                    if self.enter_calibration_count > crate::constants::CALIBRATION_ENTRY_COUNT && !self.servo.high_calibration_set {
+                    if self.enter_calibration_count > crate::constants::CALIBRATION_ENTRY_COUNT
+                        && !self.servo.high_calibration_set
+                    {
                         actions.play_tone = 3; // beacon
                         self.servo.calibration_required = true;
                         self.enter_calibration_count = 0;

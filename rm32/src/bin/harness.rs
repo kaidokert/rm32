@@ -357,9 +357,15 @@ impl Harness {
             "dshot_telemetry" => self.state.input.dshot_telemetry = v != 0,
             "signaltimeout" => self.state.input.signal_timeout = v as u16,
             "cell_count" => self.state.cell_count = v as u8,
-            "battery_voltage" => self.state.measurements.battery_voltage = rm32::units::MilliVolts(v as u16),
-            "degrees_celsius" => self.state.measurements.degrees_celsius = rm32::units::DegreesCelsius(v as i16),
-            "actual_current" => self.state.measurements.actual_current = rm32::units::MilliAmps(v as i16),
+            "battery_voltage" => {
+                self.state.measurements.battery_voltage = rm32::units::MilliVolts(v as u16)
+            }
+            "degrees_celsius" => {
+                self.state.measurements.degrees_celsius = rm32::units::DegreesCelsius(v as i16)
+            }
+            "actual_current" => {
+                self.state.measurements.actual_current = rm32::units::MilliAmps(v as i16)
+            }
             "bemf_timeout_happened" => self.state.protection.bemf_timeout_happened = v as u8,
             "prop_brake_active" => self.state.prop_brake_active = v != 0,
             "stepper_sine" => self.state.stepper_sine = v != 0,

@@ -1,10 +1,12 @@
 //! G071 flash: method-style PAC, double-word programming, page-number erase.
 
-use crate::pac;
 use crate::flash::FlashPeripheral;
+use crate::pac;
 
 macro_rules! flash_reg {
-    () => { unsafe { &*pac::FLASH::PTR } };
+    () => {
+        unsafe { &*pac::FLASH::PTR }
+    };
 }
 
 pub struct G071Flash;
@@ -17,18 +19,34 @@ impl FlashPeripheral for G071Flash {
     const STRT_BIT: u32 = 1 << 16;
     const PAGE_SIZE: u32 = 0x800;
 
-    #[inline(always)]
-    unsafe fn read_sr() -> u32 { flash_reg!().sr().read().bits() }
-    #[inline(always)]
-    unsafe fn read_cr() -> u32 { flash_reg!().cr().read().bits() }
-    #[inline(always)]
-    unsafe fn write_keyr(val: u32) { flash_reg!().keyr().write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn write_sr(val: u32) { flash_reg!().sr().write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn write_cr(val: u32) { flash_reg!().cr().write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn modify_cr(f: impl FnOnce(u32) -> u32) {
+    #[inline]
+    fn read_sr() -> u32 {
+        flash_reg!().sr().read().bits()
+    }
+    #[inline]
+    fn read_cr() -> u32 {
+        flash_reg!().cr().read().bits()
+    }
+    #[inline]
+    fn write_keyr(val: u32) {
+        unsafe {
+            flash_reg!().keyr().write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn write_sr(val: u32) {
+        unsafe {
+            flash_reg!().sr().write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn write_cr(val: u32) {
+        unsafe {
+            flash_reg!().cr().write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn modify_cr(f: impl FnOnce(u32) -> u32) {
         let v = Self::read_cr();
         Self::write_cr(f(v));
     }
@@ -47,8 +65,16 @@ impl FlashPeripheral for G071Flash {
         while i < data.len() {
             let mut word_lo = 0u32;
             let mut word_hi = 0u32;
-            for b in 0..4 { if i + b < data.len() { word_lo |= (data[i + b] as u32) << (b * 8); } }
-            for b in 0..4 { if i + 4 + b < data.len() { word_hi |= (data[i + 4 + b] as u32) << (b * 8); } }
+            for b in 0..4 {
+                if i + b < data.len() {
+                    word_lo |= (data[i + b] as u32) << (b * 8);
+                }
+            }
+            for b in 0..4 {
+                if i + 4 + b < data.len() {
+                    word_hi |= (data[i + 4 + b] as u32) << (b * 8);
+                }
+            }
 
             unsafe {
                 Self::modify_cr(|v| v | Self::PG_BIT);
@@ -56,7 +82,9 @@ impl FlashPeripheral for G071Flash {
                 core::ptr::write_volatile((address + offset + 4) as *mut u32, word_hi);
             }
             Self::wait_bsy();
-            unsafe { Self::modify_cr(|v| v & !Self::PG_BIT); }
+            unsafe {
+                Self::modify_cr(|v| v & !Self::PG_BIT);
+            }
             offset += 8;
             i += 8;
         }

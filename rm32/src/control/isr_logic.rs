@@ -28,8 +28,12 @@ pub struct TickCounters {
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
 where
-    S: SharedComm, P: hal::PwmOutput, C: hal::Comparator,
-    Ph: hal::PhaseOutput, I: hal::IntervalTimer, T: hal::ComTimer,
+    S: SharedComm,
+    P: hal::PwmOutput,
+    C: hal::Comparator,
+    Ph: hal::PhaseOutput,
+    I: hal::IntervalTimer,
+    T: hal::ComTimer,
 {
     // Throttle → setpoint
     let newinput = ctx.shared.newinput();
@@ -58,7 +62,8 @@ where
             ctx.shared.set_duty_cycle_setpoint(0);
             if ctx.config.brake_on_stop == 2 {
                 ctx.phase.com_step(2);
-                let brake_duty = (ctx.config.active_brake_power as u32 * ctx.counters.tim1_arr as u32
+                let brake_duty = (ctx.config.active_brake_power as u32
+                    * ctx.counters.tim1_arr as u32
                     / DUTY_SCALE_MAX as u32)
                     * 10;
                 ctx.pwm.set_duty_all(brake_duty as u16);
@@ -116,8 +121,12 @@ where
 /// BEMF polling (old_routine path).
 fn bemf_polling<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
 where
-    S: SharedComm, P: hal::PwmOutput, C: hal::Comparator,
-    Ph: hal::PhaseOutput, I: hal::IntervalTimer, T: hal::ComTimer,
+    S: SharedComm,
+    P: hal::PwmOutput,
+    C: hal::Comparator,
+    Ph: hal::PhaseOutput,
+    I: hal::IntervalTimer,
+    T: hal::ComTimer,
 {
     ctx.comp.mask_interrupts();
     let comp_level = ctx.comp.output_level();
@@ -212,9 +221,11 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     com_timer: &mut T,
     comp: &mut C,
     phase: &mut Ph,
-)
-where
-    S: SharedComm, C: hal::Comparator, Ph: hal::PhaseOutput, T: hal::ComTimer,
+) where
+    S: SharedComm,
+    C: hal::Comparator,
+    Ph: hal::PhaseOutput,
+    T: hal::ComTimer,
 {
     com_timer.disable_interrupt();
     let step = commutation.advance();

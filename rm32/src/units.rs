@@ -108,19 +108,6 @@ pub fn calc_temperature_pure(
     DegreesCelsius(((cal2_temp - cal1_temp) * (raw as i32 - c1) / (c2 - c1) + cal1_temp) as i16)
 }
 
-/// Calculate temperature from raw ADC and ROM calibration addresses (hardware-only).
-pub fn calc_temperature_from_cal(
-    raw: u16,
-    cal1_addr: u32,
-    cal2_addr: u32,
-    cal1_temp: i32,
-    cal2_temp: i32,
-) -> DegreesCelsius {
-    let ts_cal1 = unsafe { *(cal1_addr as *const u16) };
-    let ts_cal2 = unsafe { *(cal2_addr as *const u16) };
-    calc_temperature_pure(raw, ts_cal1, ts_cal2, cal1_temp, cal2_temp)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

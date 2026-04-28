@@ -4,8 +4,8 @@
 //! Timing via cortex_m::asm::delay (cycle-counting busy wait).
 //! Generic over any OutputPin — works with HAL pins from any MCU.
 
-use rm32::ws2812::WS2812Pin;
 use embedded_hal::digital::OutputPin;
+use rm32::ws2812::WS2812Pin;
 
 pub struct Ws2812Gpio<P: OutputPin> {
     pin: P,
@@ -19,17 +19,17 @@ impl<P: OutputPin> Ws2812Gpio<P> {
 }
 
 impl<P: OutputPin> WS2812Pin for Ws2812Gpio<P> {
-    #[inline(always)]
+    #[inline]
     fn set_high(&mut self) {
         let _ = self.pin.set_high();
     }
 
-    #[inline(always)]
+    #[inline]
     fn set_low(&mut self) {
         let _ = self.pin.set_low();
     }
 
-    #[inline(always)]
+    #[inline]
     fn delay_ns(&mut self, ns: u32) {
         let cycles = (ns as u64 * self.cpu_mhz as u64 / 1000) as u32;
         cortex_m::asm::delay(cycles);

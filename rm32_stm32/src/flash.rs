@@ -18,19 +18,21 @@ pub trait FlashPeripheral {
     const STRT_BIT: u32;
     const PAGE_SIZE: u32;
 
-    unsafe fn read_sr() -> u32;
-    unsafe fn read_cr() -> u32;
-    unsafe fn write_keyr(val: u32);
-    unsafe fn write_sr(val: u32);
-    unsafe fn write_cr(val: u32);
-    unsafe fn modify_cr(f: impl FnOnce(u32) -> u32);
+    fn read_sr() -> u32;
+    fn read_cr() -> u32;
+    fn write_keyr(val: u32);
+    fn write_sr(val: u32);
+    fn write_cr(val: u32);
+    fn modify_cr(f: impl FnOnce(u32) -> u32);
 
     /// Wait for BSY flag to clear with timeout.
     fn wait_bsy() {
         let mut timeout = 500_000u32;
-        while unsafe { Self::read_sr() } & Self::BSY_BIT != 0 {
+        while Self::read_sr() & Self::BSY_BIT != 0 {
             timeout -= 1;
-            if timeout == 0 { break; }
+            if timeout == 0 {
+                break;
+            }
         }
     }
 
@@ -56,30 +58,31 @@ impl<F: FlashPeripheral> Default for FlashStorage<F> {
 
 impl<F: FlashPeripheral> FlashStorage<F> {
     pub fn new() -> Self {
-        Self { _ops: core::marker::PhantomData }
+        Self {
+            _ops: core::marker::PhantomData,
+        }
     }
 
     fn unlock(&self) {
         F::wait_bsy();
-        if unsafe { F::read_cr() } & F::LOCK_BIT != 0 {
-            unsafe {
-                F::write_keyr(FLASH_KEY1);
-                F::write_keyr(FLASH_KEY2);
-            }
+        if F::read_cr() & F::LOCK_BIT != 0 {
+            F::write_keyr(FLASH_KEY1);
+            F::write_keyr(FLASH_KEY2);
         }
     }
 
     fn lock(&self) {
-        unsafe { F::modify_cr(|v| v | F::LOCK_BIT); }
+        F::modify_cr(|v| v | F::LOCK_BIT);
     }
 
     fn erase_page(&self, address: u32) {
         F::erase_page_impl(address, F::PAGE_SIZE);
         F::wait_bsy();
-        if unsafe { F::read_sr() } & (1 << 5) != 0 { // EOP
-            unsafe { F::write_sr(1 << 5); }
+        if F::read_sr() & (1 << 5) != 0 {
+            // EOP
+            F::write_sr(1 << 5);
         }
-        unsafe { F::modify_cr(|v| v & !F::PER_BIT); }
+        F::modify_cr(|v| v & !F::PER_BIT);
     }
 }
 
@@ -103,4 +106,3 @@ impl<F: FlashPeripheral> Flash for FlashStorage<F> {
         self.lock();
     }
 }
-

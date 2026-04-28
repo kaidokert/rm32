@@ -8,10 +8,10 @@
 //!   Phase B: high=PA9,  low=PB0
 //!   Phase C: high=PA8,  low=PA7
 
-use core::marker::PhantomData;
-use rm32::hal::PhaseOutput;
 use crate::gpio_pin::GpioPin;
 use crate::gpio_regs::GpioPort;
+use core::marker::PhantomData;
+use rm32::hal::PhaseOutput;
 
 /// GPIO MODER values.
 const MODE_OUTPUT: u32 = 0b01;
@@ -25,7 +25,8 @@ type PulseToggleFn = fn(u32);
 ///
 /// AH/AL = Phase A high/low, BH/BL = Phase B, CH/CL = Phase C.
 /// After monomorphization, all port/pin constants are inlined — zero overhead.
-pub struct PhaseDriver<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin> {
+pub struct PhaseDriver<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin>
+{
     comp_pwm: bool,
     /// PWM/enable bridge mode: low-side pins are enable (output high/low)
     /// instead of complementary PWM (alternate mode).
@@ -39,11 +40,21 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
     pub fn new(comp_pwm: bool) -> Self {
-        Self { comp_pwm, bridge_enable: false, pulse: None, _pins: PhantomData }
+        Self {
+            comp_pwm,
+            bridge_enable: false,
+            pulse: None,
+            _pins: PhantomData,
+        }
     }
 
     pub fn new_bridge(comp_pwm: bool) -> Self {
-        Self { comp_pwm, bridge_enable: true, pulse: None, _pins: PhantomData }
+        Self {
+            comp_pwm,
+            bridge_enable: true,
+            pulse: None,
+            _pins: PhantomData,
+        }
     }
 
     /// Enable RPM pulse output on the given pin.
@@ -62,7 +73,7 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     ///
     /// Normal: low-side alternate (comp_pwm) or output LOW.
     /// Bridge: enable pin output HIGH (comp_pwm) or no-op.
-    #[inline(always)]
+    #[inline]
     fn phase_pwm<H: GpioPin, L: GpioPin>(&self) {
         if self.bridge_enable {
             if self.comp_pwm {
@@ -79,7 +90,7 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     }
 
     /// Phase LOW: low-side/enable on, high-side/PWM off.
-    #[inline(always)]
+    #[inline]
     fn phase_low<H: GpioPin, L: GpioPin>() {
         L::set_mode(MODE_OUTPUT);
         L::set_high();
@@ -88,7 +99,7 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     }
 
     /// Phase FLOAT: both FETs off / enable off.
-    #[inline(always)]
+    #[inline]
     fn phase_float<H: GpioPin, L: GpioPin>() {
         L::set_mode(MODE_OUTPUT);
         L::set_low();
@@ -97,17 +108,41 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     }
 }
 
-impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin>
-    PhaseOutput for PhaseDriver<AH, AL, BH, BL, CH, CL>
+impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin> PhaseOutput
+    for PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
     fn com_step(&mut self, step: u8) {
         match step {
-            1 => { Self::phase_float::<CH, CL>(); Self::phase_low::<BH, BL>(); self.phase_pwm::<AH, AL>(); }
-            2 => { Self::phase_float::<AH, AL>(); Self::phase_low::<BH, BL>(); self.phase_pwm::<CH, CL>(); }
-            3 => { Self::phase_float::<BH, BL>(); Self::phase_low::<AH, AL>(); self.phase_pwm::<CH, CL>(); }
-            4 => { Self::phase_float::<CH, CL>(); Self::phase_low::<AH, AL>(); self.phase_pwm::<BH, BL>(); }
-            5 => { Self::phase_float::<AH, AL>(); Self::phase_low::<CH, CL>(); self.phase_pwm::<BH, BL>(); }
-            6 => { Self::phase_float::<BH, BL>(); Self::phase_low::<CH, CL>(); self.phase_pwm::<AH, AL>(); }
+            1 => {
+                Self::phase_float::<CH, CL>();
+                Self::phase_low::<BH, BL>();
+                self.phase_pwm::<AH, AL>();
+            }
+            2 => {
+                Self::phase_float::<AH, AL>();
+                Self::phase_low::<BH, BL>();
+                self.phase_pwm::<CH, CL>();
+            }
+            3 => {
+                Self::phase_float::<BH, BL>();
+                Self::phase_low::<AH, AL>();
+                self.phase_pwm::<CH, CL>();
+            }
+            4 => {
+                Self::phase_float::<CH, CL>();
+                Self::phase_low::<AH, AL>();
+                self.phase_pwm::<BH, BL>();
+            }
+            5 => {
+                Self::phase_float::<AH, AL>();
+                Self::phase_low::<CH, CL>();
+                self.phase_pwm::<BH, BL>();
+            }
+            6 => {
+                Self::phase_float::<BH, BL>();
+                Self::phase_low::<CH, CL>();
+                self.phase_pwm::<AH, AL>();
+            }
             _ => {}
         }
     }
@@ -134,9 +169,12 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
         if self.bridge_enable {
             return; // not supported on PWM/enable bridge boards
         }
-        AH::set_mode(MODE_OUTPUT); AH::set_low();
-        BH::set_mode(MODE_OUTPUT); BH::set_low();
-        CH::set_mode(MODE_OUTPUT); CH::set_low();
+        AH::set_mode(MODE_OUTPUT);
+        AH::set_low();
+        BH::set_mode(MODE_OUTPUT);
+        BH::set_low();
+        CH::set_mode(MODE_OUTPUT);
+        CH::set_low();
         AL::set_mode(MODE_ALTERNATE);
         BL::set_mode(MODE_ALTERNATE);
         CL::set_mode(MODE_ALTERNATE);

@@ -127,39 +127,72 @@ mod tests {
 
     #[test]
     fn transition_arm_from_disarmed() {
-        assert_eq!(MotorMode::Disarmed.transition(MotorEvent::Arm), MotorMode::Armed);
+        assert_eq!(
+            MotorMode::Disarmed.transition(MotorEvent::Arm),
+            MotorMode::Armed
+        );
     }
 
     #[test]
     fn transition_arm_ignored_when_armed() {
-        assert_eq!(MotorMode::Armed.transition(MotorEvent::Arm), MotorMode::Armed);
+        assert_eq!(
+            MotorMode::Armed.transition(MotorEvent::Arm),
+            MotorMode::Armed
+        );
     }
 
     #[test]
     fn transition_disarm_from_any() {
-        assert_eq!(MotorMode::Running.transition(MotorEvent::Disarm), MotorMode::Disarmed);
-        assert_eq!(MotorMode::Armed.transition(MotorEvent::Disarm), MotorMode::Disarmed);
-        assert_eq!(MotorMode::StepperSine.transition(MotorEvent::Disarm), MotorMode::Disarmed);
+        assert_eq!(
+            MotorMode::Running.transition(MotorEvent::Disarm),
+            MotorMode::Disarmed
+        );
+        assert_eq!(
+            MotorMode::Armed.transition(MotorEvent::Disarm),
+            MotorMode::Disarmed
+        );
+        assert_eq!(
+            MotorMode::StepperSine.transition(MotorEvent::Disarm),
+            MotorMode::Disarmed
+        );
     }
 
     #[test]
     fn transition_start_motor() {
-        assert_eq!(MotorMode::Armed.transition(MotorEvent::StartMotor), MotorMode::OldRoutine);
+        assert_eq!(
+            MotorMode::Armed.transition(MotorEvent::StartMotor),
+            MotorMode::OldRoutine
+        );
         // Can't start from Disarmed
-        assert_eq!(MotorMode::Disarmed.transition(MotorEvent::StartMotor), MotorMode::Disarmed);
+        assert_eq!(
+            MotorMode::Disarmed.transition(MotorEvent::StartMotor),
+            MotorMode::Disarmed
+        );
     }
 
     #[test]
     fn transition_stop_motor() {
-        assert_eq!(MotorMode::Running.transition(MotorEvent::StopMotor), MotorMode::Armed);
-        assert_eq!(MotorMode::OldRoutine.transition(MotorEvent::StopMotor), MotorMode::Armed);
+        assert_eq!(
+            MotorMode::Running.transition(MotorEvent::StopMotor),
+            MotorMode::Armed
+        );
+        assert_eq!(
+            MotorMode::OldRoutine.transition(MotorEvent::StopMotor),
+            MotorMode::Armed
+        );
     }
 
     #[test]
     fn transition_bemf_locked() {
-        assert_eq!(MotorMode::OldRoutine.transition(MotorEvent::BemfLocked), MotorMode::Running);
+        assert_eq!(
+            MotorMode::OldRoutine.transition(MotorEvent::BemfLocked),
+            MotorMode::Running
+        );
         // Not from Running
-        assert_eq!(MotorMode::Running.transition(MotorEvent::BemfLocked), MotorMode::Running);
+        assert_eq!(
+            MotorMode::Running.transition(MotorEvent::BemfLocked),
+            MotorMode::Running
+        );
     }
 
     #[test]
@@ -172,7 +205,10 @@ mod tests {
 
     #[test]
     fn transition_desync_fallback() {
-        assert_eq!(MotorMode::Running.transition(MotorEvent::DesyncFallback), MotorMode::OldRoutine);
+        assert_eq!(
+            MotorMode::Running.transition(MotorEvent::DesyncFallback),
+            MotorMode::OldRoutine
+        );
     }
 
     #[test]

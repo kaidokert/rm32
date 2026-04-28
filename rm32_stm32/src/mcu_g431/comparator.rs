@@ -1,5 +1,5 @@
-use crate::comparator::BemfComparator;
 use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
+use crate::comparator::BemfComparator;
 use crate::pac::{COMP, EXTI};
 
 const LINE_21: u32 = 1 << 21;
@@ -11,14 +11,28 @@ const LINE_22: u32 = 1 << 22;
 // Single-core Cortex-M guarantees no concurrent access.
 static mut ACTIVE_IS_COMP2: bool = true;
 
-macro_rules! comp { () => { unsafe { &*COMP::PTR } } }
-macro_rules! exti { () => { unsafe { &*EXTI::PTR } } }
-#[inline(always)]
-fn active_line() -> u32 { unsafe { if ACTIVE_IS_COMP2 { LINE_22 } else { LINE_21 } } }
+macro_rules! comp {
+    () => {
+        unsafe { &*COMP::PTR }
+    };
+}
+macro_rules! exti {
+    () => {
+        unsafe { &*EXTI::PTR }
+    };
+}
+#[inline]
+fn active_line() -> u32 {
+    unsafe { if ACTIVE_IS_COMP2 { LINE_22 } else { LINE_21 } }
+}
 
 /// G431 dual-comparator. Tracks active comp per commutation step.
 pub struct G431Comp;
-impl G431Comp { pub fn new() -> Self { Self } }
+impl G431Comp {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 impl CompOps for G431Comp {
     fn output(&self) -> bool {
@@ -40,11 +54,15 @@ impl CompOps for G431Comp {
             if is_comp2 {
                 let v = comp!().c2csr().read().bits();
                 let cleared = v & !(0b111 << 4 | 0b11 << 2);
-                comp!().c2csr().write(|w| w.bits(cleared | config | (1 << 0)));
+                comp!()
+                    .c2csr()
+                    .write(|w| w.bits(cleared | config | (1 << 0)));
             } else {
                 let v = comp!().c1csr().read().bits();
                 let cleared = v & !(0b111 << 4 | 0b11 << 2);
-                comp!().c1csr().write(|w| w.bits(cleared | config | (1 << 0)));
+                comp!()
+                    .c1csr()
+                    .write(|w| w.bits(cleared | config | (1 << 0)));
             }
         }
     }
@@ -52,13 +70,19 @@ impl CompOps for G431Comp {
 
 /// G431 EXTI — manages both lines 21 and 22.
 pub struct G431Exti;
-impl G431Exti { pub fn new() -> Self { Self } }
+impl G431Exti {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 impl ExtiOps for G431Exti {
     fn set_rising_edge(&self) {
         let line = active_line();
         unsafe {
-            exti!().rtsr1().modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
+            exti!()
+                .rtsr1()
+                .modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
             exti!().ftsr1().modify(|r, w| w.bits(r.bits() | line));
         }
     }
@@ -66,15 +90,23 @@ impl ExtiOps for G431Exti {
         let line = active_line();
         unsafe {
             exti!().rtsr1().modify(|r, w| w.bits(r.bits() | line));
-            exti!().ftsr1().modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
+            exti!()
+                .ftsr1()
+                .modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
         }
     }
     fn enable_interrupt(&self) {
-        unsafe { exti!().imr1().modify(|r, w| w.bits(r.bits() | active_line())); }
+        unsafe {
+            exti!()
+                .imr1()
+                .modify(|r, w| w.bits(r.bits() | active_line()));
+        }
     }
     fn mask_and_clear(&self) {
         unsafe {
-            exti!().imr1().modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
+            exti!()
+                .imr1()
+                .modify(|r, w| w.bits(r.bits() & !(LINE_21 | LINE_22)));
             exti!().pr1().write(|w| w.bits(LINE_21 | LINE_22));
         }
     }

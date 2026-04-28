@@ -1,0 +1,12 @@
+name: "G071 64kESC"
+mcu: stm32g071
+dead_time: 60
+voltage_divider: 110
+millivolt_per_amp: 20
+current_offset: 0
+current_adc_channel: 4
+voltage_adc_channel: 6
+stall_protect_interval: 6500
+min_bemf_counts: 2
+has_led: true
+led_pin: 8

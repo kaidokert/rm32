@@ -1,17 +1,23 @@
 //! F051 flash: field-style PAC, half-word programming, address-register erase.
 
-use crate::pac;
 use crate::flash::FlashPeripheral;
+use crate::pac;
 
 macro_rules! flash_reg {
-    () => { unsafe { &*pac::FLASH::PTR } };
+    () => {
+        unsafe { &*pac::FLASH::PTR }
+    };
 }
 
 pub struct F051Flash;
 
 impl F051Flash {
-    #[inline(always)]
-    unsafe fn write_ar(val: u32) { flash_reg!().ar.write(|w| w.bits(val)); }
+    #[inline]
+    fn write_ar(val: u32) {
+        unsafe {
+            flash_reg!().ar.write(|w| w.bits(val));
+        }
+    }
 }
 
 impl FlashPeripheral for F051Flash {
@@ -22,18 +28,34 @@ impl FlashPeripheral for F051Flash {
     const STRT_BIT: u32 = 1 << 6;
     const PAGE_SIZE: u32 = 0x400;
 
-    #[inline(always)]
-    unsafe fn read_sr() -> u32 { flash_reg!().sr.read().bits() }
-    #[inline(always)]
-    unsafe fn read_cr() -> u32 { flash_reg!().cr.read().bits() }
-    #[inline(always)]
-    unsafe fn write_keyr(val: u32) { flash_reg!().keyr.write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn write_sr(val: u32) { flash_reg!().sr.write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn write_cr(val: u32) { flash_reg!().cr.write(|w| w.bits(val)); }
-    #[inline(always)]
-    unsafe fn modify_cr(f: impl FnOnce(u32) -> u32) {
+    #[inline]
+    fn read_sr() -> u32 {
+        flash_reg!().sr.read().bits()
+    }
+    #[inline]
+    fn read_cr() -> u32 {
+        flash_reg!().cr.read().bits()
+    }
+    #[inline]
+    fn write_keyr(val: u32) {
+        unsafe {
+            flash_reg!().keyr.write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn write_sr(val: u32) {
+        unsafe {
+            flash_reg!().sr.write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn write_cr(val: u32) {
+        unsafe {
+            flash_reg!().cr.write(|w| w.bits(val));
+        }
+    }
+    #[inline]
+    fn modify_cr(f: impl FnOnce(u32) -> u32) {
         let v = Self::read_cr();
         Self::write_cr(f(v));
     }
@@ -61,7 +83,9 @@ impl FlashPeripheral for F051Flash {
                 core::ptr::write_volatile((address + offset) as *mut u16, hw);
             }
             Self::wait_bsy();
-            unsafe { Self::modify_cr(|v| v & !Self::PG_BIT); }
+            unsafe {
+                Self::modify_cr(|v| v & !Self::PG_BIT);
+            }
             offset += 2;
             i += 2;
         }
