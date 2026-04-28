@@ -122,9 +122,7 @@ pub fn init(
     }
 
     // EXTI line 15 (software-triggered by DMA TC)
-    unsafe {
-        exti.imr1().modify(|_, w| w.im15().set_bit());
-    }
+    exti.imr1().modify(|_, w| w.im15().set_bit());
 
     let sys = super::system::System::new();
     let hal = crate::isr::TargetIsrHal {

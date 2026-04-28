@@ -1,0 +1,48 @@
+# Extended DShot commands: save, EDT, programming mode
+# Lights up: more branches in computeDshotDMA command switch
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+EDT_ARM_ENABLE=1
+throttle=-1
+
+@sequence
+# Command 13 (enable extended telemetry + EDT arm): 6 reps
+tick 1  | dshot_frame=13 |
+tick 1  | dshot_frame=13 |
+tick 1  | dshot_frame=13 |
+tick 1  | dshot_frame=13 |
+tick 1  | dshot_frame=13 |
+tick 1  | dshot_frame=13 |
+
+# Command 14 (disable extended telemetry): 6 reps
+tick 1  | dshot_frame=14 |
+tick 1  | dshot_frame=14 |
+tick 1  | dshot_frame=14 |
+tick 1  | dshot_frame=14 |
+tick 1  | dshot_frame=14 |
+tick 1  | dshot_frame=14 |
+
+# Command 12 (save settings): 6 reps
+tick 1  | dshot_frame=12 |
+tick 1  | dshot_frame=12 |
+tick 1  | dshot_frame=12 |
+tick 1  | dshot_frame=12 |
+tick 1  | dshot_frame=12 |
+tick 1  | dshot_frame=12 |
+
+# Command 36 (enter programming mode): 6 reps
+tick 1  | dshot_frame=36 |
+tick 1  | dshot_frame=36 |
+tick 1  | dshot_frame=36 |
+tick 1  | dshot_frame=36 |
+tick 1  | dshot_frame=36 |
+tick 1  | dshot_frame=36 |
+
+# Programming sequence: position=5, value=200, commit=37
+tick 1  | dshot_frame=5   |
+tick 1  | dshot_frame=200 |
+tick 1  | dshot_frame=37  |

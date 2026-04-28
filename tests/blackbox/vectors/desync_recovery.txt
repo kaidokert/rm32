@@ -1,0 +1,24 @@
+# Desync recovery — zero_crosses reset, old_routine set, running cleared
+# Desync triggers when: desync_check=1 AND zero_crosses>10 AND
+#   abs(last_average_interval - average_interval) > average_interval/2 AND
+#   average_interval < 2000
+#
+# We pre-set the conditions directly since the harness can't easily drive
+# the ISR commutation path that normally sets these values.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+running=1
+old_routine=0
+zero_crosses=150
+commutation_interval=600
+desync_check=1
+last_average_interval=1000
+average_interval=400
+
+@sequence
+# Tick should trigger desync: abs(1000 - 400) = 600 > 400/2 = 200, and 400 < 2000
+# Result: zero_crosses=0, old_routine=1, running=0 (input>47 and !bi_direction)
+tick 1 | throttle=500 | zero_crosses=0 old_routine=1

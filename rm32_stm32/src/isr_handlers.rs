@@ -216,6 +216,9 @@ pub fn handle_exti_frame() {
             _ => {}
         }
 
+        // Sync direction to shared (commands may flip forward)
+        shared.set_forward(state.forward);
+
         // Propagate EDT init/deinit flags from CommandProcessor to scheduler
         if state.cmd.send_edt_init {
             state.cmd.send_edt_init = false;

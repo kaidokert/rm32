@@ -1,0 +1,21 @@
+# Variable PWM mode 1
+# Verify: tim1_arr varies with commutation_interval
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+eeprom.variable_pwm=1
+
+@sequence
+# Fast commutation: tim1_arr should be lower
+config commutation_interval=100
+tick 1  | throttle=1000 | pwm_arr>0
+
+# Slow commutation: tim1_arr should be higher
+config commutation_interval=200
+tick 1  | throttle=1000 | pwm_arr>0

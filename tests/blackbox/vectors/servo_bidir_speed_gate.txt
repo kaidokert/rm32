@@ -1,0 +1,22 @@
+# Servo bidir: reversal blocked at high RPM (speed gate)
+# Covers: motor idles when reversal not allowed (low commutation_interval)
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=0
+servoPwm=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=0
+eeprom.servo_dead_band=100
+running=1
+old_routine=0
+forward=1
+commutation_interval=500
+
+@sequence
+# Reverse requested but motor spinning too fast (ci=500 < threshold=1500)
+# C behavior: newinput forced to center, adjusted=0, no direction flip
+tick 1  | throttle=500  | forward=1 adjusted_input=0

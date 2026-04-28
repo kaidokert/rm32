@@ -6,10 +6,6 @@
 
 use rm32::hal::System;
 
-use crate::mcu::BemfComp;
-use crate::phase::G0APhaseDriver;
-use crate::timer::{Tim2Interval, Tim14Com};
-
 /// Result of MCU initialization — everything main.rs needs, zero cfg.
 pub struct InitResult<SYS, ADC, TELEM>
 where

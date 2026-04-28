@@ -16,18 +16,16 @@ pub struct L431AdcOps;
 impl AdcPeripheral for L431AdcOps {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*RCC::ptr() };
-        unsafe {
-            rcc.ahb2enr
-                .modify(|_, w| w.adcen().set_bit().gpioaen().set_bit());
-            rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
-        }
+        rcc.ahb2enr
+            .modify(|_, w| w.adcen().set_bit().gpioaen().set_bit());
+        rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
     }
 
     fn configure_pins(&self) {
         let gpioa = unsafe { &*GPIOA::ptr() };
         gpioa
             .moder
-            .modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
+            .modify(|_, w| w.moder3().bits(0b11).moder6().bits(0b11));
     }
 
     fn configure_clock_source(&self) {

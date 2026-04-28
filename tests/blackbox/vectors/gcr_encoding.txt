@@ -1,0 +1,36 @@
+# GCR/NRZI encoding test vectors for bidirectional DShot telemetry.
+# Exercises: make_dshot_package() -> eRPM shift encoding + checksum + GCR RLL + NRZI
+# REQ-TELEM-GCR_ENCODING, REQ-TELEM-NRZI_ENCODING, REQ-TELEM-BIDIR_CHECKSUM
+#
+# Harness is compiled with MCU_F051 (gcr_shift=6, multiplier=64).
+# The gcr_encode command sets running=1 internally via config.
+
+@config
+running=1
+armed=1
+
+@sequence
+# --- eRPM encoding with various commutation times ---
+# Small com_time (high RPM): shift_amount=0, raw 12-bit value
+gcr_encode 500     | | gcr=0,0,0,0,0,0,0,0,64,0,64,64,0,64,64,0,64,0,64,0,64,0,0,64,0,0,64,64,0,0,0,0,0,0,0,0,0 shift=0 dshot_full=8005
+
+# Medium com_time: shift_amount=1
+gcr_encode 1000    | | gcr=0,0,0,0,0,0,0,0,64,0,0,0,64,0,0,64,0,64,0,64,0,64,64,0,64,64,0,64,0,0,0,0,0,0,0,0,0 shift=1 dshot_full=16199
+
+# Max com_time (not running equivalent): shift_amount=7
+gcr_encode 65535   | | gcr=0,0,0,0,0,0,0,0,64,64,0,64,0,64,64,0,64,0,64,64,0,64,0,64,0,64,64,64,0,0,0,0,0,0,0,0,0 shift=7 dshot_full=65520
+
+# Very small com_time: shift_amount=0
+gcr_encode 100     | | gcr=0,0,0,0,0,0,0,0,64,0,64,64,64,0,64,64,0,64,64,0,64,0,0,64,64,0,64,64,0,0,0,0,0,0,0,0,0 shift=0 dshot_full=1613
+
+# Large com_time: shift_amount=6
+gcr_encode 30000   | | gcr=0,0,0,0,0,0,0,0,64,64,0,64,64,0,0,64,0,0,64,0,64,0,0,64,64,0,0,64,0,0,0,0,0,0,0,0,0 shift=6 dshot_full=56651
+
+# Moderate com_time: shift_amount=0
+gcr_encode 200     | | gcr=0,0,0,0,0,0,0,0,64,0,64,64,64,0,64,0,64,0,0,64,0,0,64,64,64,0,0,64,0,0,0,0,0,0,0,0,0 shift=0 dshot_full=3211
+
+# Medium-high com_time: shift_amount=5
+gcr_encode 10000   | | gcr=0,0,0,0,0,0,0,0,64,64,0,0,64,0,64,64,64,0,64,0,64,64,0,0,0,64,0,64,0,0,0,0,0,0,0,0,0 shift=5 dshot_full=45967
+
+# Minimal com_time=1: shift_amount=0, near-zero eRPM
+gcr_encode 1       | | gcr=0,0,0,0,0,0,0,0,64,0,64,64,64,0,64,0,0,0,64,0,64,64,0,64,64,0,64,0,0,0,0,0,0,0,0,0,0 shift=0 dshot_full=30

@@ -1,0 +1,19 @@
+# LVC threshold test
+# Verify: sustained low voltage (low_voltage_count > 10000) disarms motor.
+# Pre-set low_voltage_count near threshold, let it accumulate over ~10 ticks.
+# battery_voltage defaults to 0 which is < cell_count * low_cell_volt_cutoff.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+eeprom.low_voltage_cut_off=1
+cell_count=3
+
+@sequence
+# Verify still armed initially
+tick 1 | throttle=500 | armed=1
+
+# Pre-set just below threshold and let it accumulate
+config low_voltage_count=9999
+ticks 100 | throttle=500 | armed=0

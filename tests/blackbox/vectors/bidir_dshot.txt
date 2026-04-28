@@ -1,0 +1,30 @@
+# Bidirectional DShot throttle
+# Verify: DShot values >1047 = forward, 48-1047 = reverse, <48 = zero
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+throttle=-1
+eeprom.bi_direction=1
+
+@sequence
+# Forward: throttle > 1047 maps to adjusted_input
+# adjusted_input = ((1200 - 1048) * 2 + 47) - 1 = 350
+tick 1  | dshot_frame=1200 | adjusted_input=350
+
+# Reverse: throttle 48-1047 maps to adjusted_input
+# adjusted_input = ((500 - 48) * 2 + 47) - 1 = 950
+tick 1  | dshot_frame=500  | adjusted_input=950
+
+# Zero: throttle < 48
+tick 1  | dshot_frame=10   | adjusted_input=0
+
+# Full forward
+# adjusted_input = ((2047 - 1048) * 2 + 47) - 1 = 2044
+tick 1  | dshot_frame=2047 | adjusted_input=2044
+
+# Minimum forward
+# adjusted_input = ((1048 - 1048) * 2 + 47) - 1 = 46
+tick 1  | dshot_frame=1048 | adjusted_input=46

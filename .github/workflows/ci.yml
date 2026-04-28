@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Formatting, linting, yaml/toml checks ───────────────────────
+  pre-commit:
+    name: Pre-commit checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: thumbv6m-none-eabi, thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      - uses: pre-commit/action@v3.0.1
+
+  # ── Unit tests (rm32 core crate, host) ──────────────────────────
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test -p rm32 --verbose
+
+  # ── Cross-build all 4 MCU firmware targets ──────────────────────
+  firmware:
+    name: Firmware (${{ matrix.mcu }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mcu: stm32g071
+            target: thumbv6m-none-eabi
+          - mcu: stm32f051
+            target: thumbv6m-none-eabi
+          - mcu: stm32l431
+            target: thumbv7em-none-eabihf
+          - mcu: stm32g431
+            target: thumbv7em-none-eabihf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.mcu }}
+      - name: Build firmware
+        run: >
+          cargo build
+          --manifest-path=rm32_stm32/Cargo.toml
+          --release
+          --features ${{ matrix.mcu }}
+          --no-default-features
+          --target ${{ matrix.target }}
+
+  # ── Blackbox tests (Rust harness + test vectors) ────────────────
+  blackbox:
+    name: Blackbox tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        run: pip install pytest
+      - name: Build Rust harness
+        run: cargo build --release -p rm32 --bin rm32_harness
+      - name: Run blackbox tests
+        env:
+          AM32_HARNESS: target/release/rm32_harness
+        run: python -m pytest tests/blackbox/test_vectors.py -v

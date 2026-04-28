@@ -1,0 +1,45 @@
+# Desync detection and recovery
+# Covers: main_loop desync check, zero_crosses reset, running=0, old_routine=1
+#
+# Desync triggers when:
+#   desync_check=1 AND zero_crosses>10 AND
+#   getAbsDif(last_average_interval, average_interval) > average_interval>>1 AND
+#   average_interval < 2000
+#
+# Strategy: inject ZC events so commutation_interval gets averaged down by
+# PeriodElapsedCallback (since TIM2 only advances 1/tick). After step wrap at
+# ZC 12, desync_check=1 fires with zero_crosses>10 and the interval has
+# changed enough from the initial value to trigger desync.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=1
+zero_crosses=0
+commutation_interval=600
+
+@sequence
+# Inject 12 ZCs: after step wrap at ZC 6, desync_check=1 fires but
+# zero_crosses=6 < 10 so it passes harmlessly. At ZC 12, step wraps again,
+# desync_check=1 with zero_crosses=12 > 10. By now average_interval has
+# drifted significantly from last_average_interval, triggering desync.
+
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+
+# Desync should have fired: zero_crosses reset, old_routine=1
+# running=0 (because input>47 and !bi_direction, OR commutation_interval>1000)
+tick 1  | throttle=500 | zero_crosses<=2 old_routine=1

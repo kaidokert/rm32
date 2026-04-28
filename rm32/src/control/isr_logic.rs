@@ -27,14 +27,17 @@ pub struct TickCounters {
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    // Sync direction from shared (main loop may flip for bidirectional)
+    ctx.commutation.forward = ctx.shared.forward();
+
     // Throttle → setpoint
-    let newinput = ctx.shared.newinput();
-    ctx.shared.set_adjusted_input(newinput);
+    // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
+    let input = ctx.shared.adjusted_input();
     if ctx.shared.armed() && !ctx.shared.stepper_sine() {
-        if newinput >= THROTTLE_MIN_SIGNAL {
+        if input >= THROTTLE_MIN_SIGNAL {
             let min_duty = ctx.duty.minimum;
             let setpoint = map(
-                newinput as i32,
+                input as i32,
                 THROTTLE_MIN_SIGNAL as i32,
                 DSHOT_MAX_THROTTLE as i32,
                 min_duty as i32,
@@ -98,6 +101,28 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.duty.cycle = ctx.duty.cycle.saturating_add(stall_boost);
     }
 
+    // Sync main→ISR published state (main computes, ISR applies)
+    ctx.counters.tim1_arr = ctx.shared.tim1_arr();
+    ctx.duty.maximum = ctx.shared.duty_maximum();
+    ctx.bemf.filter_level = ctx.shared.filter_level();
+    let auto_adv = ctx.shared.auto_advance();
+    if auto_adv > 0 {
+        ctx.bemf.temp_advance = auto_adv;
+    }
+    let min_counts = ctx.shared.min_bemf_counts();
+    ctx.bemf.min_counts_up = min_counts;
+    ctx.bemf.min_counts_down = min_counts;
+
+    // Enforce duty ceiling (eRPM/temperature protection)
+    if ctx.duty.cycle > ctx.duty.maximum {
+        ctx.duty.cycle = ctx.duty.maximum;
+    }
+    // Current limit PID ceiling
+    let current_limit = ctx.shared.current_limit_adjust();
+    if ctx.duty.cycle > current_limit {
+        ctx.duty.cycle = current_limit;
+    }
+
     // PWM output
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
@@ -107,7 +132,13 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.pwm().set_duty_all(0);
     }
     ctx.duty.last = ctx.duty.cycle;
+    ctx.shared.set_duty_cycle(ctx.duty.cycle);
     ctx.hal.pwm().set_auto_reload(tim1_arr);
+
+    // Sync ISR→shared (Commutation owns truth, shared publishes for main loop)
+    ctx.shared.set_forward(ctx.commutation.forward);
+    ctx.shared
+        .set_interval_timer_count(ctx.hal.interval().count());
 }
 
 /// BEMF polling (old_routine path).

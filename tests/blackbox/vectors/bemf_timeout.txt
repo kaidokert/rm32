@@ -1,0 +1,17 @@
+# BEMF timeout / stuck rotor protection
+# Verify: stuck rotor protection cuts throttle when bemf_timeout_happened exceeds threshold
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.stuck_rotor_protection=1
+
+@sequence
+# Normal operation: no timeout
+tick 1  | throttle=500 | input=500
+
+# Simulate stuck rotor: bemf_timeout_happened > bemf_timeout
+config bemf_timeout_happened=20
+tick 1  | throttle=500 | input=0

@@ -16,6 +16,65 @@ use embedded_hal::digital::OutputPin;
 
 use crate::shared_state::SharedState;
 
+/// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
+pub fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
+    let half = timer1_max_arr as i32 / 2;
+    let full = timer1_max_arr as i32;
+    let result = crate::functions::map(commutation_interval as i32, 96, 200, half, full);
+    result.clamp(half, full) as u16
+}
+
+/// Compute variable PWM auto-reload value for mode 2 (CPU-scaled).
+pub fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
+    let scale = cpu_mhz as u32 / 9;
+    if average_interval < 100 && average_interval > 0 {
+        (100 * scale) as u16
+    } else if average_interval >= 250 || average_interval == 0 {
+        (250 * scale) as u16
+    } else {
+        (average_interval * scale) as u16
+    }
+}
+
+/// Compute duty ceiling from eRPM and temperature limits.
+/// Returns the more restrictive of the two (or 2000 if neither applies).
+pub fn duty_ceiling(
+    e_com_time: i32,
+    motor_kv: u16,
+    motor_poles: u8,
+    degrees_celsius: i16,
+    temperature_limit: u8,
+) -> u16 {
+    let k_erpm = if e_com_time > 0 {
+        (600000 / e_com_time) / 10
+    } else {
+        0
+    };
+    let poles = motor_poles.max(2) as i32;
+    let low_rpm = motor_kv as i32 * poles / 3200;
+    let high_rpm = motor_kv as i32 * poles / 384;
+    let erpm_max = if k_erpm > 0 && high_rpm > low_rpm {
+        crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000).clamp(1, 2000) as u16
+    } else {
+        2000
+    };
+
+    let temp_max = if degrees_celsius > temperature_limit as i16 {
+        crate::functions::map(
+            degrees_celsius as i32,
+            temperature_limit as i32 - 10,
+            temperature_limit as i32 + 10,
+            1000,
+            1,
+        )
+        .clamp(1, 2000) as u16
+    } else {
+        2000
+    };
+
+    erpm_max.min(temp_max)
+}
+
 /// Marker type for boards without a custom LED.
 pub struct NoLed;
 impl OutputPin for NoLed {
@@ -54,6 +113,10 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
     pub stall_protection_adjust: i32,
+    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
+    pub current_limit_adjust: i16,
+    /// Whether current limiting is active (set by loadEEpromSettings).
+    pub use_current_limit: bool,
     pub stall_protect_target_interval: u16,
     pub use_speed_control_loop: bool,
     pub speed_input_override: i32,
@@ -69,6 +132,12 @@ pub struct MainState<LED: OutputPin = NoLed> {
     /// Custom LED pin (NoLed if board has no custom LED)
     pub led: LED,
     pub led_counter: u16,
+    /// TIM1 max auto-reload (from PWM frequency config)
+    pub timer1_max_arr: u16,
+    /// CPU MHz for variable PWM mode 2 scaling
+    pub cpu_mhz: u8,
+    /// Main-loop tick counter for consumed current accumulation
+    pub ten_khz_counter: u32,
 }
 
 impl<LED: OutputPin> MainState<LED> {
@@ -82,21 +151,54 @@ impl<LED: OutputPin> MainState<LED> {
         // Average interval
         self.average_interval = (e_com_time / 3) as u32;
 
-        // BEMF timeout clearing — dynamic thresholds matching C
+        // BEMF timeout clearing — check whether the user has released the throttle.
+        // For unidirectional: newinput == 0 means stick centered.
+        // For bidirectional: newinput near SERVO_CENTER means stick centered.
+        // process_input zeros adjusted_input on latch, so we can't use it directly.
         let zc = shared.zero_crosses();
-        let adj_input = shared.adjusted_input();
-        if zc > 1000 || adj_input == 0 {
+        let raw_input = shared.newinput();
+        let stick_released = if self.config.bi_direction != 0 && shared.dshot() {
+            // DShot bidir: zero means no throttle (commands are 1-47)
+            raw_input == 0
+        } else if self.config.bi_direction != 0 {
+            // Servo bidir: dead band around center means stick released
+            let db = (self.config.servo_dead_band as u16) << 1;
+            let center = crate::constants::SERVO_CENTER;
+            raw_input >= center.saturating_sub(db) && raw_input <= center + db
+        } else {
+            raw_input == 0
+        };
+        if zc > 1000 || stick_released {
             self.protection.bemf_timeout_happened = 0;
         }
-        if zc > 100 && adj_input < 200 {
+        if zc > 100 && raw_input < 200 && !(self.config.bi_direction != 0 && shared.dshot()) {
+            // Skip for DShot bidir: raw_input 48-199 is active reverse throttle
             self.protection.bemf_timeout_happened = 0;
         }
-        if self.config.use_sine_start != 0 && adj_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
+        if self.config.use_sine_start != 0
+            && raw_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
+            && !(self.config.bi_direction != 0 && shared.dshot())
         {
             self.protection.bemf_timeout_happened = 0;
         }
+        // Stall detection: if interval timer exceeds threshold, motor has stalled.
+        // C: if (INTERVAL_TIMER_COUNT > 45000 && running == 1)
+        if shared.interval_timer_count() > BEMF_STALL_TIMER_THRESHOLD && shared.running() {
+            // Only increment if not already latched (102 = confirmed stuck)
+            if self.protection.bemf_timeout_happened != BEMF_FAULT_LATCHED {
+                self.protection.bemf_timeout_happened =
+                    self.protection.bemf_timeout_happened.saturating_add(1);
+            }
+            shared.set_old_routine(true);
+            if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
+                shared.transition(crate::motor_mode::MotorEvent::StopMotor);
+                shared.set_commutation_interval(DESYNC_RESET_INTERVAL);
+            }
+            shared.set_zero_crosses(0);
+        }
+
         // Dynamic BEMF timeout threshold: lenient at low throttle
-        if adj_input < BEMF_LENIENT_THROTTLE {
+        if raw_input < BEMF_LENIENT_THROTTLE {
             self.protection.bemf_timeout = BEMF_TIMEOUT_LENIENT;
         } else {
             self.protection.bemf_timeout = BEMF_TIMEOUT_STRICT;
@@ -199,6 +301,23 @@ impl<LED: OutputPin> MainState<LED> {
             shared.set_stall_protection_adjust((self.stall_protection_adjust / 10000) as u16);
         }
 
+        // Current limit PID — reduces duty when current exceeds limit
+        if self.use_current_limit && shared.running() {
+            let target = self.config.current_limit as i32 * 200;
+            let adj = self
+                .current_pid
+                .calculate(self.measurements.actual_current.0 as i32, target)
+                / 10000;
+            self.current_limit_adjust -= adj as i16;
+            let lower = (self.config.minimum_duty_cycle.min(50) as i16) * 10;
+            self.current_limit_adjust = self.current_limit_adjust.clamp(lower, 2000);
+            shared.set_current_limit_adjust(self.current_limit_adjust as u16);
+        } else {
+            // Reset ceiling when inactive to prevent stale cap on next start
+            self.current_limit_adjust = 2000;
+            shared.set_current_limit_adjust(2000);
+        }
+
         // Speed control PID — closed-loop RPM control
         if self.use_speed_control_loop && shared.running() {
             let e_com = shared.e_com_time();
@@ -231,6 +350,65 @@ impl<LED: OutputPin> MainState<LED> {
             shared.set_send_telemetry(false);
         }
 
+        // Consumed current accumulation (1s interval at ~20kHz)
+        // TODO: counter incremented in main loop (variable rate), not ISR.
+        // Matches C firmware behavior but integration is approximate.
+        self.ten_khz_counter += 1;
+        if self.ten_khz_counter > 20000 {
+            self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
+            self.ten_khz_counter = 0;
+        }
+
+        // Variable PWM — adjust tim1_arr based on commutation speed
+        if self.config.variable_pwm == 1 {
+            shared.set_tim1_arr(variable_pwm_mode1(
+                shared.commutation_interval(),
+                self.timer1_max_arr,
+            ));
+        } else if self.config.variable_pwm == 2 {
+            shared.set_tim1_arr(variable_pwm_mode2(self.average_interval, self.cpu_mhz));
+        } else {
+            // variable_pwm=0: publish the EEPROM-derived ARR so ISR uses it
+            shared.set_tim1_arr(self.timer1_max_arr);
+        }
+
+        // eRPM + temperature duty ceiling
+        shared.set_duty_maximum(duty_ceiling(
+            e_com_time,
+            self.motor_kv,
+            self.config.motor_poles,
+            self.measurements.degrees_celsius.0,
+            self.config.temperature_limit,
+        ));
+
+        // Min BEMF counts adjustment — more lenient during startup
+        if zc < 5 {
+            let counts = if self.config.bi_direction != 0 { 3 } else { 4 };
+            shared.set_min_bemf_counts(counts);
+        } else {
+            shared.set_min_bemf_counts(2);
+        }
+
+        // Filter level — dynamic based on motor speed
+        let filter = if zc < 100 && shared.commutation_interval() > 500 {
+            12u8
+        } else if shared.commutation_interval() < 50 {
+            2
+        } else {
+            crate::functions::map(self.average_interval as i32, 100, 500, 3, 12) as u8
+        };
+        shared.set_filter_level(filter);
+
+        // Auto advance — scales with duty cycle
+        if self.config.auto_advance != 0 {
+            let level =
+                crate::functions::map(shared.duty_cycle_setpoint() as i32, 100, 2000, 13, 23) as u8;
+            shared.set_auto_advance(level);
+        }
+
+        // Note: send_esc_info_flag is checked and cleared by firmware main.rs
+        // after sending the actual packet. MainState does not own this flag.
+
         // Custom LED: blink with throttle, solid when high
         {
             let input = shared.adjusted_input();
@@ -250,5 +428,179 @@ impl<LED: OutputPin> MainState<LED> {
                 let _ = self.led.set_low();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Variable PWM mode 2 ---
+
+    #[test]
+    fn vpwm2_clamps_low() {
+        // avg < 100 → floor at 100 * scale
+        assert_eq!(variable_pwm_mode2(50, 64), (100 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_clamps_high() {
+        // avg >= 250 → ceiling at 250 * scale
+        assert_eq!(variable_pwm_mode2(300, 64), (250 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_scales_mid() {
+        // 100 <= avg < 250 → avg * scale
+        assert_eq!(variable_pwm_mode2(150, 64), (150 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_zero_interval_clamps_high() {
+        assert_eq!(variable_pwm_mode2(0, 64), (250 * (64 / 9)) as u16);
+    }
+
+    // --- Variable PWM mode 1 ---
+
+    #[test]
+    fn vpwm1_fast_interval() {
+        let arr = variable_pwm_mode1(96, 1999);
+        assert_eq!(arr, 999); // maps to max_arr/2
+    }
+
+    #[test]
+    fn vpwm1_slow_interval() {
+        let arr = variable_pwm_mode1(200, 1999);
+        assert_eq!(arr, 1999); // maps to max_arr
+    }
+
+    // --- Duty ceiling ---
+
+    #[test]
+    fn duty_ceiling_no_limits() {
+        assert_eq!(duty_ceiling(0, 2000, 14, 25, 80), 2000);
+    }
+
+    #[test]
+    fn duty_ceiling_temp_reduces() {
+        let dc = duty_ceiling(0, 2000, 14, 85, 80);
+        assert!(dc < 2000, "expected reduced duty, got {}", dc);
+    }
+
+    #[test]
+    fn duty_ceiling_high_poles_no_panic() {
+        // motor_poles > 32 must not divide by zero
+        let dc = duty_ceiling(1000, 2000, 40, 25, 80);
+        assert!(dc > 0);
+    }
+
+    #[test]
+    fn duty_ceiling_takes_minimum() {
+        // Both limits active → should return the lower one
+        let dc = duty_ceiling(100, 2000, 14, 85, 80);
+        assert!(dc < 2000);
+    }
+
+    // --- Stall detection (BEMF timeout increment) ---
+
+    struct MockAdc;
+    impl MockAdc {
+        fn new() -> Self {
+            Self
+        }
+    }
+    impl crate::hal::Adc for MockAdc {
+        fn start_conversion(&mut self) {}
+        fn raw_voltage(&self) -> u16 {
+            0
+        }
+        fn raw_current(&self) -> u16 {
+            0
+        }
+        fn raw_temperature(&self) -> u16 {
+            0
+        }
+        fn calc_temperature(&self, _: u16) -> crate::units::DegreesCelsius {
+            crate::units::DegreesCelsius(25)
+        }
+    }
+
+    struct MockTelem;
+    impl crate::hal::TelemetryUart for MockTelem {
+        fn send_dma(&mut self, _: &[u8]) {}
+    }
+
+    fn make_test_main_state() -> MainState {
+        MainState {
+            protection: crate::control::state::ProtectionState::default(),
+            measurements: crate::control::state::Measurements::default(),
+            telemetry: crate::control::state::TelemetryState::default(),
+            config: crate::config::EepromConfig::default(),
+            current_pid: crate::pid::Pid::new(400, 0, 1000, 20000, 100000),
+            speed_pid: crate::pid::Pid::new(10, 0, 100, 10000, 50000),
+            stall_pid: crate::pid::Pid::new(1, 0, 50, 10000, 50000),
+            e_rpm: 0,
+            average_interval: 0,
+            last_average_interval: 0,
+            commutation_intervals: [0; 6],
+            cell_count: 0,
+            motor_kv: 2000,
+            low_cell_volt_cutoff: 330,
+            voltage_divider: 110,
+            millivolt_per_amp: 20,
+            current_offset: 0,
+            stall_protection_adjust: 0,
+            current_limit_adjust: 2000,
+            use_current_limit: false,
+            stall_protect_target_interval: 6500,
+            use_speed_control_loop: false,
+            speed_input_override: 0,
+            target_e_com_time: 0,
+            desync_check: false,
+            current_filter: crate::current::CurrentFilter::new(),
+            voltage_filter: crate::filter::EwmaPow2::new(),
+            last_armed: false,
+            just_armed: false,
+            use_ntc: false,
+            led: NoLed,
+            led_counter: 0,
+            timer1_max_arr: 1999,
+            cpu_mhz: 64,
+            ten_khz_counter: 0,
+        }
+    }
+
+    #[test]
+    fn stall_detection_increments_timeout() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine); // running=true
+        shared.set_interval_timer_count(50000); // > 45000 threshold
+        shared.set_adjusted_input(100); // above throttle min
+
+        let mut main = make_test_main_state();
+        assert_eq!(main.protection.bemf_timeout_happened, 0);
+
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(
+            main.protection.bemf_timeout_happened > 0,
+            "bemf_timeout_happened should increment on stall"
+        );
+    }
+
+    #[test]
+    fn stall_detection_does_not_trigger_below_threshold() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+        shared.set_interval_timer_count(40000); // below 45000
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(main.protection.bemf_timeout_happened, 0);
     }
 }

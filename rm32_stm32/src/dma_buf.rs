@@ -12,11 +12,13 @@ use core::cell::UnsafeCell;
 /// A DMA-safe static buffer. Wraps a fixed-size array with interior mutability.
 ///
 /// # Safety contract
+///
 /// - DMA hardware writes to this buffer via the raw pointer from `as_ptr()`
 /// - Software reads via `as_slice()` only when DMA is not active (between transfers)
 /// - This is safe on single-core Cortex-M where ISR and main don't overlap
+///
 /// Aligned to 32 bytes for cache-line safety on M4 targets with D-cache (G4/F4).
-/// Over-alignment on M0 (which has no cache) is harmless — no size increase for ZST.
+/// Over-alignment on M0 (which has no cache) is harmless.
 #[repr(align(32))]
 pub struct DmaBuf<T, const N: usize>(UnsafeCell<[T; N]>);
 

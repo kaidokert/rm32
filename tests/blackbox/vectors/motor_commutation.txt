@@ -1,0 +1,38 @@
+# Motor startup and BEMF commutation
+# Lights up: startMotor, interruptRoutine, PeriodElapsedCallback, commutate
+#
+# comp level must match: when rising=1 comp must be 0 (!=rising passes filter)
+#                         when rising=0 comp must be 1 (!=rising passes filter)
+# After each commutate, rising flips, so we alternate comp.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=0
+old_routine=1
+zero_crosses=0
+commutation_interval=12500
+
+@sequence
+# Apply throttle to trigger motor start via setInput
+tick 1  | throttle=500 | running=1
+
+# ZC 1: rising=1, comp=0 passes filter
+tick 1  | throttle=500 zc=1 comp=0 | zero_crosses=1
+
+# After commutate, rising flipped to 0. ZC 2: comp=1 passes
+tick 1  | throttle=500 zc=1 comp=1 | zero_crosses=2
+
+# ZC 3: rising flipped back to 1
+tick 1  | throttle=500 zc=1 comp=0 | zero_crosses=3
+
+# ZC 4
+tick 1  | throttle=500 zc=1 comp=1 | zero_crosses=4
+
+# ZC 5
+tick 1  | throttle=500 zc=1 comp=0 | zero_crosses=5
+
+# ZC 6
+tick 1  | throttle=500 zc=1 comp=1 | zero_crosses=6
