@@ -5,6 +5,7 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, TargetIsrState};
+use crate::mcu::ChipConfig;
 use rm32::hal::InputCapture;
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
@@ -82,11 +83,7 @@ pub fn handle_tim6() {
         config: &state.config,
         counters: &mut counters,
         shared,
-        pwm: &mut state.hal.pwm,
-        comp: &mut state.hal.comp,
-        phase: &mut state.hal.phase,
-        interval: &mut state.hal.interval,
-        com_timer: &mut state.hal.com_timer,
+        hal: &mut state.hal,
     };
     rm32::control::isr_logic::ten_khz_tick(&mut ctx);
     state.ten_khz_counter = counters.ten_khz_counter;
@@ -143,7 +140,7 @@ pub fn handle_dma_tc() {
                     rm32::dshot::erpm_to_12bit(shared.e_com_time() as u16, shared.running())
                 }
             };
-            rm32::dshot::encode_gcr_frame(value_12bit, gcr, 7, crate::config::GCR_SHIFT);
+            rm32::dshot::encode_gcr_frame(value_12bit, gcr, 7, crate::mcu::Chip::GCR_SHIFT);
 
             state.hal.input.send_dshot_dma();
         }

@@ -15,10 +15,10 @@ use rm32::hal::{PwmOutput, System, TelemetryUart as _};
 use rm32::pid::Pid;
 
 use rm32::main_state::MainState;
-use rm32_stm32::config;
 use rm32_stm32::init::InitResult;
 use rm32_stm32::isr::{self, IsrState};
 use rm32_stm32::mcu::FlashStorage;
+use rm32_stm32::mcu::{Chip, ChipConfig};
 
 // Board configuration generated from YAML by build.rs.
 // Override with: BOARD=boards/my_board.yaml cargo build
@@ -38,7 +38,7 @@ fn main() -> ! {
 
     // --- WS2812 LED: boot indicator (dim red) ---
     let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
-    let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(led_pin, config::CPU_FREQUENCY_MHZ);
+    let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(led_pin, Chip::CPU_FREQUENCY_MHZ);
     if BOARD.has_led {
         use rm32::ws2812::{LedStatus, send_status};
         cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Boot));
@@ -50,7 +50,7 @@ fn main() -> ! {
     }
     {
         use rm32::sounds::Sounds;
-        let sounds = Sounds::new(config::TIM1_AUTORELOAD);
+        let sounds = Sounds::new(Chip::TIM1_AUTORELOAD);
         sounds.play_startup(&mut hal.pwm, &mut hal.phase, &mut sys);
     }
 
@@ -61,7 +61,7 @@ fn main() -> ! {
     }
 
     // --- Start IWDG watchdog (after startup tune, matching C sequencing) ---
-    sys.start_watchdog(config::WDG_PRESCALER, config::WDG_RELOAD);
+    sys.start_watchdog(Chip::WDG_PRESCALER, Chip::WDG_RELOAD);
 
     // --- Configure input capture inversion before moving to ISR ---
     {
@@ -83,7 +83,7 @@ fn main() -> ! {
         config: EepromConfig::default(),
         forward: true,
         edt_armed: false,
-        tim1_arr: config::TIM1_AUTORELOAD,
+        tim1_arr: Chip::TIM1_AUTORELOAD,
         frametime_low: 400,
         frametime_high: 600,
         ten_khz_counter: 0,
@@ -143,10 +143,10 @@ fn main() -> ! {
                 DEVICE_32K => 0x0800_7C00u32,
                 DEVICE_64K => 0x0800_F800u32,
                 DEVICE_128K => 0x0801_F800u32,
-                _ => config::EEPROM_START,
+                _ => Chip::EEPROM_START,
             }
         } else {
-            config::EEPROM_START
+            Chip::EEPROM_START
         }
     };
 
@@ -212,9 +212,9 @@ fn main() -> ! {
         let pf = main_state.config.pwm_frequency;
         if pf > 7 && pf < 145 {
             let divider = pf as u32 * 100 / 6;
-            (config::TIM1_AUTORELOAD as u32 * 400 / divider) as u16
+            (Chip::TIM1_AUTORELOAD as u32 * 400 / divider) as u16
         } else {
-            config::TIM1_AUTORELOAD
+            Chip::TIM1_AUTORELOAD
         }
     };
 
@@ -291,7 +291,7 @@ fn main() -> ! {
                 main_state.config.motor_poles,
                 5, // changeover_step
                 BOARD.dead_time as i16,
-                config::TIM1_AUTORELOAD,
+                Chip::TIM1_AUTORELOAD,
                 main_state.config.sine_mode_power,
             );
             // Apply PWM via PwmOutput trait (through ISR state)
@@ -322,7 +322,7 @@ fn main() -> ! {
         if main_state.just_armed {
             // Play motor beeps for cell count (or single beep if no LVC)
             isr::with_isr_state(|isr| {
-                let sounds = rm32::sounds::Sounds::new(config::TIM1_AUTORELOAD);
+                let sounds = rm32::sounds::Sounds::new(Chip::TIM1_AUTORELOAD);
                 if main_state.cell_count > 0 {
                     for _ in 0..main_state.cell_count {
                         sounds.play_input(&mut isr.hal.pwm, &mut isr.hal.phase, &mut sys);

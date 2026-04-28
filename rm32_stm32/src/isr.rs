@@ -35,6 +35,38 @@ where
     pub phase: PH,
 }
 
+impl<P, I, C, IT, CT, PH> hal::MotorHal for IsrHal<P, I, C, IT, CT, PH>
+where
+    P: hal::PwmOutput,
+    I: hal::InputCapture,
+    C: hal::Comparator,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    type Pwm = P;
+    type Comp = C;
+    type Phase = PH;
+    type Interval = IT;
+    type Com = CT;
+
+    fn pwm(&mut self) -> &mut P {
+        &mut self.pwm
+    }
+    fn comp(&mut self) -> &mut C {
+        &mut self.comp
+    }
+    fn phase(&mut self) -> &mut PH {
+        &mut self.phase
+    }
+    fn interval(&mut self) -> &mut IT {
+        &mut self.interval
+    }
+    fn com_timer(&mut self) -> &mut CT {
+        &mut self.com_timer
+    }
+}
+
 /// ISR-exclusive state — generic over hardware.
 pub struct IsrState<H> {
     pub commutation: Commutation,

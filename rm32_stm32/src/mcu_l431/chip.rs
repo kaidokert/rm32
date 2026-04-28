@@ -70,5 +70,5 @@ pub use super::init::init as init_mcu;
 
 crate::define_port!(field, PortA, crate::pac::GPIOA);
 crate::define_port!(field, PortB, crate::pac::GPIOB);
-crate::define_timer_ops!(field, tim2_ops, crate::pac::TIM2);
-crate::define_timer_ops!(field, com_tim_ops, crate::pac::TIM16);
+crate::define_raw_timer!(field, Tim2Raw, crate::pac::TIM2);
+crate::define_raw_timer!(field, ComTimerRaw, crate::pac::TIM16);

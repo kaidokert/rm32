@@ -1,6 +1,6 @@
 //! ISR-level control logic — platform-independent, fully testable.
 //!
-//! All functions take `MotorContext<S, P, C, Ph, I, T>` for static dispatch.
+//! All functions take `MotorContext<S, H>` for static dispatch.
 //! No `&dyn` trait objects — the compiler monomorphizes to concrete MCU types,
 //! eliminating vtable overhead in the 20kHz ISR.
 
@@ -9,7 +9,7 @@ use crate::constants::*;
 use crate::control::context::MotorContext;
 use crate::control::state::{BemfState, DutyState};
 use crate::functions::map;
-use crate::hal;
+use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutput, PwmOutput};
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
 
@@ -26,15 +26,7 @@ pub struct TickCounters {
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
-pub fn ten_khz_tick<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
-where
-    S: SharedComm,
-    P: hal::PwmOutput,
-    C: hal::Comparator,
-    Ph: hal::PhaseOutput,
-    I: hal::IntervalTimer,
-    T: hal::ComTimer,
-{
+pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Throttle → setpoint
     let newinput = ctx.shared.newinput();
     ctx.shared.set_adjusted_input(newinput);
@@ -53,20 +45,20 @@ where
                 ctx.shared.transition(MotorEvent::StartMotor);
                 ctx.duty.last = ctx.duty.min_startup;
                 let step = ctx.commutation.advance();
-                ctx.phase.com_step(step);
-                ctx.comp.set_step(step, ctx.commutation.rising);
-                ctx.comp.change_input();
-                ctx.comp.enable_interrupts();
+                ctx.hal.phase().com_step(step);
+                ctx.hal.comp().set_step(step, ctx.commutation.rising);
+                ctx.hal.comp().change_input();
+                ctx.hal.comp().enable_interrupts();
             }
         } else {
             ctx.shared.set_duty_cycle_setpoint(0);
             if ctx.config.brake_on_stop == 2 {
-                ctx.phase.com_step(2);
+                ctx.hal.phase().com_step(2);
                 let brake_duty = (ctx.config.active_brake_power as u32
                     * ctx.counters.tim1_arr as u32
                     / DUTY_SCALE_MAX as u32)
                     * 10;
-                ctx.pwm.set_duty_all(brake_duty as u16);
+                ctx.hal.pwm().set_duty_all(brake_duty as u16);
             }
         }
     }
@@ -110,26 +102,18 @@ where
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
         let adj = ((ctx.duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
-        ctx.pwm.set_duty_all(adj);
+        ctx.hal.pwm().set_duty_all(adj);
     } else {
-        ctx.pwm.set_duty_all(0);
+        ctx.hal.pwm().set_duty_all(0);
     }
     ctx.duty.last = ctx.duty.cycle;
-    ctx.pwm.set_auto_reload(tim1_arr);
+    ctx.hal.pwm().set_auto_reload(tim1_arr);
 }
 
 /// BEMF polling (old_routine path).
-fn bemf_polling<S, P, C, Ph, I, T>(ctx: &mut MotorContext<S, P, C, Ph, I, T>)
-where
-    S: SharedComm,
-    P: hal::PwmOutput,
-    C: hal::Comparator,
-    Ph: hal::PhaseOutput,
-    I: hal::IntervalTimer,
-    T: hal::ComTimer,
-{
-    ctx.comp.mask_interrupts();
-    let comp_level = ctx.comp.output_level();
+fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    ctx.hal.comp().mask_interrupts();
+    let comp_level = ctx.hal.comp().output_level();
     let current_state = !comp_level;
     if ctx.commutation.rising {
         if current_state {
@@ -156,8 +140,8 @@ where
     if !ctx.bemf.zc_found && ctx.bemf.counter > threshold {
         ctx.bemf.zc_found = true;
         ctx.bemf.last_zc_time = ctx.bemf.this_zc_time;
-        ctx.bemf.this_zc_time = ctx.interval.count() as u16;
-        ctx.interval.set_count(0);
+        ctx.bemf.this_zc_time = ctx.hal.interval().count() as u16;
+        ctx.hal.interval().set_count(0);
         let ci = ctx.shared.commutation_interval();
         let new_ci = (ctx.bemf.this_zc_time as u32 + 3 * ci) / 4;
         ctx.shared.set_commutation_interval(new_ci);
@@ -166,15 +150,15 @@ where
         let zc = ctx.shared.zero_crosses();
         if zc < MIN_ZC_FOR_ADVANCE {
             let step = ctx.commutation.advance();
-            ctx.phase.com_step(step);
-            ctx.phase.pulse_toggle(step);
-            ctx.comp.set_step(step, ctx.commutation.rising);
-            ctx.comp.change_input();
+            ctx.hal.phase().com_step(step);
+            ctx.hal.phase().pulse_toggle(step);
+            ctx.hal.comp().set_step(step, ctx.commutation.rising);
+            ctx.hal.comp().change_input();
             ctx.bemf.counter = 0;
             ctx.bemf.bad_count = 0;
             ctx.shared.increment_zero_crosses();
         } else {
-            ctx.com_timer.set_and_enable(ctx.bemf.wait_time + 1);
+            ctx.hal.com_timer().set_and_enable(ctx.bemf.wait_time + 1);
         }
     }
 }

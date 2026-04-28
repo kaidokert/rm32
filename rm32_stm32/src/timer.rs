@@ -1,168 +1,166 @@
 //! Timer implementations.
 //!
 //! TIM2: Interval timer — free-running at 2MHz
-//! TIM14: Commutation timer — one-shot at 2MHz
+//! TIM14/TIM16: Commutation timer — one-shot at 2MHz
 //! PSC derived from MCU config to achieve 2MHz regardless of clock speed.
+//!
+//! Each MCU uses `define_raw_timer!` to generate a zero-sized struct implementing
+//! `RawTimer`. `Tim2Interval` and `ComTimerImpl` are generic over `T: RawTimer`,
+//! giving IDEs and linters full visibility into the timer API.
 
+use crate::mcu::ChipConfig;
 use rm32::hal::{ComTimer, IntervalTimer};
 
-/// PAC-based timer register access. Bridges method vs field accessor styles.
-/// G071/G431 use method accessors: tim.cr1(), tim.sr(), etc.
-/// F051/L431 use field accessors: tim.cr1, tim.sr, etc.
+/// Low-level timer register access — implemented per-MCU via `define_raw_timer!`.
+///
+/// All methods are `&self` on a zero-sized type — the struct carries no data,
+/// it just selects which PAC peripheral the methods operate on.
+pub trait RawTimer {
+    fn read_cr1(&self) -> u32;
+    fn write_cr1(&self, v: u32);
+    fn read_cnt(&self) -> u32;
+    fn write_cnt(&self, v: u32);
+    fn write_psc(&self, v: u32);
+    fn write_arr(&self, v: u32);
+    fn write_egr(&self, v: u32);
+    fn write_sr(&self, v: u32);
+    fn read_dier(&self) -> u32;
+    fn write_dier(&self, v: u32);
 
+    #[inline]
+    fn modify_cr1(&self, f: impl FnOnce(u32) -> u32) {
+        self.write_cr1(f(self.read_cr1()));
+    }
+
+    #[inline]
+    fn modify_dier(&self, f: impl FnOnce(u32) -> u32) {
+        self.write_dier(f(self.read_dier()));
+    }
+}
+
+/// Generates a zero-sized struct implementing `RawTimer` for a PAC timer peripheral.
+///
+/// Two variants handle PAC accessor differences:
+/// - `method`: G071/G431 PACs use `tim.cr1()`, `tim.sr()`, etc.
+/// - `field`: F051/L431 PACs use `tim.cr1`, `tim.sr`, etc.
 #[macro_export]
-macro_rules! define_timer_ops {
-    (method, $mod_name:ident, $pac_periph:path) => {
-        pub mod $mod_name {
-            // SAFETY: All unsafe is encapsulated here. Callers see safe functions.
-            macro_rules! tim {
-                () => {
-                    unsafe { &*<$pac_periph>::PTR }
-                };
+macro_rules! define_raw_timer {
+    (method, $name:ident, $pac_periph:path) => {
+        pub struct $name;
+
+        impl crate::timer::RawTimer for $name {
+            // SAFETY: Each method accesses a single PAC peripheral via its singleton PTR.
+            // Safe wrappers around unsafe PAC register access.
+            #[inline]
+            fn read_cr1(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.cr1().read().bits()
             }
             #[inline]
-            pub fn read_cr1() -> u32 {
-                tim!().cr1().read().bits()
-            }
-            #[inline]
-            pub fn write_cr1(v: u32) {
+            fn write_cr1(&self, v: u32) {
                 unsafe {
-                    tim!().cr1().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).cr1().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn modify_cr1(f: impl FnOnce(u32) -> u32) {
-                write_cr1(f(read_cr1()));
+            fn read_cnt(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.cnt().read().bits()
             }
             #[inline]
-            pub fn read_cnt() -> u32 {
-                tim!().cnt().read().bits()
-            }
-            #[inline]
-            pub fn write_cnt(v: u32) {
+            fn write_cnt(&self, v: u32) {
                 unsafe {
-                    tim!().cnt().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).cnt().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn write_psc(v: u32) {
+            fn write_psc(&self, v: u32) {
                 unsafe {
-                    tim!().psc().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).psc().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn write_arr(v: u32) {
+            fn write_arr(&self, v: u32) {
                 unsafe {
-                    tim!().arr().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).arr().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn write_egr(v: u32) {
+            fn write_egr(&self, v: u32) {
                 unsafe {
-                    tim!().egr().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).egr().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn write_sr(v: u32) {
+            fn write_sr(&self, v: u32) {
                 unsafe {
-                    tim!().sr().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).sr().write(|w| w.bits(v));
                 }
             }
             #[inline]
-            pub fn read_dier() -> u32 {
-                tim!().dier().read().bits()
+            fn read_dier(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.dier().read().bits()
             }
             #[inline]
-            pub fn write_dier(v: u32) {
+            fn write_dier(&self, v: u32) {
                 unsafe {
-                    tim!().dier().write(|w| w.bits(v));
+                    (&*<$pac_periph>::PTR).dier().write(|w| w.bits(v));
                 }
-            }
-            #[inline]
-            pub fn modify_dier(f: impl FnOnce(u32) -> u32) {
-                write_dier(f(read_dier()));
             }
         }
     };
-    (field, $mod_name:ident, $pac_periph:path) => {
-        pub mod $mod_name {
-            macro_rules! tim {
-                () => {
-                    unsafe { &*<$pac_periph>::PTR }
-                };
+    (field, $name:ident, $pac_periph:path) => {
+        pub struct $name;
+
+        impl crate::timer::RawTimer for $name {
+            #[inline]
+            fn read_cr1(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.cr1.read().bits()
             }
             #[inline]
-            pub fn read_cr1() -> u32 {
-                tim!().cr1.read().bits()
+            fn write_cr1(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).cr1.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn write_cr1(v: u32) {
-                unsafe {
-                    tim!().cr1.write(|w| w.bits(v));
-                }
+            fn read_cnt(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.cnt.read().bits()
             }
             #[inline]
-            pub fn modify_cr1(f: impl FnOnce(u32) -> u32) {
-                write_cr1(f(read_cr1()));
+            fn write_cnt(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).cnt.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn read_cnt() -> u32 {
-                tim!().cnt.read().bits()
+            fn write_psc(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).psc.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn write_cnt(v: u32) {
-                unsafe {
-                    tim!().cnt.write(|w| w.bits(v));
-                }
+            fn write_arr(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).arr.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn write_psc(v: u32) {
-                unsafe {
-                    tim!().psc.write(|w| w.bits(v));
-                }
+            fn write_egr(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).egr.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn write_arr(v: u32) {
-                unsafe {
-                    tim!().arr.write(|w| w.bits(v));
-                }
+            fn write_sr(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).sr.write(|w| w.bits(v)) }
             }
             #[inline]
-            pub fn write_egr(v: u32) {
-                unsafe {
-                    tim!().egr.write(|w| w.bits(v));
-                }
+            fn read_dier(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.dier.read().bits()
             }
             #[inline]
-            pub fn write_sr(v: u32) {
-                unsafe {
-                    tim!().sr.write(|w| w.bits(v));
-                }
-            }
-            #[inline]
-            pub fn read_dier() -> u32 {
-                tim!().dier.read().bits()
-            }
-            #[inline]
-            pub fn write_dier(v: u32) {
-                unsafe {
-                    tim!().dier.write(|w| w.bits(v));
-                }
-            }
-            #[inline]
-            pub fn modify_dier(f: impl FnOnce(u32) -> u32) {
-                write_dier(f(read_dier()));
+            fn write_dier(&self, v: u32) {
+                unsafe { (&*<$pac_periph>::PTR).dier.write(|w| w.bits(v)) }
             }
         }
     };
 }
 
-// Timer ops (tim2_ops, com_tim_ops) defined in mcu_xxx/chip.rs, re-exported via mcu::*.
-use crate::mcu::{com_tim_ops, tim2_ops};
+// Raw timer types defined in mcu_xxx/chip.rs, re-exported via mcu::*.
+use crate::mcu::{ComTimerRaw, Tim2Raw};
 
 /// TIM2 as free-running interval timer (2MHz, 0.5us/tick).
 pub struct Tim2Interval {
-    _private: (),
+    raw: Tim2Raw,
 }
 
 impl Default for Tim2Interval {
@@ -173,32 +171,32 @@ impl Default for Tim2Interval {
 
 impl Tim2Interval {
     pub fn new() -> Self {
-        // Enable TIM2 clock
         crate::mcu::enable_tim2_clock();
 
-        tim2_ops::modify_cr1(|v| v & !(1 << 0)); // CEN=0
-        tim2_ops::write_psc(crate::config::TIMER_PSC as u32);
-        tim2_ops::write_arr(0xFFFF_FFFF);
-        tim2_ops::write_egr(1); // UG
-        tim2_ops::write_cnt(0);
-        tim2_ops::modify_cr1(|v| v | (1 << 0)); // CEN=1
-        Self { _private: () }
+        let raw = Tim2Raw;
+        raw.modify_cr1(|v| v & !(1 << 0)); // CEN=0
+        raw.write_psc(crate::mcu::Chip::TIMER_PSC as u32);
+        raw.write_arr(0xFFFF_FFFF);
+        raw.write_egr(1); // UG
+        raw.write_cnt(0);
+        raw.modify_cr1(|v| v | (1 << 0)); // CEN=1
+        Self { raw }
     }
 }
 
 impl IntervalTimer for Tim2Interval {
     fn count(&self) -> u32 {
-        tim2_ops::read_cnt()
+        self.raw.read_cnt()
     }
 
     fn set_count(&mut self, val: u32) {
-        tim2_ops::write_cnt(val);
+        self.raw.write_cnt(val);
     }
 }
 
-/// TIM14 as one-shot commutation timer (2MHz, 0.5us/tick).
+/// One-shot commutation timer (TIM14 on G071/F051, TIM16 on L431/G431).
 pub struct Tim14Com {
-    _private: (),
+    raw: ComTimerRaw,
 }
 
 impl Default for Tim14Com {
@@ -211,28 +209,29 @@ impl Tim14Com {
     pub fn new() -> Self {
         crate::mcu::enable_com_timer_clock();
 
-        com_tim_ops::write_psc(crate::config::TIMER_PSC as u32);
-        com_tim_ops::write_arr(0xFFFF);
-        com_tim_ops::write_egr(1);
-        Self { _private: () }
+        let raw = ComTimerRaw;
+        raw.write_psc(crate::mcu::Chip::TIMER_PSC as u32);
+        raw.write_arr(0xFFFF);
+        raw.write_egr(1);
+        Self { raw }
     }
 }
 
 impl ComTimer for Tim14Com {
     fn set_and_enable(&mut self, timeout: u16) {
-        com_tim_ops::modify_cr1(|v| v & !(1 << 0));
-        com_tim_ops::write_cnt(0);
-        com_tim_ops::write_arr(timeout as u32);
-        com_tim_ops::write_sr(0);
-        com_tim_ops::modify_dier(|v| v | 1);
-        com_tim_ops::modify_cr1(|v| v | (1 << 0));
+        self.raw.modify_cr1(|v| v & !(1 << 0));
+        self.raw.write_cnt(0);
+        self.raw.write_arr(timeout as u32);
+        self.raw.write_sr(0);
+        self.raw.modify_dier(|v| v | 1);
+        self.raw.modify_cr1(|v| v | (1 << 0));
     }
 
     fn disable_interrupt(&mut self) {
-        com_tim_ops::modify_dier(|v| v & !1);
+        self.raw.modify_dier(|v| v & !1);
     }
 
     fn enable_interrupt(&mut self) {
-        com_tim_ops::modify_dier(|v| v | 1);
+        self.raw.modify_dier(|v| v | 1);
     }
 }

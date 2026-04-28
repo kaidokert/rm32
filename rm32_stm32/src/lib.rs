@@ -6,7 +6,6 @@
 #![no_std]
 
 pub mod mcu;
-pub use mcu::config;
 pub use mcu::pac;
 
 // --- Shared across all MCUs (zero cfg) ---

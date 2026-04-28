@@ -28,20 +28,3 @@ pub use crate::mcu_g071::chip::*;
 pub use crate::mcu_g431::chip::*;
 #[cfg(feature = "stm32l431")]
 pub use crate::mcu_l431::chip::*;
-
-// Backward-compatible config module.
-pub mod config {
-    use super::{Chip, ChipConfig};
-    pub const CPU_FREQUENCY_MHZ: u32 = Chip::CPU_FREQUENCY_MHZ;
-    pub const EEPROM_START: u32 = Chip::EEPROM_START;
-    pub const FLASH_PAGE_SIZE: u32 = Chip::FLASH_PAGE_SIZE;
-    pub const TIMER_PSC: u16 = Chip::TIMER_PSC;
-    pub const GCR_SHIFT: u8 = Chip::GCR_SHIFT;
-    pub const COMP_EXTI_LINE: u32 = Chip::COMP_EXTI_LINE;
-    pub const INPUT_DMA_CHANNEL: usize = Chip::INPUT_DMA_CHANNEL;
-    pub const ADC_CURRENT_CHANNEL: u8 = Chip::ADC_CURRENT_CHANNEL;
-    pub const ADC_VOLTAGE_CHANNEL: u8 = Chip::ADC_VOLTAGE_CHANNEL;
-    pub const TIM1_AUTORELOAD: u16 = Chip::TIM1_AUTORELOAD;
-    pub const WDG_PRESCALER: u8 = Chip::WDG_PRESCALER;
-    pub const WDG_RELOAD: u16 = Chip::WDG_RELOAD;
-}

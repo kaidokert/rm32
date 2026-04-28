@@ -1070,6 +1070,51 @@ mod tests {
         fn enable_interrupt(&mut self) {}
     }
 
+    struct MockMotorHal {
+        pwm: MockPwm,
+        comp: MockComp,
+        phase: MockPhase,
+        interval: MockInterval,
+        com_timer: MockComTimer,
+    }
+    impl hal::MotorHal for MockMotorHal {
+        type Pwm = MockPwm;
+        type Comp = MockComp;
+        type Phase = MockPhase;
+        type Interval = MockInterval;
+        type Com = MockComTimer;
+
+        fn pwm(&mut self) -> &mut MockPwm {
+            &mut self.pwm
+        }
+        fn comp(&mut self) -> &mut MockComp {
+            &mut self.comp
+        }
+        fn phase(&mut self) -> &mut MockPhase {
+            &mut self.phase
+        }
+        fn interval(&mut self) -> &mut MockInterval {
+            &mut self.interval
+        }
+        fn com_timer(&mut self) -> &mut MockComTimer {
+            &mut self.com_timer
+        }
+    }
+    impl MockMotorHal {
+        fn new() -> Self {
+            Self {
+                pwm: MockPwm { last_duty: 0 },
+                comp: MockComp {
+                    level: false,
+                    mask_called: false,
+                },
+                phase: MockPhase,
+                interval: MockInterval { count: 0 },
+                com_timer: MockComTimer,
+            }
+        }
+    }
+
     #[test]
     fn isr_tick_throttle_maps_to_setpoint() {
         let mut comm = crate::commutation::Commutation::new();
@@ -1078,14 +1123,7 @@ mod tests {
         let config = crate::config::EepromConfig::default();
         let mut counters = make_counters();
         let shared = TestShared::new();
-        let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-        };
-        let mut phase = MockPhase;
-        let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut hal = MockMotorHal::new();
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(1000);
@@ -1097,11 +1135,7 @@ mod tests {
             config: &config,
             counters: &mut counters,
             shared: &shared,
-            pwm: &mut pwm,
-            comp: &mut comp,
-            phase: &mut phase,
-            interval: &mut interval,
-            com_timer: &mut com_timer,
+            hal: &mut hal,
         });
 
         assert!(shared.duty_cycle_setpoint() > 0);
@@ -1116,14 +1150,7 @@ mod tests {
         let config = crate::config::EepromConfig::default();
         let mut counters = make_counters();
         let shared = TestShared::new();
-        let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-        };
-        let mut phase = MockPhase;
-        let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut hal = MockMotorHal::new();
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(0);
@@ -1135,11 +1162,7 @@ mod tests {
             config: &config,
             counters: &mut counters,
             shared: &shared,
-            pwm: &mut pwm,
-            comp: &mut comp,
-            phase: &mut phase,
-            interval: &mut interval,
-            com_timer: &mut com_timer,
+            hal: &mut hal,
         });
 
         assert_eq!(shared.duty_cycle_setpoint(), 0);
@@ -1153,14 +1176,7 @@ mod tests {
         let config = crate::config::EepromConfig::default();
         let mut counters = make_counters();
         let shared = TestShared::new();
-        let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-        };
-        let mut phase = MockPhase;
-        let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut hal = MockMotorHal::new();
 
         shared.input_set.set(true);
         shared.newinput.set(0);
@@ -1173,11 +1189,7 @@ mod tests {
                 config: &config,
                 counters: &mut counters,
                 shared: &shared,
-                pwm: &mut pwm,
-                comp: &mut comp,
-                phase: &mut phase,
-                interval: &mut interval,
-                com_timer: &mut com_timer,
+                hal: &mut hal,
             });
         }
         assert!(!shared.armed());
@@ -1189,11 +1201,7 @@ mod tests {
             config: &config,
             counters: &mut counters,
             shared: &shared,
-            pwm: &mut pwm,
-            comp: &mut comp,
-            phase: &mut phase,
-            interval: &mut interval,
-            com_timer: &mut com_timer,
+            hal: &mut hal,
         });
         assert!(shared.armed());
     }
@@ -1206,14 +1214,7 @@ mod tests {
         let config = crate::config::EepromConfig::default();
         let mut counters = make_counters();
         let shared = TestShared::new();
-        let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-        };
-        let mut phase = MockPhase;
-        let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut hal = MockMotorHal::new();
 
         isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
             commutation: &mut comm,
@@ -1222,11 +1223,7 @@ mod tests {
             config: &config,
             counters: &mut counters,
             shared: &shared,
-            pwm: &mut pwm,
-            comp: &mut comp,
-            phase: &mut phase,
-            interval: &mut interval,
-            com_timer: &mut com_timer,
+            hal: &mut hal,
         });
 
         assert_eq!(shared.signal_timeout(), 1);
@@ -1240,14 +1237,7 @@ mod tests {
         let config = crate::config::EepromConfig::default();
         let mut counters = make_counters();
         let shared = TestShared::new();
-        let mut pwm = MockPwm { last_duty: 0 };
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-        };
-        let mut phase = MockPhase;
-        let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut hal = MockMotorHal::new();
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(2047);
@@ -1261,11 +1251,7 @@ mod tests {
             config: &config,
             counters: &mut counters,
             shared: &shared,
-            pwm: &mut pwm,
-            comp: &mut comp,
-            phase: &mut phase,
-            interval: &mut interval,
-            com_timer: &mut com_timer,
+            hal: &mut hal,
         });
 
         assert!(

@@ -65,6 +65,24 @@ pub trait ComTimer {
     fn enable_interrupt(&mut self);
 }
 
+/// Bundle of ISR-level motor peripherals for static dispatch.
+///
+/// Reduces generic parameter count from 5 to 1 in ISR function signatures.
+/// Implementors provide the concrete MCU-specific types.
+pub trait MotorHal {
+    type Pwm: PwmOutput;
+    type Comp: Comparator;
+    type Phase: PhaseOutput;
+    type Interval: IntervalTimer;
+    type Com: ComTimer;
+
+    fn pwm(&mut self) -> &mut Self::Pwm;
+    fn comp(&mut self) -> &mut Self::Comp;
+    fn phase(&mut self) -> &mut Self::Phase;
+    fn interval(&mut self) -> &mut Self::Interval;
+    fn com_timer(&mut self) -> &mut Self::Com;
+}
+
 /// Serial telemetry output (KISS protocol)
 pub trait TelemetryUart {
     fn send_dma(&mut self, data: &[u8]);

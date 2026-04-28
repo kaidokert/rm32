@@ -1,6 +1,7 @@
 //! STM32L431 initialization.
 
 use crate::init::InitResult;
+use crate::mcu::ChipConfig;
 use crate::phase::G0APhaseDriver;
 use crate::timer::{Tim2Interval, Tim14Com};
 
@@ -50,7 +51,7 @@ pub fn init(
         let tim1 = &*pac::TIM1::ptr();
         tim1.psc.write(|w| w.bits(0));
         tim1.arr
-            .write(|w| w.bits(crate::config::TIM1_AUTORELOAD as u32));
+            .write(|w| w.bits(super::chip::Chip::TIM1_AUTORELOAD as u32));
         tim1.ccmr1_output().write(|w| w.bits(0x6868)); // OC1/2 PWM mode 1
         tim1.ccmr2_output().write(|w| w.bits(0x0068)); // OC3 PWM mode 1
         tim1.ccer.write(|w| w.bits(0x555)); // CC1-3 + CC1N-3N enable
