@@ -2,10 +2,14 @@
 
 use rm32::hal::PwmOutput;
 
-pub struct Pwm { _private: () }
+pub struct Pwm {
+    _private: (),
+}
 
 impl Pwm {
-    pub fn new() -> Self { Self { _private: () } }
+    pub fn new() -> Self {
+        Self { _private: () }
+    }
 }
 
 impl PwmOutput for Pwm {
@@ -41,6 +45,7 @@ impl PwmOutput for Pwm {
     }
     fn set_dead_time_override(&mut self, dtg: u16) {
         let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
-        tim1.bdtr.modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
+        tim1.bdtr
+            .modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
     }
 }

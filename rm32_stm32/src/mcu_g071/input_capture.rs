@@ -1,8 +1,8 @@
 //! G071 input capture: TIM3 CH1 (PB4) + DMA1 Channel 1 + DMAMUX.
 
-use crate::pac::{DMA1, DMAMUX, GPIOB, RCC, TIM3};
-use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
+use crate::capture_hal::{DmaOps, InputPinOps, TimerOps};
+use crate::pac::{DMA1, DMAMUX, GPIOB, RCC, TIM3};
 
 // --- DMA1 Channel 1 (G071) ---
 pub struct G071Dma;
@@ -27,21 +27,41 @@ impl DmaOps for G071Dma {
     fn start_rx(&self) {
         let dma = unsafe { &*DMA1::ptr() };
         dma.ch1().cr().write(|w| unsafe {
-            w.tcie().set_bit().minc().set_bit()
-             .psize().bits(0b10).msize().bits(0b10).en().set_bit()
+            w.tcie()
+                .set_bit()
+                .minc()
+                .set_bit()
+                .psize()
+                .bits(0b10)
+                .msize()
+                .bits(0b10)
+                .en()
+                .set_bit()
         });
     }
     fn start_tx(&self) {
         let dma = unsafe { &*DMA1::ptr() };
         dma.ch1().cr().write(|w| unsafe {
-            w.dir().set_bit().tcie().set_bit().minc().set_bit()
-             .psize().bits(0b10).msize().bits(0b10).en().set_bit()
+            w.dir()
+                .set_bit()
+                .tcie()
+                .set_bit()
+                .minc()
+                .set_bit()
+                .psize()
+                .bits(0b10)
+                .msize()
+                .bits(0b10)
+                .en()
+                .set_bit()
         });
     }
 }
 
 // --- TIM3 (G071) ---
-pub struct G071Timer { pub prescaler: u8 }
+pub struct G071Timer {
+    pub prescaler: u8,
+}
 
 impl TimerOps for G071Timer {
     fn reset(&self) {
@@ -53,7 +73,8 @@ impl TimerOps for G071Timer {
         let tim = unsafe { &*TIM3::ptr() };
         tim.ccmr1_output().write(|w| unsafe { w.bits(0x41) });
         tim.ccer().write(|w| unsafe { w.bits(0x0A) });
-        tim.psc().write(|w| unsafe { w.bits(self.prescaler as u32) });
+        tim.psc()
+            .write(|w| unsafe { w.bits(self.prescaler as u32) });
         tim.arr().write(|w| unsafe { w.bits(0xFFFF) });
         tim.egr().write(|w| w.ug().set_bit());
         tim.cnt().write(|w| unsafe { w.bits(0) });
@@ -109,21 +130,22 @@ pub fn init_g071() {
     let gpiob = unsafe { &*GPIOB::ptr() };
     let dmamux = unsafe { &*DMAMUX::ptr() };
 
-    rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });
-    rcc.ahbenr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) });
-    rcc.iopenr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });
+    rcc.apbenr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });
+    rcc.ahbenr()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) });
+    rcc.iopenr()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });
 
     gpiob.moder().modify(|_, w| w.moder4().alternate());
     gpiob.afrl().modify(|_, w| w.afr(4).af1());
 
-    dmamux.ccr(0).modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 32) });
+    dmamux
+        .ccr(0)
+        .modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 32) });
 }
 
 /// Create a new G071 DshotCapture instance.
 pub fn new_capture() -> DshotCapture {
-    GenericCapture::new(
-        G071Dma,
-        G071Timer { prescaler: 64 / 6 },
-        G071Pin,
-    )
+    GenericCapture::new(G071Dma, G071Timer { prescaler: 64 / 6 }, G071Pin)
 }

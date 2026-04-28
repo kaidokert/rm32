@@ -1,27 +1,49 @@
 //! L431 input capture: TIM15 CH1 (PA2/AF14) + DMA1 Channel 5 (request 7).
 
-use crate::pac::{DMA1, GPIOA, RCC, TIM15};
-use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
+use crate::capture_hal::{DmaOps, InputPinOps, TimerOps};
+use crate::pac::{DMA1, GPIOA, RCC, TIM15};
 
 // --- DMA1 Channel 5 (L431, flat registers) ---
 pub struct L431Dma;
 
 impl DmaOps for L431Dma {
-    fn disable(&self) { unsafe { &*DMA1::ptr() }.ccr5.write(|w| unsafe { w.bits(0) }); }
-    fn set_mar(&self, a: u32) { unsafe { &*DMA1::ptr() }.cmar5.write(|w| unsafe { w.bits(a) }); }
-    fn set_par(&self, a: u32) { unsafe { &*DMA1::ptr() }.cpar5.write(|w| unsafe { w.bits(a) }); }
-    fn set_ndtr(&self, n: u32) { unsafe { &*DMA1::ptr() }.cndtr5.write(|w| unsafe { w.bits(n) }); }
+    fn disable(&self) {
+        unsafe { &*DMA1::ptr() }
+            .ccr5
+            .write(|w| unsafe { w.bits(0) });
+    }
+    fn set_mar(&self, a: u32) {
+        unsafe { &*DMA1::ptr() }
+            .cmar5
+            .write(|w| unsafe { w.bits(a) });
+    }
+    fn set_par(&self, a: u32) {
+        unsafe { &*DMA1::ptr() }
+            .cpar5
+            .write(|w| unsafe { w.bits(a) });
+    }
+    fn set_ndtr(&self, n: u32) {
+        unsafe { &*DMA1::ptr() }
+            .cndtr5
+            .write(|w| unsafe { w.bits(n) });
+    }
     fn start_rx(&self) {
-        unsafe { &*DMA1::ptr() }.ccr5.write(|w| unsafe { w.bits(0x98B) });
+        unsafe { &*DMA1::ptr() }
+            .ccr5
+            .write(|w| unsafe { w.bits(0x98B) });
     }
     fn start_tx(&self) {
-        unsafe { &*DMA1::ptr() }.ccr5.write(|w| unsafe { w.bits(0x99B) });
+        unsafe { &*DMA1::ptr() }
+            .ccr5
+            .write(|w| unsafe { w.bits(0x99B) });
     }
 }
 
 // --- TIM15 (L431) ---
-pub struct L431Timer { pub prescaler: u8 }
+pub struct L431Timer {
+    pub prescaler: u8,
+}
 
 impl TimerOps for L431Timer {
     fn reset(&self) {
@@ -49,7 +71,8 @@ impl TimerOps for L431Timer {
     }
     fn start(&self) {
         let tim = unsafe { &*TIM15::ptr() };
-        tim.dier.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 9)) });
+        tim.dier
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 9)) });
         tim.ccer.modify(|r, w| unsafe { w.bits(r.bits() | 1) });
         tim.cr1.modify(|r, w| unsafe { w.bits(r.bits() | 1) });
     }
@@ -67,13 +90,19 @@ impl InputPinOps for L431Pin {
         unsafe { &*GPIOA::ptr() }.idr.read().idr2().bit()
     }
     fn set_pull_up(&self) {
-        unsafe { &*GPIOA::ptr() }.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
+        unsafe { &*GPIOA::ptr() }
+            .pupdr
+            .modify(|_, w| unsafe { w.pupdr2().bits(0b01) });
     }
     fn set_pull_down(&self) {
-        unsafe { &*GPIOA::ptr() }.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b10) });
+        unsafe { &*GPIOA::ptr() }
+            .pupdr
+            .modify(|_, w| unsafe { w.pupdr2().bits(0b10) });
     }
     fn set_pull_none(&self) {
-        unsafe { &*GPIOA::ptr() }.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b00) });
+        unsafe { &*GPIOA::ptr() }
+            .pupdr
+            .modify(|_, w| unsafe { w.pupdr2().bits(0b00) });
     }
 }
 
@@ -90,7 +119,8 @@ pub fn init_l431() {
     }
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
-    dma.cselr.modify(|r, w| unsafe { w.bits((r.bits() & !(0xF << 16)) | (7 << 16)) });
+    dma.cselr
+        .modify(|r, w| unsafe { w.bits((r.bits() & !(0xF << 16)) | (7 << 16)) });
 }
 
 pub fn new_capture() -> L431DshotCapture {

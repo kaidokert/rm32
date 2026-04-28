@@ -1,5 +1,5 @@
-pub use stm32g0xx_hal::stm32 as pac;
 pub use stm32g0xx_hal as hal_impl;
+pub use stm32g0xx_hal::stm32 as pac;
 
 use crate::mcu::ChipConfig;
 
@@ -23,13 +23,15 @@ pub use super::flash::FlashStorage;
 /// Enable TIM2 peripheral clock.
 pub fn enable_tim2_clock() {
     let rcc = unsafe { &*pac::RCC::PTR };
-    rcc.apbenr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
+    rcc.apbenr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
 }
 
 /// Enable commutation timer (TIM14) peripheral clock.
 pub fn enable_com_timer_clock() {
     let rcc = unsafe { &*pac::RCC::PTR };
-    rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN
+    rcc.apbenr2()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) }); // TIM14EN
 }
 
 /// Adjust IRQ priorities based on motor speed. No-op on G071.
@@ -39,7 +41,9 @@ pub type TargetIsrHal = crate::isr::IsrHal<
     super::pwm::Tim1Pwm,
     super::input_capture::DshotCapture,
     super::comparator::G071BemfComparator,
-    crate::timer::Tim2Interval, crate::timer::Tim14Com, crate::phase::G0APhaseDriver,
+    crate::timer::Tim2Interval,
+    crate::timer::Tim14Com,
+    crate::phase::G0APhaseDriver,
 >;
 pub use super::comparator::G071BemfComparator as BemfComp;
 pub use super::init::init as init_mcu;

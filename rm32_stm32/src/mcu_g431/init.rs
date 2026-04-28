@@ -4,7 +4,9 @@ use crate::init::InitResult;
 use crate::phase::G0APhaseDriver;
 use crate::timer::{Tim2Interval, Tim14Com};
 
-pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::G431Adc, super::telemetry_uart::G431TelemUart> {
+pub fn init(
+    dead_time: u8,
+) -> InitResult<super::system::System, super::adc::G431Adc, super::telemetry_uart::G431TelemUart> {
     use stm32g4xx_hal::stm32 as pac;
 
     let rcc = unsafe { &*pac::RCC::PTR };
@@ -22,11 +24,16 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::G431
 
         // Configure PLL: PLLSRC=HSI16, M=4(3), N=85, R=2(0), PLLREN
         rcc.pllcfgr().write(|w| {
-            w.pllsrc().bits(0b10)  // HSI16
-             .pllm().bits(3)       // M=4 (M-1)
-             .plln().bits(85)
-             .pllr().bits(0)       // R=2 (00=/2)
-             .pllren().set_bit()
+            w.pllsrc()
+                .bits(0b10) // HSI16
+                .pllm()
+                .bits(3) // M=4 (M-1)
+                .plln()
+                .bits(85)
+                .pllr()
+                .bits(0) // R=2 (00=/2)
+                .pllren()
+                .set_bit()
         });
 
         // Enable PLL
@@ -38,26 +45,35 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::G431
         while rcc.cfgr().read().sws().bits() != 0b11 {}
 
         // Enable peripheral clocks
-        rcc.ahb2enr().modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
-        rcc.apb2enr().modify(|_, w| w.tim1en().set_bit().tim15en().set_bit().tim16en().set_bit());
-        rcc.apb1enr1().modify(|_, w| w.tim2en().set_bit().tim6en().set_bit());
+        rcc.ahb2enr()
+            .modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
+        rcc.apb2enr()
+            .modify(|_, w| w.tim1en().set_bit().tim15en().set_bit().tim16en().set_bit());
+        rcc.apb1enr1()
+            .modify(|_, w| w.tim2en().set_bit().tim6en().set_bit());
 
         // PA8/9/10 as AF6 (TIM1_CH1/2/3)
         gpioa.moder().modify(|_, w| {
-            w.moder8().bits(0b10).moder9().bits(0b10).moder10().bits(0b10)
+            w.moder8()
+                .bits(0b10)
+                .moder9()
+                .bits(0b10)
+                .moder10()
+                .bits(0b10)
         });
-        gpioa.afrh().modify(|_, w| {
-            w.afrh8().bits(6).afrh9().bits(6).afrh10().bits(6)
-        });
+        gpioa
+            .afrh()
+            .modify(|_, w| w.afrh8().bits(6).afrh9().bits(6).afrh10().bits(6));
     }
 
     // TIM1 PWM: 170MHz / (ARR+1) = 24kHz -> ARR = 7082
     unsafe {
         tim1.psc().write(|w| w.psc().bits(0));
-        tim1.arr().write(|w| w.arr().bits(crate::config::TIM1_AUTORELOAD as u32));
-        tim1.ccmr1_output().write(|w| w.bits(0x6868));  // OC1/2 PWM mode 1
-        tim1.ccmr2_output().write(|w| w.bits(0x0068));  // OC3 PWM mode 1
-        tim1.ccer().write(|w| w.bits(0x555));            // CC1-3 + CC1N-3N enable
+        tim1.arr()
+            .write(|w| w.arr().bits(crate::config::TIM1_AUTORELOAD as u32));
+        tim1.ccmr1_output().write(|w| w.bits(0x6868)); // OC1/2 PWM mode 1
+        tim1.ccmr2_output().write(|w| w.bits(0x0068)); // OC3 PWM mode 1
+        tim1.ccer().write(|w| w.bits(0x555)); // CC1-3 + CC1N-3N enable
         tim1.bdtr().write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
         tim1.cr1().write(|w| w.cen().set_bit());
     }
@@ -81,7 +97,8 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::G431
     let _ = adc.init();
 
     // UART telemetry
-    let telem = super::telemetry_uart::G431TelemUart::init().unwrap_or_else(|_| super::telemetry_uart::G431TelemUart::post_init());
+    let telem = super::telemetry_uart::G431TelemUart::init()
+        .unwrap_or_else(|_| super::telemetry_uart::G431TelemUart::post_init());
 
     // TIM6: 170MHz / 8500 = 20kHz
     unsafe {
@@ -109,6 +126,18 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::G431
     }
 
     let sys = super::system::System::new();
-    let hal = crate::isr::TargetIsrHal { pwm, input, comp, interval, com_timer, phase };
-    InitResult { hal, sys, adc, telem }
+    let hal = crate::isr::TargetIsrHal {
+        pwm,
+        input,
+        comp,
+        interval,
+        com_timer,
+        phase,
+    };
+    InitResult {
+        hal,
+        sys,
+        adc,
+        telem,
+    }
 }

@@ -17,7 +17,8 @@ pub fn init_comp2() {
     let exti = unsafe { &*EXTI::ptr() };
 
     // Enable SYSCFG clock
-    rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // SYSCFGEN
+    rcc.apbenr2()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // SYSCFGEN
 
     // Configure analog pins:
     // PA2 (COMP2_INM IO3), PA3 (COMP2_INP IO3) as analog
@@ -39,7 +40,7 @@ pub fn init_comp2() {
         w.bits(
             ((0b1000 << 4)   // INMSEL = IO3 (PA2)
             | (0b10 << 8))  // power mode high speed
-            | (1 << 0)      // EN = enable
+            | (1 << 0), // EN = enable
         )
     });
 
@@ -47,8 +48,11 @@ pub fn init_comp2() {
     cortex_m::asm::delay(320);
 
     // EXTI line 18: start with interrupts disabled
-    exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() & !(1 << 18)) });
+    exti.imr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() & !(1 << 18)) });
     // Both edges initially (change_input will select rising or falling)
-    exti.rtsr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 18)) });
-    exti.ftsr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 18)) });
+    exti.rtsr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 18)) });
+    exti.ftsr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 18)) });
 }

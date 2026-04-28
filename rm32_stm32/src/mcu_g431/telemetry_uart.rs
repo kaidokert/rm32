@@ -2,9 +2,9 @@
 //! USART2 on PB3 (AF7), half-duplex open-drain, 115200 baud.
 //! DMA1 Channel 3 (DMAMUX request 27 = USART2_TX).
 
-use crate::telem_hal::UartPeripheral;
-use crate::regs::InitError;
 use crate::pac;
+use crate::regs::InitError;
+use crate::telem_hal::UartPeripheral;
 
 pub struct G431Uart;
 
@@ -40,12 +40,18 @@ impl UartPeripheral for G431Uart {
 
     fn wait_ready(&self) -> Result<(), InitError> {
         let usart = unsafe { &*pac::USART2::PTR };
-        crate::regs::wait_for(|| unsafe { usart.isr().read().teack().bit() }, 100_000, "USART TEACK")
+        crate::regs::wait_for(
+            || unsafe { usart.isr().read().teack().bit() },
+            100_000,
+            "USART TEACK",
+        )
     }
 
     fn configure_dma_routing(&self) {
         let dmamux = unsafe { &*pac::DMAMUX::PTR };
-        unsafe { dmamux.ccr(2).write(|w| w.dmareq_id().bits(27)); }
+        unsafe {
+            dmamux.ccr(2).write(|w| w.dmareq_id().bits(27));
+        }
     }
 
     fn configure_dma_channel(&self) {
@@ -55,7 +61,16 @@ impl UartPeripheral for G431Uart {
         unsafe {
             ch3.par().write(|w| w.bits(usart.tdr().as_ptr() as u32));
             ch3.mar().write(|w| w.bits(0));
-            ch3.cr().write(|w| w.tcie().set_bit().teie().set_bit().dir().set_bit().minc().set_bit());
+            ch3.cr().write(|w| {
+                w.tcie()
+                    .set_bit()
+                    .teie()
+                    .set_bit()
+                    .dir()
+                    .set_bit()
+                    .minc()
+                    .set_bit()
+            });
         }
     }
 
@@ -76,6 +91,10 @@ impl UartPeripheral for G431Uart {
 pub type G431TelemUart = crate::telem_hal::GenericTelemUart<G431Uart>;
 
 impl G431TelemUart {
-    pub fn init() -> Result<Self, InitError> { crate::telem_hal::GenericTelemUart::new_init(G431Uart) }
-    pub fn post_init() -> Self { crate::telem_hal::GenericTelemUart::new_post_init(G431Uart) }
+    pub fn init() -> Result<Self, InitError> {
+        crate::telem_hal::GenericTelemUart::new_init(G431Uart)
+    }
+    pub fn post_init() -> Self {
+        crate::telem_hal::GenericTelemUart::new_post_init(G431Uart)
+    }
 }

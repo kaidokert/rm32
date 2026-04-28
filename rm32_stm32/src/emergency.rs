@@ -13,11 +13,7 @@ impl rm32::hal::EmergencyOff for G0AEmergencyOff {
     fn emergency_off() {
         // BSRR reset bits force GPIO outputs low regardless of peripheral state.
         // GpioPort::write_bsrr is safe (write-only, bit-atomic register).
-        PortA::write_bsrr(
-            (1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16))
-        );
-        PortB::write_bsrr(
-            (1 << 16) | (1 << (1 + 16))
-        );
+        PortA::write_bsrr((1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16)));
+        PortB::write_bsrr((1 << 16) | (1 << (1 + 16)));
     }
 }

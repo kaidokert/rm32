@@ -9,6 +9,7 @@ bytemuck = { version = "1", default-features = false, features = ["derive"] }
 heapless = "0.8"
 dronecan = { version = "0.1", default-features = false, optional = true }
 fixed = "1.31.0"
+portable-atomic = { version = "1", default-features = false }
 
 [[bin]]
 name = "rm32_harness"

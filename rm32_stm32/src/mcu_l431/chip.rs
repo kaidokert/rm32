@@ -1,5 +1,5 @@
-pub use stm32l4xx_hal::pac;
 pub use stm32l4xx_hal as hal_impl;
+pub use stm32l4xx_hal::pac;
 
 use crate::mcu::ChipConfig;
 
@@ -23,13 +23,15 @@ pub use super::flash::FlashStorage;
 /// Enable TIM2 peripheral clock.
 pub fn enable_tim2_clock() {
     let rcc = unsafe { &*pac::RCC::PTR };
-    rcc.apb1enr1.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
+    rcc.apb1enr1
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // TIM2EN
 }
 
 /// Enable commutation timer (TIM16) peripheral clock.
 pub fn enable_com_timer_clock() {
     let rcc = unsafe { &*pac::RCC::PTR };
-    rcc.apb2enr.modify(|r, w| unsafe { w.bits(r.bits() | (1 << 17)) }); // TIM16EN
+    rcc.apb2enr
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 17)) }); // TIM16EN
 }
 
 /// Adjust IRQ priorities based on motor speed.
@@ -38,7 +40,8 @@ pub fn enable_com_timer_clock() {
 pub fn adjust_irq_priorities(interval: u32, dshot_telem: bool) {
     use pac::Interrupt;
     const DSHOT_PRIORITY_THRESHOLD: u32 = 60;
-    let nvic = unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
+    let nvic =
+        unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
     if dshot_telem && interval > DSHOT_PRIORITY_THRESHOLD {
         unsafe {
             nvic.set_priority(Interrupt::DMA1_CH5, 0);
@@ -58,7 +61,9 @@ pub type TargetIsrHal = crate::isr::IsrHal<
     super::pwm::Pwm,
     super::input_capture::L431DshotCapture,
     super::comparator::L431BemfComparator,
-    crate::timer::Tim2Interval, crate::timer::Tim14Com, crate::phase::G0APhaseDriver,
+    crate::timer::Tim2Interval,
+    crate::timer::Tim14Com,
+    crate::phase::G0APhaseDriver,
 >;
 pub use super::comparator::L431BemfComparator as BemfComp;
 pub use super::init::init as init_mcu;

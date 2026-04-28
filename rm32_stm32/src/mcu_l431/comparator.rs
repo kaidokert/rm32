@@ -1,5 +1,5 @@
-use crate::comparator::BemfComparator;
 use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
+use crate::comparator::BemfComparator;
 use crate::pac::{COMP, EXTI};
 
 pub struct L431Comp;
@@ -11,9 +11,8 @@ impl CompOps for L431Comp {
     fn set_inmsel(&self, phase: u32) {
         let comp = unsafe { &*COMP::ptr() };
         let v = comp.comp2_csr.read().bits();
-        comp.comp2_csr.write(|w| unsafe {
-            w.bits((v & !(0xF << 4 | 0x3 << 8)) | (phase << 4))
-        });
+        comp.comp2_csr
+            .write(|w| unsafe { w.bits((v & !(0xF << 4 | 0x3 << 8)) | (phase << 4)) });
     }
 }
 
@@ -23,11 +22,13 @@ impl ExtiOps for L431Exti {
     fn set_rising_edge(&self) {
         let exti = unsafe { &*EXTI::ptr() };
         exti.rtsr1.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
-        exti.ftsr1.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+        exti.ftsr1
+            .modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
     }
     fn set_falling_edge(&self) {
         let exti = unsafe { &*EXTI::ptr() };
-        exti.rtsr1.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
+        exti.rtsr1
+            .modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
         exti.ftsr1.modify(|r, w| unsafe { w.bits(r.bits() | LINE) });
     }
     fn enable_interrupt(&self) {
@@ -43,7 +44,9 @@ impl ExtiOps for L431Exti {
 }
 
 pub const INMSEL: InmselMap = InmselMap {
-    phase_a: 0b0101, phase_b: 0b0100, phase_c: 0b0011,
+    phase_a: 0b0101,
+    phase_b: 0b0100,
+    phase_c: 0b0011,
 };
 
 pub type L431BemfComparator = BemfComparator<L431Comp, L431Exti>;

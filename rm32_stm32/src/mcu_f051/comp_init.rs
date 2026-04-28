@@ -17,10 +17,14 @@ pub fn init_comp1() {
     unsafe {
         // PA0, PA1, PA4, PA5 as analog mode
         gpioa.moder.modify(|_, w| {
-            w.moder0().analog()
-             .moder1().analog()
-             .moder4().analog()
-             .moder5().analog()
+            w.moder0()
+                .analog()
+                .moder1()
+                .analog()
+                .moder4()
+                .analog()
+                .moder5()
+                .analog()
         });
 
         // Enable SYSCFG/COMP clock (APB2ENR bit 0)
@@ -31,9 +35,12 @@ pub fn init_comp1() {
             // Clear COMP1 bits (lower 16), keep COMP2 bits (upper 16)
             let comp2_bits = r.bits() & 0xFFFF_0000;
             w.bits(comp2_bits)
-             .comp1en().enabled()
-             .comp1insel().bits(0b101) // PA5
-             .comp1mode().high_speed()
+                .comp1en()
+                .enabled()
+                .comp1insel()
+                .bits(0b101) // PA5
+                .comp1mode()
+                .high_speed()
         });
 
         // Wait for startup (~5us at 48MHz)

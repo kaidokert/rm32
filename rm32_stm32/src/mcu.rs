@@ -20,14 +20,14 @@ pub trait ChipConfig {
 }
 
 // Re-export pac, hal_impl, and Chip from the active MCU directory.
-#[cfg(feature = "stm32g071")]
-pub use crate::mcu_g071::chip::*;
 #[cfg(feature = "stm32f051")]
 pub use crate::mcu_f051::chip::*;
-#[cfg(feature = "stm32l431")]
-pub use crate::mcu_l431::chip::*;
+#[cfg(feature = "stm32g071")]
+pub use crate::mcu_g071::chip::*;
 #[cfg(feature = "stm32g431")]
 pub use crate::mcu_g431::chip::*;
+#[cfg(feature = "stm32l431")]
+pub use crate::mcu_l431::chip::*;
 
 // Backward-compatible config module.
 pub mod config {

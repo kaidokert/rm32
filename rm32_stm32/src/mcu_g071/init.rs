@@ -4,14 +4,13 @@ use crate::init::InitResult;
 use crate::phase::G0APhaseDriver;
 use crate::timer::{Tim2Interval, Tim14Com};
 
-pub fn init(dead_time: u8) -> InitResult<
-    super::system::SystemControl,
-    super::adc::AdcReader,
-    super::telemetry_uart::TelemUart,
-> {
+pub fn init(
+    dead_time: u8,
+) -> InitResult<super::system::SystemControl, super::adc::AdcReader, super::telemetry_uart::TelemUart>
+{
     use stm32g0xx_hal::prelude::*;
-    use stm32g0xx_hal::stm32;
     use stm32g0xx_hal::rcc::Config as RccConfig;
+    use stm32g0xx_hal::stm32;
     use stm32g0xx_hal::time::Hertz;
 
     let dp = stm32::Peripherals::take().unwrap();
@@ -21,8 +20,12 @@ pub fn init(dead_time: u8) -> InitResult<
     let _gpiob = dp.GPIOB.split(&mut rcc);
 
     let pwm = super::pwm::Tim1Pwm::new(
-        dp.TIM1, gpioa.pa8, gpioa.pa9, gpioa.pa10,
-        Hertz::from_raw(24_000), &mut rcc,
+        dp.TIM1,
+        gpioa.pa8,
+        gpioa.pa9,
+        gpioa.pa10,
+        Hertz::from_raw(24_000),
+        &mut rcc,
         dead_time,
     );
     let phase = G0APhaseDriver::new(false);
@@ -40,7 +43,8 @@ pub fn init(dead_time: u8) -> InitResult<
 
     let adc = super::adc::new_adc();
     let _ = adc.init();
-    let telem = super::telemetry_uart::TelemUart::init().unwrap_or_else(|_| super::telemetry_uart::TelemUart::post_init());
+    let telem = super::telemetry_uart::TelemUart::init()
+        .unwrap_or_else(|_| super::telemetry_uart::TelemUart::post_init());
 
     // TIM6: 20kHz
     {
@@ -64,8 +68,21 @@ pub fn init(dead_time: u8) -> InitResult<
         NVIC::unmask(Interrupt::EXTI4_15);
     }
     let exti = unsafe { &*stm32::EXTI::ptr() };
-    exti.imr1().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) });
+    exti.imr1()
+        .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 15)) });
 
-    let hal = crate::isr::TargetIsrHal { pwm, input, comp, interval, com_timer, phase };
-    InitResult { hal, sys, adc, telem }
+    let hal = crate::isr::TargetIsrHal {
+        pwm,
+        input,
+        comp,
+        interval,
+        com_timer,
+        phase,
+    };
+    InitResult {
+        hal,
+        sys,
+        adc,
+        telem,
+    }
 }

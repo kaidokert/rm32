@@ -14,7 +14,7 @@ use rm32::edt::EdtScheduler;
 use rm32::hal;
 use rm32::transfer::TransferState;
 
-use crate::shared::SharedState;
+use rm32::shared_state::SharedState;
 
 /// ISR-exclusive hardware — generic over all HAL peripherals.
 /// Zero cfg blocks. Concrete types resolved by `TargetIsrHal` alias.
@@ -70,7 +70,9 @@ pub type TargetIsrState = IsrState<TargetIsrHal>;
 static ISR_STATE: Mutex<RefCell<Option<TargetIsrState>>> = Mutex::new(RefCell::new(None));
 static SHARED: SharedState = SharedState::new();
 
-pub fn shared() -> &'static SharedState { &SHARED }
+pub fn shared() -> &'static SharedState {
+    &SHARED
+}
 
 pub fn init_isr_state(state: TargetIsrState) {
     cortex_m::interrupt::free(|cs| {

@@ -2,8 +2,8 @@
 //!
 //! MCU-specific register details abstracted via DmaOps + TimerOps + InputPinOps.
 
+use crate::capture_hal::{DmaOps, InputPinOps, TimerOps};
 use rm32::hal::InputCapture;
-use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 
 pub struct GenericCapture<D: DmaOps, T: TimerOps, P: InputPinOps> {
     pub buffer_size: u16,
@@ -22,10 +22,11 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> GenericCapture<D, T, P> {
             out_put: false,
             dma_buf: [0; 64],
             gcr_buf: [0; 37],
-            dma, timer, pin,
+            dma,
+            timer,
+            pin,
         }
     }
-
 }
 
 impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, T, P> {
@@ -55,11 +56,25 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, 
         self.timer.start();
     }
 
-    fn input_pin_state(&self) -> bool { self.pin.read() }
-    fn set_pull_up(&mut self) { self.pin.set_pull_up(); }
-    fn set_pull_down(&mut self) { self.pin.set_pull_down(); }
-    fn set_pull_none(&mut self) { self.pin.set_pull_none(); }
-    fn dma_buffer(&self) -> &[u32; 64] { &self.dma_buf }
-    fn gcr_buffer(&mut self) -> &mut [u32; 37] { &mut self.gcr_buf }
-    fn is_output(&self) -> bool { self.out_put }
+    fn input_pin_state(&self) -> bool {
+        self.pin.read()
+    }
+    fn set_pull_up(&mut self) {
+        self.pin.set_pull_up();
+    }
+    fn set_pull_down(&mut self) {
+        self.pin.set_pull_down();
+    }
+    fn set_pull_none(&mut self) {
+        self.pin.set_pull_none();
+    }
+    fn dma_buffer(&self) -> &[u32; 64] {
+        &self.dma_buf
+    }
+    fn gcr_buffer(&mut self) -> &mut [u32; 37] {
+        &mut self.gcr_buf
+    }
+    fn is_output(&self) -> bool {
+        self.out_put
+    }
 }

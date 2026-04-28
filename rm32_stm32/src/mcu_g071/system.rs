@@ -1,8 +1,8 @@
 //! System control (IRQ, watchdog, reset).
 
-use stm32g0xx_hal::watchdog::{IndependedWatchdog, IWDGExt};
-use stm32g0xx_hal::stm32::IWDG;
 use rm32::hal::System;
+use stm32g0xx_hal::stm32::IWDG;
+use stm32g0xx_hal::watchdog::{IWDGExt, IndependedWatchdog};
 
 pub struct SystemControl {
     wdg: IndependedWatchdog,
@@ -32,12 +32,12 @@ impl System for SystemControl {
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) {
         let iwdg = unsafe { &*stm32g0xx_hal::stm32::IWDG::PTR };
         unsafe {
-            iwdg.kr().write(|w| w.bits(0x5555));  // unlock
+            iwdg.kr().write(|w| w.bits(0x5555)); // unlock
             iwdg.pr().write(|w| w.pr().bits(prescaler));
             iwdg.rlr().write(|w| w.rl().bits(reload as u16));
             while iwdg.sr().read().bits() & 0x03 != 0 {}
-            iwdg.kr().write(|w| w.bits(0xCCCC));  // start
-            iwdg.kr().write(|w| w.bits(0xAAAA));  // reload
+            iwdg.kr().write(|w| w.bits(0xCCCC)); // start
+            iwdg.kr().write(|w| w.bits(0xAAAA)); // reload
         }
     }
 

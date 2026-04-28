@@ -3,24 +3,28 @@
 //! This runs in thread mode (non-ISR). Accesses shared state via atomics,
 //! owns protection/telemetry/config exclusively.
 
-use rm32::config::EepromConfig;
-use rm32::constants::*;
-use rm32::control::state::{Measurements, ProtectionState, TelemetryState};
-use rm32::current::CurrentFilter;
-use rm32::filter::EwmaPow2;
-use rm32::pid::Pid;
-use rm32::functions::get_abs_dif;
-use rm32::hal::{Adc, TelemetryUart};
-use rm32::telemetry;
+use crate::config::EepromConfig;
+use crate::constants::*;
+use crate::control::state::{Measurements, ProtectionState, TelemetryState};
+use crate::current::CurrentFilter;
+use crate::filter::EwmaPow2;
+use crate::functions::get_abs_dif;
+use crate::hal::{Adc, TelemetryUart};
+use crate::pid::Pid;
+use crate::telemetry;
 use embedded_hal::digital::OutputPin;
 
-use crate::shared::SharedState;
+use crate::shared_state::SharedState;
 
 /// Marker type for boards without a custom LED.
 pub struct NoLed;
 impl OutputPin for NoLed {
-    fn set_low(&mut self) -> Result<(), Self::Error> { Ok(()) }
-    fn set_high(&mut self) -> Result<(), Self::Error> { Ok(()) }
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 impl embedded_hal::digital::ErrorType for NoLed {
     type Error = core::convert::Infallible;
@@ -87,7 +91,8 @@ impl<LED: OutputPin> MainState<LED> {
         if zc > 100 && adj_input < 200 {
             self.protection.bemf_timeout_happened = 0;
         }
-        if self.config.use_sine_start != 0 && adj_input < rm32::constants::SINE_BEMF_CLEAR_THROTTLE {
+        if self.config.use_sine_start != 0 && adj_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
+        {
             self.protection.bemf_timeout_happened = 0;
         }
         // Dynamic BEMF timeout threshold: lenient at low throttle
@@ -114,20 +119,19 @@ impl<LED: OutputPin> MainState<LED> {
                 if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
                     || shared.commutation_interval() > 1000
                 {
-                    shared.transition(rm32::motor_mode::MotorEvent::StopMotor);
+                    shared.transition(crate::motor_mode::MotorEvent::StopMotor);
                 }
-                shared.transition(rm32::motor_mode::MotorEvent::DesyncFallback);
+                shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
             }
             self.desync_check = false;
             self.last_average_interval = self.average_interval;
         }
 
         // Signal timeout
-        if shared.signal_timeout() > rm32::constants::SIGNAL_TIMEOUT_DISARM
-            && shared.armed() {
-                shared.transition(rm32::motor_mode::MotorEvent::Disarm);
-                shared.set_input_set(false);
-            }
+        if shared.signal_timeout() > crate::constants::SIGNAL_TIMEOUT_DISARM && shared.armed() {
+            shared.transition(crate::motor_mode::MotorEvent::Disarm);
+            shared.set_input_set(false);
+        }
 
         // eRPM
         if !shared.stepper_sine() && e_com_time > 0 {
@@ -147,21 +151,26 @@ impl<LED: OutputPin> MainState<LED> {
             } else if !self.protection.low_voltage_cutoff {
                 self.protection.low_voltage_count = 0;
             }
-            let lvc_limit = if shared.stepper_sine() { LVC_STARTUP_THRESHOLD } else { LVC_NORMAL_THRESHOLD };
+            let lvc_limit = if shared.stepper_sine() {
+                LVC_STARTUP_THRESHOLD
+            } else {
+                LVC_NORMAL_THRESHOLD
+            };
             if self.protection.low_voltage_count > lvc_limit {
                 self.protection.low_voltage_cutoff = true;
-                shared.transition(rm32::motor_mode::MotorEvent::Disarm);
+                shared.transition(crate::motor_mode::MotorEvent::Disarm);
             }
         }
 
         // ADC measurements — typed conversions via AdcCount
-        use rm32::units::AdcCount;
+        use crate::units::AdcCount;
         let smoothed_v = AdcCount(self.voltage_filter.update(adc.raw_voltage()));
         let smoothed_c = AdcCount(self.current_filter.update(adc.raw_current()));
         self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
-        self.measurements.actual_current = smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
+        self.measurements.actual_current =
+            smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
         self.measurements.degrees_celsius = if self.use_ntc {
-            rm32::ntc::ntc_degrees(adc.raw_temperature())
+            crate::ntc::ntc_degrees(adc.raw_temperature())
         } else {
             adc.calc_temperature(adc.raw_temperature())
         };
@@ -175,10 +184,9 @@ impl<LED: OutputPin> MainState<LED> {
         // Cell count auto-detection on arming transition
         let armed = shared.armed();
         self.just_armed = armed && !self.last_armed;
-        if self.just_armed
-            && self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
-                self.cell_count = (self.measurements.battery_voltage.0 / 370) as u8;
-            }
+        if self.just_armed && self.cell_count == 0 && self.config.low_voltage_cut_off == 1 {
+            self.cell_count = (self.measurements.battery_voltage.0 / 370) as u8;
+        }
         self.last_armed = armed;
 
         // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
@@ -194,7 +202,9 @@ impl<LED: OutputPin> MainState<LED> {
         // Speed control PID — closed-loop RPM control
         if self.use_speed_control_loop && shared.running() {
             let e_com = shared.e_com_time();
-            self.speed_input_override += self.speed_pid.calculate(e_com, self.target_e_com_time as i32);
+            self.speed_input_override += self
+                .speed_pid
+                .calculate(e_com, self.target_e_com_time as i32);
             self.speed_input_override = self.speed_input_override.clamp(0, 2047 * 10000);
             if shared.zero_crosses() < 100 {
                 self.speed_pid.integral = 0;
@@ -225,14 +235,16 @@ impl<LED: OutputPin> MainState<LED> {
         {
             let input = shared.adjusted_input();
             self.led_counter = self.led_counter.wrapping_add(1);
-            if input >= 47 && input < 1947 {
-                if self.led_counter > rm32::constants::LED_BLINK_HALF_PERIOD {
+            if (47..1947).contains(&input) {
+                if self.led_counter > crate::constants::LED_BLINK_HALF_PERIOD {
                     let _ = self.led.set_high();
                 } else {
                     let _ = self.led.set_low();
                 }
-                if self.led_counter > rm32::constants::LED_BLINK_HALF_PERIOD * 2 { self.led_counter = 0; }
-            } else if input > rm32::constants::LED_HIGH_THROTTLE {
+                if self.led_counter > crate::constants::LED_BLINK_HALF_PERIOD * 2 {
+                    self.led_counter = 0;
+                }
+            } else if input > crate::constants::LED_HIGH_THROTTLE {
                 let _ = self.led.set_high();
             } else {
                 let _ = self.led.set_low();

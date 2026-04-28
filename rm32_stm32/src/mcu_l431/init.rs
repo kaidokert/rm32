@@ -4,9 +4,11 @@ use crate::init::InitResult;
 use crate::phase::G0APhaseDriver;
 use crate::timer::{Tim2Interval, Tim14Com};
 
-pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::L431Adc, super::telemetry_uart::L431TelemUart> {
-    use stm32l4xx_hal::prelude::*;
+pub fn init(
+    dead_time: u8,
+) -> InitResult<super::system::System, super::adc::L431Adc, super::telemetry_uart::L431TelemUart> {
     use stm32l4xx_hal::pac;
+    use stm32l4xx_hal::prelude::*;
 
     let dp = pac::Peripherals::take().unwrap();
     let _cp = cortex_m::Peripherals::take().unwrap();
@@ -15,23 +17,31 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::L431
     let mut flash = dp.FLASH.constrain();
     let mut rcc = dp.RCC.constrain();
     let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
-    let clocks = rcc.cfgr.sysclk(80_000_000u32.Hz()).freeze(&mut flash.acr, &mut pwr);
+    let clocks = rcc
+        .cfgr
+        .sysclk(80_000_000u32.Hz())
+        .freeze(&mut flash.acr, &mut pwr);
     let _ = clocks;
 
     let rcc_pac = unsafe { &*pac::RCC::ptr() };
     unsafe {
         // Enable GPIOA, GPIOB (AHB2ENR bits 0, 1)
-        rcc_pac.ahb2enr.modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
+        rcc_pac
+            .ahb2enr
+            .modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
         // Enable TIM1 (APB2ENR bit 11)
         rcc_pac.apb2enr.modify(|_, w| w.tim1en().set_bit());
 
         // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2)
         let gpioa = &*pac::GPIOA::ptr();
         gpioa.moder.modify(|r, w| {
-            w.bits((r.bits() & !(0b11<<16 | 0b11<<18 | 0b11<<20)) | (0b10<<16 | 0b10<<18 | 0b10<<20))
+            w.bits(
+                (r.bits() & !(0b11 << 16 | 0b11 << 18 | 0b11 << 20))
+                    | (0b10 << 16 | 0b10 << 18 | 0b10 << 20),
+            )
         });
         gpioa.afrh.modify(|r, w| {
-            w.bits((r.bits() & !(0xFFF)) | (1 | 1<<4 | 1<<8))  // AF1
+            w.bits((r.bits() & !(0xFFF)) | (1 | 1 << 4 | 1 << 8)) // AF1
         });
     }
 
@@ -39,10 +49,11 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::L431
     unsafe {
         let tim1 = &*pac::TIM1::ptr();
         tim1.psc.write(|w| w.bits(0));
-        tim1.arr.write(|w| w.bits(crate::config::TIM1_AUTORELOAD as u32));
-        tim1.ccmr1_output().write(|w| w.bits(0x6868));   // OC1/2 PWM mode 1
-        tim1.ccmr2_output().write(|w| w.bits(0x0068));   // OC3 PWM mode 1
-        tim1.ccer.write(|w| w.bits(0x555));               // CC1-3 + CC1N-3N enable
+        tim1.arr
+            .write(|w| w.bits(crate::config::TIM1_AUTORELOAD as u32));
+        tim1.ccmr1_output().write(|w| w.bits(0x6868)); // OC1/2 PWM mode 1
+        tim1.ccmr2_output().write(|w| w.bits(0x0068)); // OC3 PWM mode 1
+        tim1.ccer.write(|w| w.bits(0x555)); // CC1-3 + CC1N-3N enable
         tim1.bdtr.write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
         tim1.cr1.write(|w| w.cen().set_bit());
     }
@@ -66,7 +77,8 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::L431
     let _ = adc.init();
 
     // UART telemetry
-    let telem = super::telemetry_uart::L431TelemUart::init().unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
+    let telem = super::telemetry_uart::L431TelemUart::init()
+        .unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
 
     // TIM6: 80MHz / 4000 = 20kHz
     unsafe {
@@ -98,6 +110,18 @@ pub fn init(dead_time: u8) -> InitResult<super::system::System, super::adc::L431
     }
 
     let sys = super::system::System::new();
-    let hal = crate::isr::TargetIsrHal { pwm, input, comp, interval, com_timer, phase };
-    InitResult { hal, sys, adc, telem }
+    let hal = crate::isr::TargetIsrHal {
+        pwm,
+        input,
+        comp,
+        interval,
+        com_timer,
+        phase,
+    };
+    InitResult {
+        hal,
+        sys,
+        adc,
+        telem,
+    }
 }

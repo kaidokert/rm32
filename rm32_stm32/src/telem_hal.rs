@@ -3,8 +3,8 @@
 //! `UartPeripheral` trait splits init into discrete operations.
 //! `GenericTelemUart` provides the shared `TelemetryUart` impl with tx buffer management.
 
-use rm32::hal::TelemetryUart;
 use crate::regs::InitError;
+use rm32::hal::TelemetryUart;
 
 /// MCU-specific UART + DMA register operations.
 pub trait UartPeripheral {
@@ -39,11 +39,17 @@ impl<U: UartPeripheral> GenericTelemUart<U> {
         ops.wait_ready()?;
         ops.configure_dma_routing();
         ops.configure_dma_channel();
-        Ok(Self { ops, tx_buf: [0; 49] })
+        Ok(Self {
+            ops,
+            tx_buf: [0; 49],
+        })
     }
 
     pub fn new_post_init(ops: U) -> Self {
-        Self { ops, tx_buf: [0; 49] }
+        Self {
+            ops,
+            tx_buf: [0; 49],
+        }
     }
 }
 

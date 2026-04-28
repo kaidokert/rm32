@@ -1,7 +1,7 @@
 //! G071 interrupt vectors — thin wrappers calling shared handlers.
 
-use stm32g0xx_hal::stm32::interrupt;
 use crate::isr_handlers;
+use stm32g0xx_hal::stm32::interrupt;
 
 #[interrupt]
 fn TIM6_DAC_LPTIM1() {
@@ -47,8 +47,16 @@ fn EXTI4_15() {
     let shared = crate::isr::shared();
     let gpiob = unsafe { &*stm32g0xx_hal::stm32::GPIOB::ptr() };
     let pin_high = gpiob.idr().read().bits() & (1 << 4) != 0;
-    let sz = if shared.servo_pwm() && pin_high { 3u32 } else if shared.servo_pwm() { 2 } else { 32 };
+    let sz = if shared.servo_pwm() && pin_high {
+        3u32
+    } else if shared.servo_pwm() {
+        2
+    } else {
+        32
+    };
     dma.ch(0).ndtr().write(|w| unsafe { w.bits(sz) });
     dma.ch(0).cr().modify(|_, w| w.en().set_bit());
-    unsafe { &*stm32g0xx_hal::stm32::TIM3::ptr() }.cr1().modify(|_, w| w.cen().set_bit());
+    unsafe { &*stm32g0xx_hal::stm32::TIM3::ptr() }
+        .cr1()
+        .modify(|_, w| w.cen().set_bit());
 }

@@ -1,7 +1,7 @@
 //! F051 ADC: CH2 current, CH6 voltage, CH16 temp. DMA1_CH1 circular.
 
-use crate::pac::{ADC, DMA1, GPIOA, RCC};
 use crate::adc_hal::AdcPeripheral;
+use crate::pac::{ADC, DMA1, GPIOA, RCC};
 use crate::regs::{InitError, wait_for};
 
 crate::define_adc_boilerplate!(
@@ -24,7 +24,9 @@ impl AdcPeripheral for F051AdcOps {
 
     fn configure_pins(&self) {
         let gpioa = unsafe { &*GPIOA::ptr() };
-        gpioa.moder.modify(|_, w| w.moder2().analog().moder6().analog());
+        gpioa
+            .moder
+            .modify(|_, w| w.moder2().analog().moder6().analog());
     }
 
     fn configure_clock_source(&self) {
@@ -42,10 +44,21 @@ impl AdcPeripheral for F051AdcOps {
         let adc = unsafe { &*ADC::ptr() };
 
         dma.ch1.cr.write(|w| w.en().disabled());
-        dma.ch1.par.write(|w| unsafe { w.bits(&adc.dr as *const _ as u32) });
+        dma.ch1
+            .par
+            .write(|w| unsafe { w.bits(&adc.dr as *const _ as u32) });
         dma.ch1.mar.write(|w| unsafe { w.bits(buf_ptr as u32) });
         dma.ch1.ndtr.write(|w| unsafe { w.bits(buf_len as u32) });
-        dma.ch1.cr.write(|w| w.circ().enabled().minc().enabled().psize().bits16().msize().bits16());
+        dma.ch1.cr.write(|w| {
+            w.circ()
+                .enabled()
+                .minc()
+                .enabled()
+                .psize()
+                .bits16()
+                .msize()
+                .bits16()
+        });
         dma.ch1.cr.modify(|_, w| w.en().enabled());
     }
 
@@ -56,13 +69,16 @@ impl AdcPeripheral for F051AdcOps {
 
     fn configure_sequence(&self) {
         let adc = unsafe { &*ADC::ptr() };
-        adc.chselr.write(|w| unsafe { w.bits((1 << 2) | (1 << 6) | (1 << 16)) });
+        adc.chselr
+            .write(|w| unsafe { w.bits((1 << 2) | (1 << 6) | (1 << 16)) });
     }
 
     fn enable_dma_mode(&self) {
         let adc = unsafe { &*ADC::ptr() };
-        adc.cfgr1.modify(|_, w| w.dmaen().set_bit().dmacfg().set_bit());
-        adc.cfgr1.modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << 3)) });
+        adc.cfgr1
+            .modify(|_, w| w.dmaen().set_bit().dmacfg().set_bit());
+        adc.cfgr1
+            .modify(|r, w| unsafe { w.bits(r.bits() & !(0b11 << 3)) });
     }
 
     // power_up(): default no-op — F051 doesn't have deep power-down
@@ -70,7 +86,11 @@ impl AdcPeripheral for F051AdcOps {
     fn calibrate(&self) -> Result<(), InitError> {
         let adc = unsafe { &*ADC::ptr() };
         adc.cr.write(|w| w.adcal().start_calibration());
-        wait_for(|| !adc.cr.read().adcal().is_calibrating(), 100_000, "ADC cal")?;
+        wait_for(
+            || !adc.cr.read().adcal().is_calibrating(),
+            100_000,
+            "ADC cal",
+        )?;
         cortex_m::asm::delay(48 * 20);
         Ok(())
     }

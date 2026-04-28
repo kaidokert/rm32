@@ -1,14 +1,16 @@
 //! F051 interrupt vectors — thin wrappers calling shared handlers.
 
-use stm32f0xx_hal::pac::interrupt;
-use crate::pac;
 use crate::isr_handlers;
+use crate::pac;
+use stm32f0xx_hal::pac::interrupt;
 
 #[interrupt]
 fn TIM6_DAC() {
     // Clear UIF
     let tim6 = unsafe { &*pac::TIM6::PTR };
-    unsafe { tim6.sr.write(|w| w.bits(0)); }
+    unsafe {
+        tim6.sr.write(|w| w.bits(0));
+    }
     isr_handlers::handle_tim6();
 }
 
@@ -29,7 +31,9 @@ fn DMA1_CH4_5_6_7_DMA2_CH3_4_5() {
     let dma_isr = dma.isr.read().bits();
     // Channel 5 TC flag = bit 17
     if dma_isr & (1 << 17) != 0 {
-        unsafe { dma.ifcr.write(|w| w.bits(1 << 16)); } // CGIF5
+        unsafe {
+            dma.ifcr.write(|w| w.bits(1 << 16));
+        } // CGIF5
         // Disable DMA CH5 (CCR5)
         unsafe {
             dma.ch5.cr.modify(|r, w| w.bits(r.bits() & !1));
@@ -37,7 +41,9 @@ fn DMA1_CH4_5_6_7_DMA2_CH3_4_5() {
         isr_handlers::handle_dma_tc();
         // Trigger software EXTI15
         let exti = unsafe { &*pac::EXTI::PTR };
-        unsafe { exti.swier.write(|w| w.bits(1 << 15)); }
+        unsafe {
+            exti.swier.write(|w| w.bits(1 << 15));
+        }
     }
 }
 
@@ -45,7 +51,9 @@ fn DMA1_CH4_5_6_7_DMA2_CH3_4_5() {
 fn EXTI4_15() {
     // Clear EXTI15 pending
     let exti = unsafe { &*pac::EXTI::PTR };
-    unsafe { exti.pr.write(|w| w.bits(1 << 15)); }
+    unsafe {
+        exti.pr.write(|w| w.bits(1 << 15));
+    }
     isr_handlers::handle_exti_frame();
 
     // Re-enable DMA CH5 for next frame

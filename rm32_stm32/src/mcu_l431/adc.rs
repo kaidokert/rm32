@@ -1,7 +1,7 @@
 //! L431 ADC: CH8 current, CH11 voltage, CH17 temp. DMA1_CH1 circular.
 
-use crate::pac::{ADC1, ADC_COMMON, DMA1, GPIOA, RCC};
 use crate::adc_hal::AdcPeripheral;
+use crate::pac::{ADC_COMMON, ADC1, DMA1, GPIOA, RCC};
 use crate::regs::{InitError, wait_for};
 
 crate::define_adc_boilerplate!(
@@ -17,19 +17,24 @@ impl AdcPeripheral for L431AdcOps {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*RCC::ptr() };
         unsafe {
-            rcc.ahb2enr.modify(|_, w| w.adcen().set_bit().gpioaen().set_bit());
+            rcc.ahb2enr
+                .modify(|_, w| w.adcen().set_bit().gpioaen().set_bit());
             rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
         }
     }
 
     fn configure_pins(&self) {
         let gpioa = unsafe { &*GPIOA::ptr() };
-        gpioa.moder.modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
+        gpioa
+            .moder
+            .modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
     }
 
     fn configure_clock_source(&self) {
         let adc_common = unsafe { &*ADC_COMMON::ptr() };
-        adc_common.ccr.modify(|_, w| unsafe { w.ckmode().bits(0b01) });
+        adc_common
+            .ccr
+            .modify(|_, w| unsafe { w.ckmode().bits(0b01) });
     }
 
     fn enable_temp_sensor(&self) {
@@ -41,12 +46,15 @@ impl AdcPeripheral for L431AdcOps {
         let adc = unsafe { &*ADC1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 
-        dma.cselr.modify(|r, w| unsafe { w.bits(r.bits() & !(0xF << 0)) });
+        dma.cselr
+            .modify(|r, w| unsafe { w.bits(r.bits() & !(0xF << 0)) });
         dma.ccr1.write(|w| unsafe { w.bits(0) });
-        dma.cpar1.write(|w| unsafe { w.bits(adc.dr.as_ptr() as u32) });
+        dma.cpar1
+            .write(|w| unsafe { w.bits(adc.dr.as_ptr() as u32) });
         dma.cmar1.write(|w| unsafe { w.bits(buf_ptr as u32) });
         dma.cndtr1.write(|w| unsafe { w.bits(buf_len as u32) });
-        dma.ccr1.write(|w| unsafe { w.bits((1<<5)|(1<<7)|(0b01<<8)|(0b01<<10)) });
+        dma.ccr1
+            .write(|w| unsafe { w.bits((1 << 5) | (1 << 7) | (0b01 << 8) | (0b01 << 10)) });
         dma.ccr1.modify(|r, w| unsafe { w.bits(r.bits() | 1) });
     }
 
@@ -59,12 +67,13 @@ impl AdcPeripheral for L431AdcOps {
 
     fn configure_sequence(&self) {
         let adc = unsafe { &*ADC1::ptr() };
-        adc.sqr1.write(|w| unsafe { w.l().bits(2).sq1().bits(8).sq2().bits(11).sq3().bits(17) });
+        adc.sqr1
+            .write(|w| unsafe { w.l().bits(2).sq1().bits(8).sq2().bits(11).sq3().bits(17) });
     }
 
     fn enable_dma_mode(&self) {
         let adc = unsafe { &*ADC1::ptr() };
-        adc.cfgr.write(|w| unsafe { w.bits((1<<0)|(1<<1)) });
+        adc.cfgr.write(|w| unsafe { w.bits((1 << 0) | (1 << 1)) });
     }
 
     fn power_up(&self) {

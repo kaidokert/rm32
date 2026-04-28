@@ -15,7 +15,9 @@ pub struct TelemUart {
 
 impl TelemUart {
     /// Create a handle to already-initialized USART hardware.
-    pub fn post_init() -> Self { Self { tx_buf: [0; 49] } }
+    pub fn post_init() -> Self {
+        Self { tx_buf: [0; 49] }
+    }
 
     /// Initialize USART1 + DMA3 for half-duplex telemetry TX.
     pub fn init() -> Result<Self, crate::regs::InitError> {
@@ -25,9 +27,12 @@ impl TelemUart {
         let dma = unsafe { &*DMA1::ptr() };
 
         // Enable clocks: USART1 (APB2), GPIOB (IOP), DMA1 (AHB)
-        rcc.apbenr2().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 14)) }); // USART1EN
-        rcc.iopenr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });   // GPIOBEN
-        rcc.ahbenr().modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) });   // DMA1EN
+        rcc.apbenr2()
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 14)) }); // USART1EN
+        rcc.iopenr()
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) }); // GPIOBEN
+        rcc.ahbenr()
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 0)) }); // DMA1EN
 
         // PB6: alternate function 0 (USART1_TX), open-drain, pull-up
         let pin = 6u32;
@@ -36,7 +41,9 @@ impl TelemUart {
             w.bits((r.bits() & !(0b11 << moder_off)) | (0b10 << moder_off))
         });
         // Open-drain
-        gpiob.otyper().modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) });
+        gpiob
+            .otyper()
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << pin)) });
         // Pull-up
         let pupdr_off = pin * 2;
         gpiob.pupdr().modify(|r, w| unsafe {
@@ -55,21 +62,35 @@ impl TelemUart {
         // Half-duplex mode
         usart.cr3().write(|w| w.hdsel().set_bit());
         // Enable TX+RX, then enable USART
-        usart.cr1().write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
+        usart
+            .cr1()
+            .write(|w| w.te().set_bit().re().set_bit().ue().set_bit());
 
         // Wait for TEACK + REACK
-        crate::regs::wait_for(|| usart.isr().read().teack().bit_is_set(), 100_000, "USART TEACK")?;
-        crate::regs::wait_for(|| usart.isr().read().reack().bit_is_set(), 100_000, "USART REACK")?;
+        crate::regs::wait_for(
+            || usart.isr().read().teack().bit_is_set(),
+            100_000,
+            "USART TEACK",
+        )?;
+        crate::regs::wait_for(
+            || usart.isr().read().reack().bit_is_set(),
+            100_000,
+            "USART REACK",
+        )?;
 
         // DMA1 Channel 3: USART1_TX
         // DMAMUX channel 2 (0-indexed) → USART1_TX request
         // DMAMUX: Channel 2 → USART1_TX (request 51)
         let dmamux = unsafe { &*crate::pac::DMAMUX::ptr() };
-        dmamux.ccr(2).modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 51) });
+        dmamux
+            .ccr(2)
+            .modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 51) });
 
         // Configure DMA channel 3 (index 2)
         // MAR is set to 0 here; send_dma() sets the actual buffer address before each transfer.
-        dma.ch(2).par().write(|w| unsafe { w.bits(usart.tdr().as_ptr() as u32) });
+        dma.ch(2)
+            .par()
+            .write(|w| unsafe { w.bits(usart.tdr().as_ptr() as u32) });
         dma.ch(2).mar().write(|w| unsafe { w.bits(0) });
 
         // Enable TC + TE interrupts on DMA channel 3
@@ -79,7 +100,7 @@ impl TelemUart {
                 (1 << 1)  // TCIE
                 | (1 << 3)  // TEIE
                 | (1 << 4)  // DIR = memory-to-periph
-                | (1 << 7)  // MINC
+                | (1 << 7), // MINC
             )
         });
 
@@ -101,7 +122,9 @@ impl TelemetryUart for TelemUart {
 
         // Configure and start DMA transfer
         dma.ch(2).cr().modify(|_, w| w.en().clear_bit()); // disable first
-        dma.ch(2).mar().write(|w| unsafe { w.bits(self.tx_buf.as_ptr() as u32) });
+        dma.ch(2)
+            .mar()
+            .write(|w| unsafe { w.bits(self.tx_buf.as_ptr() as u32) });
         dma.ch(2).ndtr().write(|w| unsafe { w.bits(len as u32) });
 
         // Enable USART DMA TX request

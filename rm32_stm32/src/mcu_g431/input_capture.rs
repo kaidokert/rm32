@@ -1,7 +1,7 @@
 //! G431 input capture: TIM15 CH1 (PA2/AF9) + DMA1 Channel 1 (DMAMUX req 78).
 
-use crate::capture_hal::{DmaOps, TimerOps, InputPinOps};
 use crate::capture_generic::GenericCapture;
+use crate::capture_hal::{DmaOps, InputPinOps, TimerOps};
 use crate::pac;
 
 // --- DMA1 Channel 1 (G431) ---
@@ -10,32 +10,46 @@ pub struct G431Dma;
 impl DmaOps for G431Dma {
     fn disable(&self) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.cr().write(|w| w.bits(0)); }
+        unsafe {
+            ch.cr().write(|w| w.bits(0));
+        }
     }
     fn set_mar(&self, a: u32) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.mar().write(|w| w.bits(a)); }
+        unsafe {
+            ch.mar().write(|w| w.bits(a));
+        }
     }
     fn set_par(&self, a: u32) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.par().write(|w| w.bits(a)); }
+        unsafe {
+            ch.par().write(|w| w.bits(a));
+        }
     }
     fn set_ndtr(&self, n: u32) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.ndtr().write(|w| w.bits(n)); }
+        unsafe {
+            ch.ndtr().write(|w| w.bits(n));
+        }
     }
     fn start_rx(&self) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.cr().write(|w| w.bits(0x98B)); }
+        unsafe {
+            ch.cr().write(|w| w.bits(0x98B));
+        }
     }
     fn start_tx(&self) {
         let ch = unsafe { &*pac::DMA1::PTR }.ch1();
-        unsafe { ch.cr().write(|w| w.bits(0x99B)); }
+        unsafe {
+            ch.cr().write(|w| w.bits(0x99B));
+        }
     }
 }
 
 // --- TIM15 (G431) ---
-pub struct G431Timer { pub prescaler: u8 }
+pub struct G431Timer {
+    pub prescaler: u8,
+}
 
 impl TimerOps for G431Timer {
     fn reset(&self) {
@@ -71,7 +85,7 @@ impl TimerOps for G431Timer {
         let tim = unsafe { &*pac::TIM15::PTR };
         unsafe {
             tim.dier().modify(|r, w| w.bits(r.bits() | (1 << 9))); // CC1DE
-            tim.ccer().modify(|r, w| w.bits(r.bits() | 1));         // CC1E
+            tim.ccer().modify(|r, w| w.bits(r.bits() | 1)); // CC1E
             tim.cr1().modify(|_, w| w.cen().set_bit());
         }
     }
@@ -91,15 +105,21 @@ impl InputPinOps for G431Pin {
     }
     fn set_pull_up(&self) {
         let gpioa = unsafe { &*pac::GPIOA::PTR };
-        unsafe { gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b01)); }
+        unsafe {
+            gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b01));
+        }
     }
     fn set_pull_down(&self) {
         let gpioa = unsafe { &*pac::GPIOA::PTR };
-        unsafe { gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b10)); }
+        unsafe {
+            gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b10));
+        }
     }
     fn set_pull_none(&self) {
         let gpioa = unsafe { &*pac::GPIOA::PTR };
-        unsafe { gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b00)); }
+        unsafe {
+            gpioa.pupdr().modify(|_, w| w.pupdr2().bits(0b00));
+        }
     }
 }
 

@@ -17,19 +17,28 @@ pub fn init_comp2() {
 
     unsafe {
         // Enable GPIOA, GPIOB clocks (AHB2ENR bits 0, 1)
-        rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
+        rcc.ahb2enr
+            .modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
 
         // PA4, PA5 as analog (INM inputs)
-        gpioa.moder.modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));
+        gpioa
+            .moder
+            .modify(|_, w| w.moder4().bits(0b11).moder5().bits(0b11));
         // PB4 as analog (INP), PB7 as analog (INM)
-        gpiob.moder.modify(|_, w| w.moder4().bits(0b11).moder7().bits(0b11));
+        gpiob
+            .moder
+            .modify(|_, w| w.moder4().bits(0b11).moder7().bits(0b11));
 
         // Configure COMP2 via PAC
         comp.comp2_csr.write(|w| {
-            w.comp2_inmsel().bits(0b101) // PB7 = IO2
-             .comp2_inpsel().bits(0b00) // IO1 = PB4
-             .comp2_pwrmode().bits(0b00) // high speed
-             .comp2_en().set_bit()
+            w.comp2_inmsel()
+                .bits(0b101) // PB7 = IO2
+                .comp2_inpsel()
+                .bits(0b00) // IO1 = PB4
+                .comp2_pwrmode()
+                .bits(0b00) // high speed
+                .comp2_en()
+                .set_bit()
         });
 
         // Wait for startup (~5us at 80MHz)

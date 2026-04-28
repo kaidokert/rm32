@@ -1,7 +1,7 @@
 //! Generic BEMF comparator — MCU details via CompOps + ExtiOps traits.
 
-use rm32::hal::Comparator as CompTrait;
 use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
+use rm32::hal::Comparator as CompTrait;
 
 /// Generic BEMF comparator. Zero cfg blocks — MCU differences in trait impls.
 pub struct BemfComparator<C: CompOps, E: ExtiOps> {
@@ -14,7 +14,13 @@ pub struct BemfComparator<C: CompOps, E: ExtiOps> {
 
 impl<C: CompOps, E: ExtiOps> BemfComparator<C, E> {
     pub fn new(comp: C, exti: E, inmsel: InmselMap) -> Self {
-        Self { step: 1, rising: true, comp, exti, inmsel }
+        Self {
+            step: 1,
+            rising: true,
+            comp,
+            exti,
+            inmsel,
+        }
     }
 }
 
@@ -52,4 +58,3 @@ impl<C: CompOps, E: ExtiOps> CompTrait for BemfComparator<C, E> {
         self.exti.mask_and_clear();
     }
 }
-

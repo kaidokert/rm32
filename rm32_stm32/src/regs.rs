@@ -18,7 +18,11 @@ pub enum InitError {
 /// Spin-wait for a condition with a cycle-counted timeout.
 /// Returns `Ok(())` if condition becomes true, `Err(InitError::Timeout)` if not.
 #[inline]
-pub fn wait_for(mut condition: impl FnMut() -> bool, timeout_cycles: u32, name: &'static str) -> Result<(), InitError> {
+pub fn wait_for(
+    mut condition: impl FnMut() -> bool,
+    timeout_cycles: u32,
+    name: &'static str,
+) -> Result<(), InitError> {
     let mut count = 0u32;
     while !condition() {
         count += 1;

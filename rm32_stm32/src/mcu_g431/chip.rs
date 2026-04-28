@@ -1,5 +1,5 @@
-pub use stm32g4xx_hal::stm32 as pac;
 pub use stm32g4xx_hal as hal_impl;
+pub use stm32g4xx_hal::stm32 as pac;
 
 use crate::mcu::ChipConfig;
 
@@ -39,7 +39,9 @@ pub type TargetIsrHal = crate::isr::IsrHal<
     super::pwm::Pwm,
     super::input_capture::G431DshotCapture,
     super::comparator::G431BemfComparator,
-    crate::timer::Tim2Interval, crate::timer::Tim14Com, crate::phase::G0APhaseDriver,
+    crate::timer::Tim2Interval,
+    crate::timer::Tim14Com,
+    crate::phase::G0APhaseDriver,
 >;
 pub use super::comparator::G431BemfComparator as BemfComp;
 pub use super::init::init as init_mcu;

@@ -5,12 +5,12 @@
 //! (HAL doesn't expose these).
 
 use crate::pac::TIM1;
-use stm32g0xx_hal::gpio::{gpioa::*, DefaultMode};
+use rm32::hal::PwmOutput;
+use stm32g0xx_hal::gpio::{DefaultMode, gpioa::*};
 use stm32g0xx_hal::rcc::Rcc;
 use stm32g0xx_hal::time::Hertz;
-use stm32g0xx_hal::timer::pwm::{Pwm, PwmExt, PwmPin};
 use stm32g0xx_hal::timer::Channel;
-use rm32::hal::PwmOutput;
+use stm32g0xx_hal::timer::pwm::{Pwm, PwmExt, PwmPin};
 
 type Channel1 = Channel<0>;
 type Channel2 = Channel<1>;
@@ -49,23 +49,26 @@ impl Tim1Pwm {
 
         // Advanced features not covered by HAL: dead-time, MOE, complementary outputs
         let tim = unsafe { &*TIM1::ptr() };
-        tim.bdtr().modify(|_, w| unsafe { w.dtg().bits(dead_time).moe().set_bit() });
-        tim.ccer().modify(|_, w| {
-            w.cc1ne().set_bit()
-             .cc2ne().set_bit()
-             .cc3ne().set_bit()
-        });
+        tim.bdtr()
+            .modify(|_, w| unsafe { w.dtg().bits(dead_time).moe().set_bit() });
+        tim.ccer()
+            .modify(|_, w| w.cc1ne().set_bit().cc2ne().set_bit().cc3ne().set_bit());
 
-        Self { _pwm: pwm, ch1, ch2, ch3 }
+        Self {
+            _pwm: pwm,
+            ch1,
+            ch2,
+            ch3,
+        }
     }
 }
 
 impl PwmOutput for Tim1Pwm {
     fn set_duty_all(&mut self, duty: u16) {
         // PwmPin::set_duty writes to the channel's CCR register
-        self.ch1.set_duty(duty );
-        self.ch2.set_duty(duty );
-        self.ch3.set_duty(duty );
+        self.ch1.set_duty(duty);
+        self.ch2.set_duty(duty);
+        self.ch3.set_duty(duty);
     }
 
     fn set_auto_reload(&mut self, arr: u16) {
@@ -81,15 +84,15 @@ impl PwmOutput for Tim1Pwm {
     }
 
     fn set_compare1(&mut self, val: u16) {
-        self.ch1.set_duty(val );
+        self.ch1.set_duty(val);
     }
 
     fn set_compare2(&mut self, val: u16) {
-        self.ch2.set_duty(val );
+        self.ch2.set_duty(val);
     }
 
     fn set_compare3(&mut self, val: u16) {
-        self.ch3.set_duty(val );
+        self.ch3.set_duty(val);
     }
 
     fn generate_update_event(&mut self) {
@@ -99,6 +102,7 @@ impl PwmOutput for Tim1Pwm {
 
     fn set_dead_time_override(&mut self, dtg: u16) {
         let tim = unsafe { &*TIM1::ptr() };
-        tim.bdtr().modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
+        tim.bdtr()
+            .modify(|r, w| unsafe { w.bits(r.bits() | dtg as u32) });
     }
 }

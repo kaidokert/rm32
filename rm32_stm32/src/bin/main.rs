@@ -14,10 +14,10 @@ use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, 
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
 use rm32::pid::Pid;
 
+use rm32::main_state::MainState;
 use rm32_stm32::config;
 use rm32_stm32::init::InitResult;
 use rm32_stm32::isr::{self, IsrState};
-use rm32_stm32::main_loop::MainState;
 use rm32_stm32::mcu::FlashStorage;
 
 // Board configuration generated from YAML by build.rs.
@@ -123,7 +123,7 @@ fn main() -> ! {
         last_armed: false,
         just_armed: false,
         use_ntc: BOARD.use_ntc,
-        led: rm32_stm32::main_loop::NoLed,
+        led: rm32::main_state::NoLed,
         led_counter: 0,
     };
 
