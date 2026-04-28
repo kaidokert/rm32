@@ -98,6 +98,22 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.duty.cycle = ctx.duty.cycle.saturating_add(stall_boost);
     }
 
+    // Sync main→ISR published state (main computes, ISR applies)
+    let published_arr = ctx.shared.tim1_arr();
+    if published_arr > 0 {
+        ctx.counters.tim1_arr = published_arr;
+    }
+    let published_max = ctx.shared.duty_maximum();
+    if published_max > 0 {
+        ctx.duty.maximum = published_max;
+    }
+    ctx.bemf.filter_level = ctx.shared.filter_level();
+    let min_counts = ctx.shared.min_bemf_counts();
+    if min_counts > 0 {
+        ctx.bemf.min_counts_up = min_counts;
+        ctx.bemf.min_counts_down = min_counts;
+    }
+
     // PWM output
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {

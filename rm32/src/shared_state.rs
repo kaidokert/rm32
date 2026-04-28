@@ -477,14 +477,26 @@ impl crate::shared_comm::SharedComm for SharedState {
     fn set_send_esc_info_flag(&self, v: bool) {
         self.set_send_esc_info_flag(v);
     }
+    fn tim1_arr(&self) -> u16 {
+        SharedState::tim1_arr(self)
+    }
     fn set_tim1_arr(&self, v: u16) {
         SharedState::set_tim1_arr(self, v);
+    }
+    fn duty_maximum(&self) -> u16 {
+        SharedState::duty_maximum(self)
     }
     fn set_duty_maximum(&self, v: u16) {
         SharedState::set_duty_maximum(self, v);
     }
+    fn filter_level(&self) -> u8 {
+        SharedState::filter_level(self)
+    }
     fn set_filter_level(&self, v: u8) {
         SharedState::set_filter_level(self, v);
+    }
+    fn min_bemf_counts(&self) -> u8 {
+        SharedState::min_bemf_counts(self)
     }
     fn set_min_bemf_counts(&self, v: u8) {
         SharedState::set_min_bemf_counts(self, v);

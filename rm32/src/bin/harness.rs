@@ -369,7 +369,17 @@ impl Harness {
             self.dshot,
         );
 
-        // --- ISR tick ---
+        // Sync desync_check from commutation before main.tick()
+        if self.commutation.desync_check {
+            self.main.desync_check = true;
+            self.commutation.desync_check = false;
+        }
+
+        // --- main_loop: runs first so published values are available to ISR ---
+        self.main.config = self.config;
+        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
+
+        // --- ISR tick: reads main-published atomics (tim1_arr, duty_max, etc.) ---
         let mut ctx = MotorContext {
             commutation: &mut self.commutation,
             bemf: &mut self.bemf,
@@ -380,31 +390,6 @@ impl Harness {
             hal: &mut self.hal,
         };
         isr_logic::ten_khz_tick(&mut ctx);
-
-        // Sync desync_check from commutation BEFORE main.tick()
-        if self.commutation.desync_check {
-            self.main.desync_check = true;
-            self.commutation.desync_check = false;
-        }
-
-        // --- main_loop: call real MainState::tick() ---
-        self.main.config = self.config;
-        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
-
-        // Sync main→ISR published state
-        // MainState publishes via SharedComm, but harness2 needs to apply to local state
-        let duty_max = self.shared.duty_maximum();
-        if duty_max != 0 {
-            self.duty.maximum = duty_max;
-        }
-        let arr = self.shared.tim1_arr();
-        if arr != 0 {
-            self.counters.tim1_arr = arr;
-        }
-        self.bemf.filter_level = self.shared.filter_level();
-        let min_counts = self.shared.min_bemf_counts();
-        self.bemf.min_counts_up = min_counts;
-        self.bemf.min_counts_down = min_counts;
 
         self.tick_count += 1;
     }
