@@ -31,6 +31,12 @@ repos:
         language: system
         pass_filenames: false
 
+    -   id: clippy-stm32
+        name: Clippy (rm32_stm32)
+        entry: cargo clippy --manifest-path=rm32_stm32/Cargo.toml --features stm32g071 --no-default-features --target thumbv6m-none-eabi -- -D warnings
+        language: system
+        pass_filenames: false
+
     -   id: cross-build-g071
         name: Cross Build - STM32G071
         entry: cargo build --manifest-path=rm32_stm32/Cargo.toml --release --features stm32g071 --no-default-features --target thumbv6m-none-eabi

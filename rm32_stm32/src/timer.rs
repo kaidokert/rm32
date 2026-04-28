@@ -48,7 +48,7 @@ macro_rules! define_raw_timer {
     (method, $name:ident, $pac_periph:path) => {
         pub struct $name;
 
-        impl crate::timer::RawTimer for $name {
+        impl $crate::timer::RawTimer for $name {
             // SAFETY: Each method accesses a single PAC peripheral via its singleton PTR.
             // Safe wrappers around unsafe PAC register access.
             #[inline]
@@ -110,7 +110,7 @@ macro_rules! define_raw_timer {
     (field, $name:ident, $pac_periph:path) => {
         pub struct $name;
 
-        impl crate::timer::RawTimer for $name {
+        impl $crate::timer::RawTimer for $name {
             #[inline]
             fn read_cr1(&self) -> u32 {
                 unsafe { &*<$pac_periph>::PTR }.cr1.read().bits()
