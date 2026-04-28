@@ -1,0 +1,71 @@
+# Servo PWM calibration sequence
+# Covers: calibration_required path in computeServoInput,
+#         high calibration (averaging + set), low calibration (averaging + commit),
+#         calibration entry via transfercomplete, and getAbsDif
+
+@config
+armed=0
+inputSet=1
+servoPwm=1
+dshot=0
+EDT_ARMED=1
+throttle=-1
+
+@sequence
+# === Phase 1: Enter calibration via transfercomplete ===
+# Calibration entry requires: !armed, adjusted_input > 1500, steady for 50+ calls,
+# !disable_stick_calibration, !high_calibration_set
+# We shortcut by setting calibration_required directly.
+
+# === Phase 2: High-end calibration ===
+# calibration_required=1, high_calibration_set=0
+# Feed consistent ~1900us pulses (dma[1]-dma[0] = 1900, within 800-2200 range)
+# servo_high_threshold starts at 1900, pulse is 1900 -> getAbsDif = 0 <= 50 -> averages
+# After 51 calls: high_calibration_set=1
+
+config calibration_required=1
+config high_calibration_set=0
+config high_calibration_counts=0
+config servo_high_threshold=1900
+config dma_0=1000 dma_1=2900
+
+# Feed 51 servo pulses via transfercomplete to complete high calibration
+# Each transfercomplete with servoPwm=1 calls computeServoInput
+ticks 51 | transfer=1 |
+
+# === Phase 3: Low-end calibration ===
+# Now high_calibration_set=1, need pulses < 1250us for low calibration
+# After 76 calls with low pulse: completes, sets calibration_required=0
+
+config dma_0=1000 dma_1=2100
+
+# Feed 76 servo pulses
+ticks 76 | transfer=1 |
+
+# === Phase 4: Calibration entry via transfercomplete ===
+# Reset and test the entry path: !armed, adjusted_input > 1500, stable
+config calibration_required=0
+config high_calibration_set=0
+config high_calibration_counts=0
+config low_calibration_counts=0
+config adjusted_input=1600
+config last_input=1600
+config enter_calibration_count=50
+
+# transfercomplete with inputSet=1, !armed, adjusted_input>1500:
+# getAbsDif(1600, 1600) = 0 <= 50, so enter_calibration_count++
+# enter_calibration_count > 50 && !high_calibration_set -> calibration_required=1
+tick 1  | transfer=1 |
+
+# === Phase 5: Abort calibration (high threshold drifted too far) ===
+# If getAbsDif(last_high_threshold, servo_high_threshold) > 50 -> calibration_required=0
+config calibration_required=1
+config high_calibration_set=0
+config high_calibration_counts=0
+config servo_high_threshold=1900
+config dma_0=1000 dma_1=2500
+
+# Pulse is 1500, servo_high_threshold is 1900
+# After first call: last_high_threshold = 1500 (first time, high_cal_counts was 0)
+# Then getAbsDif(1500, 1900) = 400 > 50 -> abort
+tick 1  | transfer=1 |

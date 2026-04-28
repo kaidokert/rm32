@@ -1,0 +1,23 @@
+# Brake modes
+# Verify: different brake_on_stop settings produce correct behavior
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.comp_pwm=1
+eeprom.drag_brake_strength=5
+
+@sequence
+# With brake_on_stop=1, zero throttle should activate prop brake
+config eeprom.brake_on_stop=1
+ticks 5 | throttle=0 | prop_brake_active=1
+
+# Reset for next test
+config running=0 prop_brake_active=0
+config eeprom.brake_on_stop=0 eeprom.comp_pwm=0 eeprom.brake_on_stop=1
+
+# With brake_on_stop and non-comp_pwm, zero throttle should brake
+config eeprom.comp_pwm=0
+ticks 5 | throttle=0 | duty_cycle_setpoint=0

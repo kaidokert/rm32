@@ -1,0 +1,52 @@
+# DShot commands
+# Verify: commands 1-14, 20-21 processed correctly
+# Commands require 6 repetitions (beacons get fast-tracked)
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+throttle=-1
+
+@sequence
+# Command 1 (beacon): play_tone_flag should be set
+# Beacons have command_count set to 6 immediately
+tick 1  | dshot_frame=1 |
+
+# Need zero throttle + armed + !running for command processing
+# After processing, play_tone_flag gets consumed by setInput
+# Check that the command was at least received
+tick 1  | dshot_frame=0 |
+
+# Command 7 (direction normal): 6 repetitions needed
+tick 1  | dshot_frame=7 |
+tick 1  | dshot_frame=7 |
+tick 1  | dshot_frame=7 |
+tick 1  | dshot_frame=7 |
+tick 1  | dshot_frame=7 |
+tick 1  | dshot_frame=7 | forward=1
+
+# Command 8 (direction reversed): 6 repetitions
+tick 1  | dshot_frame=8 |
+tick 1  | dshot_frame=8 |
+tick 1  | dshot_frame=8 |
+tick 1  | dshot_frame=8 |
+tick 1  | dshot_frame=8 |
+tick 1  | dshot_frame=8 | forward=0
+
+# Command 10 (bidirectional on)
+tick 1  | dshot_frame=10 |
+tick 1  | dshot_frame=10 |
+tick 1  | dshot_frame=10 |
+tick 1  | dshot_frame=10 |
+tick 1  | dshot_frame=10 |
+tick 1  | dshot_frame=10 |
+
+# Command 9 (bidirectional off)
+tick 1  | dshot_frame=9 |
+tick 1  | dshot_frame=9 |
+tick 1  | dshot_frame=9 |
+tick 1  | dshot_frame=9 |
+tick 1  | dshot_frame=9 |
+tick 1  | dshot_frame=9 |

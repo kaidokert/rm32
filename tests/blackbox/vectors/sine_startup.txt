@@ -1,0 +1,23 @@
+# Sine startup mode
+# Verify: sine start maps throttle differently
+# Note: stepper_sine=1 activates sinusoidal drive in main_loop
+# which involves advanceincrement() calls with delays.
+# We test the input mapping, not the sinusoidal drive itself.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.use_sine_start=1
+eeprom.sine_mode_changeover_thottle_level=10
+
+@sequence
+# Zero throttle: input=0 (dead band below 30)
+tick 1  | throttle=0   | input=0
+
+# Low throttle (above 30, below changeover 200): maps to 47-160
+tick 1  | throttle=100 | input>=47 input<=160
+
+# Throttle above changeover: maps to 160-2047
+tick 1  | throttle=500 | input>160

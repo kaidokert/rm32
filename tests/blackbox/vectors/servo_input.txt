@@ -1,0 +1,35 @@
+# Servo PWM input path
+# Lights up: computeServoInput, checkServo, detectInput, transfercomplete servo branch
+
+@config
+armed=1
+inputSet=0
+dshot=0
+servoPwm=0
+EDT_ARMED=1
+throttle=-1
+
+@sequence
+# First: inject a servo-like DMA buffer and call transfercomplete
+# with inputSet=0 to trigger detectInput -> checkServo
+# Servo pulse: large intervals (>200 ticks between edges)
+config dma_0=100 dma_1=1100 dma_2=2100 dma_3=3100 dma_4=4100 dma_5=5100
+config dma_6=6100 dma_7=7100 dma_8=8100 dma_9=9100 dma_10=10100 dma_11=11100
+config dma_12=12100 dma_13=13100 dma_14=14100 dma_15=15100 dma_16=16100
+config dma_17=17100 dma_18=18100 dma_19=19100 dma_20=20100 dma_21=21100
+config dma_22=22100 dma_23=23100 dma_24=24100 dma_25=25100 dma_26=26100
+config dma_27=27100 dma_28=28100 dma_29=29100 dma_30=30100 dma_31=31100
+tick 1  | transfer=1 | inputSet=1 servoPwm=1
+
+# Now with inputSet=1 and servoPwm=1, inject a servo pulse and call transfercomplete
+# Pulse width = dma_buffer[1] - dma_buffer[0] = 1500us (mid-range)
+config dma_0=1000 dma_1=2500
+tick 1  | transfer=1 | newinput>0
+
+# High throttle pulse: 1900us
+config dma_0=1000 dma_1=2900
+tick 1  | transfer=1 |
+
+# Low throttle pulse: 1100us
+config dma_0=1000 dma_1=2100
+tick 1  | transfer=1 |

@@ -1,0 +1,29 @@
+# Variable PWM all modes
+# Mode 0: fixed (pwm_arr stays at default 1999)
+# Mode 1: maps commutation_interval 96-200 → 50%-100% of max ARR
+#
+# Note: variable_pwm sets tim1_arr in main_loop, which is applied via
+# set_auto_reload in the NEXT tick's tenKhzRoutine. So we need 2 ticks.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+running=1
+old_routine=0
+zero_crosses=200
+
+@sequence
+# --- Mode 0 (fixed): pwm_arr should be default 1999 ---
+config eeprom.variable_pwm=0
+config commutation_interval=100
+ticks 2 | throttle=1000 | pwm_arr=1999
+
+# --- Mode 1: fast commutation (96) → lower arr (~50% of 1999 ≈ 999) ---
+config eeprom.variable_pwm=1
+config commutation_interval=96
+ticks 2 | throttle=1000 | pwm_arr<=1050
+
+# --- Mode 1: slow commutation (200) → higher arr (~100% of 1999) ---
+config commutation_interval=200
+ticks 2 | throttle=1000 | pwm_arr>=1900

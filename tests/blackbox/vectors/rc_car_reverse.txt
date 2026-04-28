@@ -1,0 +1,26 @@
+# RC car reverse mode (DShot, bidirectional)
+# Verify: wrong-direction input triggers prop brake,
+# return to center clears brake and allows direction change
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+throttle=-1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=1
+forward=1
+
+@sequence
+# Forward throttle while already forward - normal operation
+tick 1  | dshot_frame=1200 | prop_brake_active=0
+
+# Reverse throttle (48-1047) while forward - triggers prop brake
+tick 1  | dshot_frame=500  | prop_brake_active=1 adjusted_input=0
+
+# Zero throttle clears brake, sets return_to_center
+tick 1  | dshot_frame=10   | prop_brake_active=0 adjusted_input=0
+
+# Now reverse throttle should work (return_to_center allows direction change)
+tick 1  | dshot_frame=500  | forward=0

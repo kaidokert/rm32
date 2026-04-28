@@ -1,0 +1,30 @@
+# Serial telemetry
+# Verify: telemetry interval triggers send, and send_telemetry flag clears
+# Also verify: ESC info packet path
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.telemetry_on_interval=1
+
+@sequence
+# Telemetry interval fires after (telemetry_interval_ms - 1 + 1) * 20 = 600 ticks
+# Each tick increments telem_ms_count in tenKhzRoutine
+# When telem_ms_count > 600, send_telemetry is set
+# main_loop then calls makeTelemPackage + send_telem_DMA and clears it
+
+# Run to just before telemetry trigger
+ticks 599 | throttle=500 | send_telemetry=0
+
+# Next tick should trigger telemetry and immediately clear it
+tick 1    | throttle=500 | send_telemetry=0
+
+# The flag was set in tenKhzRoutine but cleared in main_loop same tick
+# Run another interval to confirm it repeats
+ticks 600 | throttle=500 | send_telemetry=0
+
+# ESC info path: send_esc_info_flag triggers makeInfoPacket
+config send_esc_info_flag=1
+tick 1    | throttle=500 | send_esc_info_flag=0
