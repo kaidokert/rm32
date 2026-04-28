@@ -378,13 +378,15 @@ impl Harness {
                         self.prop_brake_active,
                         self.return_to_center,
                     );
-                    self.shared.set_adjusted_input(r.adjusted);
+                    self.shared.set_newinput(r.adjusted);
                     if r.reverse {
                         self.commutation.forward = !self.commutation.forward;
-                        self.prop_brake_active = false;
                         self.return_to_center = false;
                     }
-                    self.prop_brake_active = r.prop_brake;
+                    if r.prop_brake {
+                        self.prop_brake_active = true;
+                    }
+                    // Zero input with active brake → clear brake, enable return_to_center
                     if newinput <= 47 && self.prop_brake_active {
                         self.prop_brake_active = false;
                         self.return_to_center = true;
@@ -399,7 +401,8 @@ impl Harness {
                         self.shared.stepper_sine(),
                         1500,
                     );
-                    self.shared.set_adjusted_input(r.adjusted);
+                    // Set newinput to mapped value so ten_khz_tick sees it
+                    self.shared.set_newinput(r.adjusted);
                     if r.reverse {
                         self.commutation.forward = !self.commutation.forward;
                         self.shared.set_zero_crosses(0);
@@ -453,6 +456,12 @@ impl Harness {
         };
         isr_logic::ten_khz_tick(&mut ctx);
 
+        // Sync desync_check from commutation BEFORE main.tick()
+        if self.commutation.desync_check {
+            self.main.desync_check = true;
+            self.commutation.desync_check = false;
+        }
+
         // --- main_loop: call real MainState::tick() ---
         self.main.config = self.config;
         self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
@@ -471,12 +480,6 @@ impl Harness {
         let min_counts = self.shared.min_bemf_counts();
         self.bemf.min_counts_up = min_counts;
         self.bemf.min_counts_down = min_counts;
-
-        // Sync desync_check from commutation
-        if self.commutation.desync_check {
-            self.main.desync_check = true;
-            self.commutation.desync_check = false;
-        }
 
         self.tick_count += 1;
     }
@@ -574,6 +577,12 @@ impl Harness {
                         &mut self.hal.comp,
                         &mut self.hal.phase,
                     );
+                    // Sync commutation interval to intervals array for main_loop e_com_time calc
+                    let ci = self.shared.commutation_interval() as u16;
+                    let step = self.commutation.step;
+                    if (1..=6).contains(&step) {
+                        self.main.commutation_intervals[(step - 1) as usize] = ci;
+                    }
                 }
             }
             "interval_timer" => self.hal.interval.count = v as u32,

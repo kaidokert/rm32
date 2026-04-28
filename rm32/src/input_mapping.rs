@@ -47,9 +47,10 @@ pub fn dshot_bidir(
             prop_brake: false,
         }
     } else if newinput > 47 {
-        let want_reverse = dir_reversed;
-        let reverse = forward == want_reverse && can_reverse;
-        let adjusted = if reverse || forward == want_reverse {
+        // Motor needs to be going in the "normal forward" direction to need reversal
+        let needs_reversal = forward != dir_reversed;
+        let reverse = needs_reversal && can_reverse;
+        let adjusted = if reverse || !needs_reversal {
             ((newinput.saturating_sub(48)) * 2 + 47).saturating_sub(reversing_dead_band)
         } else {
             0
@@ -137,10 +138,11 @@ pub fn dshot_rc_car(
             }
         }
     } else {
+        // Zero input: clear brake and enable return_to_center
         BidirResult {
             adjusted: 0,
             reverse: false,
-            prop_brake: !prop_brake_active && !return_to_center,
+            prop_brake: false,
         }
     }
 }
