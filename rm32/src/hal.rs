@@ -136,13 +136,6 @@ pub trait EmergencyOff {
     fn emergency_off();
 }
 
-/// Hall sensor input for commutation (alternative to BEMF zero-cross detection).
-/// Boards with hall sensors bypass the comparator entirely.
-pub trait HallSensor {
-    /// Read the 3 hall sensor states as a 3-bit value (0-7).
-    fn read_halls(&self) -> u8;
-}
-
 /// System control (IRQ, watchdog, reset)
 pub trait System {
     fn reset(&mut self) -> !;

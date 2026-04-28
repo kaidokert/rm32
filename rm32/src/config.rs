@@ -55,7 +55,8 @@ pub struct EepromConfig {
     pub low_voltage_cut_off: u8,
     pub low_cell_volt_cutoff: u8,
     pub rc_car_reverse: u8,
-    pub use_hall_sensors: u8,
+    /// Reserved — hall sensor commutation is not implemented in C or Rust firmware.
+    pub reserved_hall_sensors: u8,
     pub sine_mode_changeover_throttle_level: u8,
     pub drag_brake_strength: u8,
     pub driving_brake_strength: u8,
