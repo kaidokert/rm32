@@ -12,4 +12,3 @@ pub mod shared_impl;
 pub mod state;
 #[cfg(test)]
 mod tests;
-pub mod tick;

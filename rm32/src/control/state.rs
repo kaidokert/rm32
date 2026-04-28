@@ -2,8 +2,6 @@
 //!
 //! Decomposed into focused sub-structs that each own a coherent slice of state.
 
-use crate::commutation::Commutation;
-use crate::config::EepromConfig;
 use crate::pid::Pid;
 
 /// BEMF zero-cross detection state.
@@ -115,52 +113,6 @@ pub struct TimingState {
     pub polling_mode_changeover: u32,
 }
 
-/// Top-level motor controller state, composed of sub-structs.
-pub struct MotorState {
-    pub commutation: Commutation,
-    pub timing: TimingState,
-    pub bemf: BemfState,
-    pub duty: DutyState,
-    pub input: InputState,
-    pub pid: PidState,
-    pub telemetry: TelemetryState,
-    pub protection: ProtectionState,
-    pub measurements: Measurements,
-
-    // Motor state machine
-    pub armed: bool,
-    pub running: bool,
-    pub old_routine: bool,
-    pub stepper_sine: bool,
-
-    // Braking
-    pub prop_brake_active: bool,
-    pub prop_brake_duty_cycle: u16,
-    pub return_to_center: bool,
-    pub reverse_speed_threshold: u16,
-
-    // Misc flags
-    pub play_tone_flag: u8,
-
-    // Counters (tick-level)
-    pub ten_khz_counter: u32,
-    pub one_khz_loop_counter: u16,
-    pub armed_timeout_count: u32,
-
-    // Hardware config
-    pub cell_count: u8,
-    pub cpu_mhz: u8,
-    pub tim1_arr: u16,
-    pub timer1_max_arr: u16,
-    pub motor_kv: u16,
-
-    // Telemetry config
-    pub telemetry_interval_ms: u8,
-
-    // Persistent config
-    pub config: EepromConfig,
-}
-
 impl Default for BemfState {
     fn default() -> Self {
         Self {
@@ -240,48 +192,6 @@ impl Default for ProtectionState {
             low_voltage_count: 0,
             low_voltage_cutoff: false,
             desync_happened: 0,
-        }
-    }
-}
-
-impl Default for MotorState {
-    fn default() -> Self {
-        Self {
-            commutation: Commutation::new(),
-            timing: TimingState::default(),
-            bemf: BemfState::default(),
-            duty: DutyState::default(),
-            input: InputState::default(),
-            pid: PidState::default(),
-            telemetry: TelemetryState::default(),
-            protection: ProtectionState::default(),
-            measurements: Measurements::default(),
-
-            armed: false,
-            running: false,
-            old_routine: true,
-            stepper_sine: false,
-
-            prop_brake_active: false,
-            prop_brake_duty_cycle: 0,
-            return_to_center: false,
-            reverse_speed_threshold: 1500,
-
-            play_tone_flag: 0,
-
-            ten_khz_counter: 0,
-            one_khz_loop_counter: 0,
-            armed_timeout_count: 0,
-
-            cell_count: 0,
-            cpu_mhz: 64,
-            tim1_arr: 1999,
-            timer1_max_arr: 1999,
-            motor_kv: 2000,
-
-            telemetry_interval_ms: 30,
-
-            config: EepromConfig::default(),
         }
     }
 }
