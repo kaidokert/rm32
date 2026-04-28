@@ -13,12 +13,12 @@ static mut ACTIVE_IS_COMP2: bool = true;
 
 macro_rules! comp {
     () => {
-        unsafe { &*COMP::PTR }
+        &*COMP::PTR
     };
 }
 macro_rules! exti {
     () => {
-        unsafe { &*EXTI::PTR }
+        &*EXTI::PTR
     };
 }
 #[inline]

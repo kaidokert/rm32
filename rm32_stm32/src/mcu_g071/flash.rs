@@ -5,7 +5,7 @@ use crate::pac;
 
 macro_rules! flash_reg {
     () => {
-        unsafe { &*pac::FLASH::PTR }
+        &*pac::FLASH::PTR
     };
 }
 
@@ -21,11 +21,11 @@ impl FlashPeripheral for G071Flash {
 
     #[inline]
     fn read_sr() -> u32 {
-        flash_reg!().sr().read().bits()
+        unsafe { flash_reg!() }.sr().read().bits()
     }
     #[inline]
     fn read_cr() -> u32 {
-        flash_reg!().cr().read().bits()
+        unsafe { flash_reg!() }.cr().read().bits()
     }
     #[inline]
     fn write_keyr(val: u32) {
@@ -53,10 +53,8 @@ impl FlashPeripheral for G071Flash {
 
     fn erase_page_impl(address: u32, page_size: u32) {
         let page = address / page_size;
-        unsafe {
-            Self::modify_cr(|v| (v & !(0x3F << 3)) | Self::PER_BIT | (page << 3));
-            Self::modify_cr(|v| v | Self::STRT_BIT);
-        }
+        Self::modify_cr(|v| (v & !(0x3F << 3)) | Self::PER_BIT | (page << 3));
+        Self::modify_cr(|v| v | Self::STRT_BIT);
     }
 
     fn program_impl(address: u32, data: &[u8]) {
@@ -82,9 +80,7 @@ impl FlashPeripheral for G071Flash {
                 core::ptr::write_volatile((address + offset + 4) as *mut u32, word_hi);
             }
             Self::wait_bsy();
-            unsafe {
-                Self::modify_cr(|v| v & !Self::PG_BIT);
-            }
+            Self::modify_cr(|v| v & !Self::PG_BIT);
             offset += 8;
             i += 8;
         }

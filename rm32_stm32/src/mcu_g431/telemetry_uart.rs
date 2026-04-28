@@ -11,11 +11,9 @@ pub struct G431Uart;
 impl UartPeripheral for G431Uart {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*pac::RCC::PTR };
-        unsafe {
-            rcc.apb1enr1().modify(|_, w| w.usart2en().set_bit());
-            rcc.ahb2enr().modify(|_, w| w.gpioben().set_bit());
-            rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
-        }
+        rcc.apb1enr1().modify(|_, w| w.usart2en().set_bit());
+        rcc.ahb2enr().modify(|_, w| w.gpioben().set_bit());
+        rcc.ahb1enr().modify(|_, w| w.dma1en().set_bit());
     }
 
     fn configure_pin(&self) {
@@ -40,11 +38,7 @@ impl UartPeripheral for G431Uart {
 
     fn wait_ready(&self) -> Result<(), InitError> {
         let usart = unsafe { &*pac::USART2::PTR };
-        crate::regs::wait_for(
-            || unsafe { usart.isr().read().teack().bit() },
-            100_000,
-            "USART TEACK",
-        )
+        crate::regs::wait_for(|| usart.isr().read().teack().bit(), 100_000, "USART TEACK")
     }
 
     fn configure_dma_routing(&self) {

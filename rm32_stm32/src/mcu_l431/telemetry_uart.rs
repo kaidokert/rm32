@@ -11,11 +11,9 @@ pub struct L431Uart;
 impl UartPeripheral for L431Uart {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*RCC::ptr() };
-        unsafe {
-            rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
-            rcc.ahb2enr.modify(|_, w| w.gpioben().set_bit());
-            rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
-        }
+        rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
+        rcc.ahb2enr.modify(|_, w| w.gpioben().set_bit());
+        rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
     }
 
     fn configure_pin(&self) {

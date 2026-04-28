@@ -54,10 +54,8 @@ pub struct G431Timer {
 impl TimerOps for G431Timer {
     fn reset(&self) {
         let rcc = unsafe { &*pac::RCC::PTR };
-        unsafe {
-            rcc.apb2rstr().modify(|_, w| w.tim15rst().set_bit());
-            rcc.apb2rstr().modify(|_, w| w.tim15rst().clear_bit());
-        }
+        rcc.apb2rstr().modify(|_, w| w.tim15rst().set_bit());
+        rcc.apb2rstr().modify(|_, w| w.tim15rst().clear_bit());
     }
     fn configure_capture(&self, _: u8) {
         let tim = unsafe { &*pac::TIM15::PTR };

@@ -11,11 +11,9 @@ pub struct F051Uart;
 impl UartPeripheral for F051Uart {
     fn enable_clocks(&self) {
         let rcc = unsafe { &*RCC::ptr() };
-        unsafe {
-            rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
-            rcc.ahbenr
-                .modify(|_, w| w.dmaen().set_bit().iopben().set_bit());
-        }
+        rcc.apb2enr.modify(|_, w| w.usart1en().set_bit());
+        rcc.ahbenr
+            .modify(|_, w| w.dmaen().set_bit().iopben().set_bit());
     }
 
     fn configure_pin(&self) {
