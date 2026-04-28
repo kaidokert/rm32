@@ -16,6 +16,7 @@ pub struct TestShared {
     pub commutation_interval: Cell<u32>,
     pub e_com_time: Cell<i32>,
     pub signal_timeout: Cell<u16>,
+    pub send_telemetry: Cell<bool>,
 }
 
 impl Default for TestShared {
@@ -37,6 +38,7 @@ impl TestShared {
             commutation_interval: Cell::new(12500),
             e_com_time: Cell::new(0),
             signal_timeout: Cell::new(0),
+            send_telemetry: Cell::new(false),
         }
     }
 }
@@ -108,5 +110,12 @@ impl SharedComm for TestShared {
         if v < u16::MAX {
             self.signal_timeout.set(v + 1);
         }
+    }
+
+    fn send_telemetry(&self) -> bool {
+        self.send_telemetry.get()
+    }
+    fn set_send_telemetry(&self, v: bool) {
+        self.send_telemetry.set(v);
     }
 }

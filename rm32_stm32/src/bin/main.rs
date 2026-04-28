@@ -126,6 +126,9 @@ fn main() -> ! {
         use_ntc: BOARD.use_ntc,
         led: rm32::main_state::NoLed,
         led_counter: 0,
+        timer1_max_arr: Chip::TIM1_AUTORELOAD,
+        cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
+        ten_khz_counter: 0,
     };
 
     // --- Check bootloader device info for dynamic EEPROM address ---

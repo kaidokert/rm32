@@ -69,6 +69,12 @@ pub struct MainState<LED: OutputPin = NoLed> {
     /// Custom LED pin (NoLed if board has no custom LED)
     pub led: LED,
     pub led_counter: u16,
+    /// TIM1 max auto-reload (from PWM frequency config)
+    pub timer1_max_arr: u16,
+    /// CPU MHz for variable PWM mode 2 scaling
+    pub cpu_mhz: u8,
+    /// Main-loop tick counter for consumed current accumulation
+    pub ten_khz_counter: u32,
 }
 
 impl<LED: OutputPin> MainState<LED> {
@@ -229,6 +235,92 @@ impl<LED: OutputPin> MainState<LED> {
             );
             telem.send_dma(&pkt);
             shared.set_send_telemetry(false);
+        }
+
+        // Consumed current accumulation (1s interval at 20kHz)
+        self.ten_khz_counter += 1;
+        if self.ten_khz_counter > 20000 {
+            self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
+            self.ten_khz_counter = 0;
+        }
+
+        // Variable PWM — adjust tim1_arr based on commutation speed
+        if self.config.variable_pwm == 1 {
+            let ci = shared.commutation_interval();
+            let new_arr = crate::functions::map(
+                ci as i32,
+                96,
+                200,
+                self.timer1_max_arr as i32 / 2,
+                self.timer1_max_arr as i32,
+            ) as u16;
+            shared.set_tim1_arr(new_arr);
+        } else if self.config.variable_pwm == 2 {
+            let avg = self.average_interval;
+            let scale = self.cpu_mhz as u32 / 9;
+            let new_arr = if avg < 100 && avg > 0 {
+                (100 * scale) as u16
+            } else if avg >= 250 || avg == 0 {
+                (250 * scale) as u16
+            } else {
+                (avg * scale) as u16
+            };
+            shared.set_tim1_arr(new_arr);
+        }
+
+        // eRPM-based throttle restriction (protects motor/ESC at extreme RPMs)
+        {
+            let k_erpm = if e_com_time > 0 {
+                (600000 / e_com_time) / 10
+            } else {
+                0
+            };
+            let poles = self.config.motor_poles.max(2) as i32;
+            let low_rpm = self.motor_kv as i32 / 100 / (32 / poles);
+            let high_rpm = self.motor_kv as i32 / 12 / (32 / poles);
+            let max_duty = if k_erpm > 0 && high_rpm > low_rpm {
+                crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000) as u16
+            } else {
+                2000
+            };
+            shared.set_duty_maximum(max_duty);
+        }
+
+        // Temperature limiting — reduces max duty when approaching limit
+        if self.measurements.degrees_celsius.0 > self.config.temperature_limit as i16 {
+            let max_duty = crate::functions::map(
+                self.measurements.degrees_celsius.0 as i32,
+                self.config.temperature_limit as i32 - 10,
+                self.config.temperature_limit as i32 + 10,
+                1000,
+                1,
+            ) as u16;
+            shared.set_duty_maximum(max_duty);
+        }
+
+        // Min BEMF counts adjustment — more lenient during startup
+        if zc < 5 {
+            let counts = if self.config.bi_direction != 0 { 3 } else { 4 };
+            shared.set_min_bemf_counts(counts);
+        } else {
+            shared.set_min_bemf_counts(2);
+        }
+
+        // Filter level — dynamic based on motor speed
+        let filter = if zc < 100 && shared.commutation_interval() > 500 {
+            12u8
+        } else if shared.commutation_interval() < 50 {
+            2
+        } else {
+            crate::functions::map(self.average_interval as i32, 100, 500, 3, 12) as u8
+        };
+        shared.set_filter_level(filter);
+
+        // Auto advance — scales with duty cycle
+        if self.config.auto_advance != 0 {
+            let level =
+                crate::functions::map(shared.duty_cycle_setpoint() as i32, 100, 2000, 13, 23) as u8;
+            shared.set_auto_advance(level);
         }
 
         // Custom LED: blink with throttle, solid when high
