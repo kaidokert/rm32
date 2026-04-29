@@ -45,7 +45,7 @@ pub fn dshot_bidir(
         };
         BidirResult {
             adjusted,
-            reverse,
+            reverse: false,
             prop_brake: false,
         }
     } else if newinput > THROTTLE_MIN_SIGNAL {
@@ -60,7 +60,7 @@ pub fn dshot_bidir(
         };
         BidirResult {
             adjusted,
-            reverse,
+            reverse: false,
             prop_brake: false,
         }
     } else {
@@ -83,11 +83,14 @@ pub fn dshot_rc_car(
     let reversing_dead_band = 1u16;
     if newinput > crate::constants::DSHOT_BIDIR_BRAKE_LIMIT {
         let want_forward = !dir_reversed;
+        let fwd_adjusted = ((newinput - crate::constants::BIDIR_MIDPOINT) * 2
+            + THROTTLE_MIN_SIGNAL)
+            .saturating_sub(reversing_dead_band);
         if forward != want_forward {
-            // Wrong direction — brake or reverse on center return
             if return_to_center {
+                // Flip direction AND apply throttle (matches C fall-through)
                 return BidirResult {
-                    adjusted: 0,
+                    adjusted: fwd_adjusted,
                     reverse: true,
                     prop_brake: false,
                 };
@@ -100,8 +103,7 @@ pub fn dshot_rc_car(
         }
         if !prop_brake_active {
             BidirResult {
-                adjusted: ((newinput - crate::constants::BIDIR_MIDPOINT) * 2 + THROTTLE_MIN_SIGNAL)
-                    .saturating_sub(reversing_dead_band),
+                adjusted: fwd_adjusted,
                 reverse: false,
                 prop_brake: false,
             }
@@ -114,10 +116,13 @@ pub fn dshot_rc_car(
         }
     } else if newinput > THROTTLE_MIN_SIGNAL {
         let want_reverse = dir_reversed;
+        let rev_adjusted = ((newinput.saturating_sub(THROTTLE_MIN_SIGNAL + 1)) * 2
+            + THROTTLE_MIN_SIGNAL)
+            .saturating_sub(reversing_dead_band);
         if forward != want_reverse {
             if return_to_center {
                 return BidirResult {
-                    adjusted: 0,
+                    adjusted: rev_adjusted,
                     reverse: true,
                     prop_brake: false,
                 };
@@ -130,8 +135,7 @@ pub fn dshot_rc_car(
         }
         if !prop_brake_active {
             BidirResult {
-                adjusted: ((newinput - (THROTTLE_MIN_SIGNAL + 1)) * 2 + THROTTLE_MIN_SIGNAL)
-                    .saturating_sub(reversing_dead_band),
+                adjusted: rev_adjusted,
                 reverse: false,
                 prop_brake: false,
             }
@@ -173,7 +177,29 @@ pub fn servo_bidir(
     if newinput > center + db2 {
         // Forward range
         let want_forward = !dir_reversed;
-        let reverse = forward != want_forward && can_reverse;
+        if forward != want_forward {
+            // Wrong direction — try to reverse
+            if can_reverse {
+                let adjusted = map(
+                    newinput as i32,
+                    (center + db2) as i32,
+                    2000,
+                    THROTTLE_MIN_SIGNAL as i32,
+                    DSHOT_MAX_THROTTLE as i32,
+                ) as u16;
+                return BidirResult {
+                    adjusted,
+                    reverse: true,
+                    prop_brake: false,
+                };
+            }
+            // Can't reverse at this speed — idle (matches C: newinput=1000)
+            return BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: false,
+            };
+        }
         let adjusted = map(
             newinput as i32,
             (center + db2) as i32,
@@ -183,13 +209,33 @@ pub fn servo_bidir(
         ) as u16;
         BidirResult {
             adjusted,
-            reverse,
+            reverse: false,
             prop_brake: false,
         }
     } else if newinput < center.saturating_sub(db2) {
         // Reverse range
         let needs_reversal = forward != dir_reversed;
-        let reverse = needs_reversal && can_reverse;
+        if needs_reversal {
+            if can_reverse {
+                let adjusted = map(
+                    newinput as i32,
+                    0,
+                    (center - db2) as i32,
+                    DSHOT_MAX_THROTTLE as i32,
+                    THROTTLE_MIN_SIGNAL as i32,
+                ) as u16;
+                return BidirResult {
+                    adjusted,
+                    reverse: true,
+                    prop_brake: false,
+                };
+            }
+            return BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: false,
+            };
+        }
         let adjusted = map(
             newinput as i32,
             0,
@@ -199,7 +245,7 @@ pub fn servo_bidir(
         ) as u16;
         BidirResult {
             adjusted,
-            reverse,
+            reverse: false,
             prop_brake: false,
         }
     } else {
@@ -375,7 +421,8 @@ pub fn clamp_startup_duty(
     maximum: u16,
 ) -> u16 {
     let mut sp = setpoint;
-    if input >= THROTTLE_MIN_SIGNAL && zero_crosses < (STARTUP_ZC_BASE >> stall_protection) {
+    let safe_shift = stall_protection.min(5); // clamp to prevent shift overflow
+    if input >= THROTTLE_MIN_SIGNAL && zero_crosses < (STARTUP_ZC_BASE >> safe_shift) {
         if sp < min_startup {
             sp = min_startup;
         }

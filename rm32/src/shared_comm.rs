@@ -156,6 +156,8 @@ pub trait SharedComm {
     }
     fn set_auto_advance(&self, _v: u8) {}
 
+    // --- ISR→Main published state ---
+
     /// Interval timer count (ISR publishes, main reads for stall detection).
     /// When this exceeds ~45000 (22.5ms at 2MHz), no BEMF zero-cross has occurred.
     fn interval_timer_count(&self) -> u32 {
