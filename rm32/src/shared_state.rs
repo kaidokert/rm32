@@ -48,6 +48,7 @@ pub struct SharedState {
 
     // Stall protection (main computes, ISR applies to duty)
     stall_protection_adjust: AtomicU16,
+    current_limit_adjust: AtomicU16, // main PID publishes, ISR clamps duty
 
     // Measurements (main writes, ISR reads for EDT)
     actual_current: AtomicU16,  // mA, stored as u16
@@ -94,6 +95,7 @@ impl SharedState {
             e_com_time: AtomicU32::new(0),
             interval_timer_count: AtomicU32::new(0),
             stall_protection_adjust: AtomicU16::new(0),
+            current_limit_adjust: AtomicU16::new(2000),
             actual_current: AtomicU16::new(0),
             battery_voltage: AtomicU16::new(0),
             degrees_celsius: AtomicU16::new(0),
@@ -344,6 +346,13 @@ impl SharedState {
         self.stall_protection_adjust.store(v, REL);
     }
 
+    pub fn current_limit_adjust(&self) -> u16 {
+        self.current_limit_adjust.load(ACQ)
+    }
+    pub fn set_current_limit_adjust(&self, v: u16) {
+        self.current_limit_adjust.store(v, REL);
+    }
+
     pub fn actual_current(&self) -> i16 {
         self.actual_current.load(ACQ) as i16
     }
@@ -500,6 +509,12 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_stall_protection_adjust(&self, v: u16) {
         self.set_stall_protection_adjust(v);
+    }
+    fn current_limit_adjust(&self) -> u16 {
+        SharedState::current_limit_adjust(self)
+    }
+    fn set_current_limit_adjust(&self, v: u16) {
+        SharedState::set_current_limit_adjust(self, v);
     }
 
     fn battery_voltage(&self) -> u16 {

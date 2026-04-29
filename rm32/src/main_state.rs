@@ -113,6 +113,10 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
     pub stall_protection_adjust: i32,
+    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
+    pub current_limit_adjust: i16,
+    /// Whether current limiting is active (set by loadEEpromSettings).
+    pub use_current_limit: bool,
     pub stall_protect_target_interval: u16,
     pub use_speed_control_loop: bool,
     pub speed_input_override: i32,
@@ -280,6 +284,20 @@ impl<LED: OutputPin> MainState<LED> {
             self.stall_protection_adjust = self.stall_protection_adjust.clamp(0, 150 * 10000);
             // Publish to ISR via shared state (ISR adds to duty)
             shared.set_stall_protection_adjust((self.stall_protection_adjust / 10000) as u16);
+        }
+
+        // Current limit PID — reduces duty when current exceeds limit
+        if self.use_current_limit && shared.running() {
+            let target = self.config.current_limit as i32 * 200;
+            let adj = self
+                .current_pid
+                .calculate(self.measurements.actual_current.0 as i32, target)
+                / 10000;
+            self.current_limit_adjust -= adj as i16;
+            self.current_limit_adjust = self
+                .current_limit_adjust
+                .clamp(self.config.minimum_duty_cycle as i16 * 10, 2000);
+            shared.set_current_limit_adjust(self.current_limit_adjust as u16);
         }
 
         // Speed control PID — closed-loop RPM control
@@ -514,6 +532,8 @@ mod tests {
             millivolt_per_amp: 20,
             current_offset: 0,
             stall_protection_adjust: 0,
+            current_limit_adjust: 2000,
+            use_current_limit: false,
             stall_protect_target_interval: 6500,
             use_speed_control_loop: false,
             speed_input_override: 0,

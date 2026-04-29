@@ -114,6 +114,11 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     if ctx.duty.cycle > ctx.duty.maximum {
         ctx.duty.cycle = ctx.duty.maximum;
     }
+    // Current limit PID ceiling
+    let current_limit = ctx.shared.current_limit_adjust();
+    if ctx.duty.cycle > current_limit {
+        ctx.duty.cycle = current_limit;
+    }
 
     // PWM output
     let tim1_arr = ctx.counters.tim1_arr;

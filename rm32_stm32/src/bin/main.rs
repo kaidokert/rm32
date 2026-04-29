@@ -114,6 +114,8 @@ fn main() -> ! {
         millivolt_per_amp: BOARD.millivolt_per_amp,
         current_offset: BOARD.current_offset,
         stall_protection_adjust: 0,
+        current_limit_adjust: 2000,
+        use_current_limit: false,
         stall_protect_target_interval: BOARD.stall_protect_interval,
         use_speed_control_loop: false,
         speed_input_override: 0,

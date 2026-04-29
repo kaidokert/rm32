@@ -156,6 +156,13 @@ pub trait SharedComm {
     }
     fn set_auto_advance(&self, _v: u8) {}
 
+    /// Current limit duty ceiling (main PID publishes, ISR clamps duty).
+    /// Default 2000 = no limit.
+    fn current_limit_adjust(&self) -> u16 {
+        2000
+    }
+    fn set_current_limit_adjust(&self, _v: u16) {}
+
     // --- ISR→Main published state ---
 
     /// Interval timer count (ISR publishes, main reads for stall detection).

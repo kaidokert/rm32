@@ -240,6 +240,8 @@ impl Harness {
                 millivolt_per_amp: 20,
                 current_offset: 0,
                 stall_protection_adjust: 0,
+                current_limit_adjust: 2000,
+                use_current_limit: false,
                 stall_protect_target_interval: 6500,
                 use_speed_control_loop: false,
                 speed_input_override: 0,
