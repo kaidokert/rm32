@@ -1,0 +1,29 @@
+# Servo RC-car bidirectional: brake + return-to-center direction flip
+# Covers: REQ-PROT-RC_CAR_REVERSE (servo path)
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=0
+servoPwm=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=1
+eeprom.servo_dead_band=100
+running=1
+old_routine=1
+forward=1
+
+@sequence
+# Forward throttle: normal operation
+tick 1  | throttle=1500 | forward=1 prop_brake_active=0 adjusted_input>0
+
+# Reverse while forward: triggers prop brake
+tick 1  | throttle=500  | forward=1 prop_brake_active=1 adjusted_input=0
+
+# Dead band: clears brake, sets return_to_center
+tick 1  | throttle=1000 | prop_brake_active=0 adjusted_input=0
+
+# Reverse again: return_to_center allows direction flip
+tick 1  | throttle=500  | forward=0 adjusted_input>0

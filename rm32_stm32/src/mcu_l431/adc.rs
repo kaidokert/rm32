@@ -25,7 +25,7 @@ impl AdcPeripheral for L431AdcOps {
         let gpioa = unsafe { &*GPIOA::ptr() };
         gpioa
             .moder
-            .modify(|_, w| unsafe { w.moder3().bits(0b11).moder6().bits(0b11) });
+            .modify(|_, w| w.moder3().bits(0b11).moder6().bits(0b11));
     }
 
     fn configure_clock_source(&self) {
