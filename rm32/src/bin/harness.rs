@@ -362,6 +362,9 @@ impl Harness {
     }
 
     fn do_tick(&mut self) {
+        // Clear one-shot flags from previous tick (so print_state can observe them)
+        self.shared.set_send_esc_info_flag(false);
+
         // Apply persistent throttle
         if self.has_throttle {
             self.shared.set_newinput(self.throttle_value);
@@ -409,11 +412,6 @@ impl Harness {
         // Runs AFTER ISR tick, matching C ordering.
         self.main.config = self.config;
         self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
-
-        // ESC info flag: firmware main.rs handles send+clear; harness just clears.
-        if self.shared.send_esc_info_flag() {
-            self.shared.set_send_esc_info_flag(false);
-        }
 
         self.tick_count += 1;
     }
@@ -568,7 +566,7 @@ impl Harness {
             "zero_input_count" => self.zero_input_count = v as u16,
             "EDT_ARMED" => self.edt_armed = v != 0,
             "EDT_ARM_ENABLE" => {}
-            "dshot_telemetry" => {}
+            "dshot_telemetry" => self.shared.set_dshot_telemetry(v != 0),
             "signaltimeout" => self.shared.set_signal_timeout(v as u16),
             "cell_count" => self.main.cell_count = v as u8,
             "battery_voltage" => {
