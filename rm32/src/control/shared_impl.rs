@@ -12,10 +12,20 @@ pub struct TestShared {
     pub newinput: Cell<u16>,
     pub adjusted_input: Cell<u16>,
     pub duty_cycle_setpoint: Cell<u16>,
+    pub duty_cycle: Cell<u16>,
+    pub forward: Cell<bool>,
     pub zero_crosses: Cell<u32>,
     pub commutation_interval: Cell<u32>,
     pub e_com_time: Cell<i32>,
     pub signal_timeout: Cell<u16>,
+    pub send_telemetry: Cell<bool>,
+    // Main→ISR published state
+    pub tim1_arr: Cell<u16>,
+    pub duty_maximum: Cell<u16>,
+    pub filter_level: Cell<u8>,
+    pub min_bemf_counts: Cell<u8>,
+    pub auto_advance: Cell<u8>,
+    pub interval_timer_count: Cell<u32>,
 }
 
 impl Default for TestShared {
@@ -33,10 +43,19 @@ impl TestShared {
             newinput: Cell::new(0),
             adjusted_input: Cell::new(0),
             duty_cycle_setpoint: Cell::new(0),
+            duty_cycle: Cell::new(0),
+            forward: Cell::new(true),
             zero_crosses: Cell::new(0),
             commutation_interval: Cell::new(12500),
             e_com_time: Cell::new(0),
             signal_timeout: Cell::new(0),
+            send_telemetry: Cell::new(false),
+            tim1_arr: Cell::new(1999),
+            duty_maximum: Cell::new(2000),
+            filter_level: Cell::new(5),
+            min_bemf_counts: Cell::new(2),
+            auto_advance: Cell::new(0),
+            interval_timer_count: Cell::new(0),
         }
     }
 }
@@ -77,6 +96,18 @@ impl SharedComm for TestShared {
     fn set_duty_cycle_setpoint(&self, v: u16) {
         self.duty_cycle_setpoint.set(v);
     }
+    fn duty_cycle(&self) -> u16 {
+        self.duty_cycle.get()
+    }
+    fn set_duty_cycle(&self, v: u16) {
+        self.duty_cycle.set(v);
+    }
+    fn forward(&self) -> bool {
+        self.forward.get()
+    }
+    fn set_forward(&self, v: bool) {
+        self.forward.set(v);
+    }
 
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses.get()
@@ -108,5 +139,49 @@ impl SharedComm for TestShared {
         if v < u16::MAX {
             self.signal_timeout.set(v + 1);
         }
+    }
+
+    fn send_telemetry(&self) -> bool {
+        self.send_telemetry.get()
+    }
+    fn set_send_telemetry(&self, v: bool) {
+        self.send_telemetry.set(v);
+    }
+
+    fn tim1_arr(&self) -> u16 {
+        self.tim1_arr.get()
+    }
+    fn set_tim1_arr(&self, v: u16) {
+        self.tim1_arr.set(v);
+    }
+    fn duty_maximum(&self) -> u16 {
+        self.duty_maximum.get()
+    }
+    fn set_duty_maximum(&self, v: u16) {
+        self.duty_maximum.set(v);
+    }
+    fn filter_level(&self) -> u8 {
+        self.filter_level.get()
+    }
+    fn set_filter_level(&self, v: u8) {
+        self.filter_level.set(v);
+    }
+    fn min_bemf_counts(&self) -> u8 {
+        self.min_bemf_counts.get()
+    }
+    fn set_min_bemf_counts(&self, v: u8) {
+        self.min_bemf_counts.set(v);
+    }
+    fn auto_advance(&self) -> u8 {
+        self.auto_advance.get()
+    }
+    fn set_auto_advance(&self, v: u8) {
+        self.auto_advance.set(v);
+    }
+    fn interval_timer_count(&self) -> u32 {
+        self.interval_timer_count.get()
+    }
+    fn set_interval_timer_count(&self, v: u32) {
+        self.interval_timer_count.set(v);
     }
 }
