@@ -45,7 +45,7 @@ pub fn dshot_bidir(
         };
         BidirResult {
             adjusted,
-            reverse: false,
+            reverse,
             prop_brake: false,
         }
     } else if newinput > THROTTLE_MIN_SIGNAL {
@@ -60,7 +60,7 @@ pub fn dshot_bidir(
         };
         BidirResult {
             adjusted,
-            reverse: false,
+            reverse,
             prop_brake: false,
         }
     } else {
@@ -170,7 +170,7 @@ pub fn servo_bidir(
     dead_band: u16,
 ) -> BidirResult {
     let db2 = dead_band << 1;
-    let center: u16 = 1000;
+    let center = crate::constants::SERVO_CENTER;
     let can_reverse =
         (commutation_interval > reverse_speed_threshold as u32 && duty_cycle < 200) || stepper_sine;
 
@@ -269,7 +269,7 @@ pub fn servo_rc_car(
     dead_band: u16,
 ) -> BidirResult {
     let db2 = dead_band << 1;
-    let center: u16 = 1000;
+    let center = crate::constants::SERVO_CENTER;
 
     if newinput > center + db2 {
         let want_forward = !dir_reversed;

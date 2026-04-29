@@ -131,7 +131,7 @@ pub fn process_input<S: SharedComm>(
                     input_state.prop_brake_active = true;
                 }
                 // Dead band with active brake → clear brake, enable return_to_center
-                let center: u16 = 1000;
+                let center = crate::constants::SERVO_CENTER;
                 let db2 = dead_band << 1;
                 if newinput >= center.saturating_sub(db2)
                     && newinput <= center + db2

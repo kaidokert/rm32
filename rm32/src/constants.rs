@@ -41,6 +41,10 @@ pub const OLD_ROUTINE_EXIT_INTERVAL: u32 = 2000;
 /// Ensures enough successful commutations before trusting interrupt-driven mode.
 pub const OLD_ROUTINE_EXIT_ZC: u32 = 20;
 
+/// Servo PWM neutral/center position (pulse width mapped to 0-2047 scale).
+/// Used as the center point for servo bidirectional dead band calculations.
+pub const SERVO_CENTER: u16 = 1000;
+
 /// Bidir DShot midpoint. Values 0-1047 = reverse, 1048-2047 = forward.
 pub const BIDIR_MIDPOINT: u16 = 1048;
 
