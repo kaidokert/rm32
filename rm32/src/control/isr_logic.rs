@@ -28,13 +28,13 @@ pub struct TickCounters {
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Throttle → setpoint
-    let newinput = ctx.shared.newinput();
-    ctx.shared.set_adjusted_input(newinput);
+    // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
+    let input = ctx.shared.adjusted_input();
     if ctx.shared.armed() && !ctx.shared.stepper_sine() {
-        if newinput >= THROTTLE_MIN_SIGNAL {
+        if input >= THROTTLE_MIN_SIGNAL {
             let min_duty = ctx.duty.minimum;
             let setpoint = map(
-                newinput as i32,
+                input as i32,
                 THROTTLE_MIN_SIGNAL as i32,
                 DSHOT_MAX_THROTTLE as i32,
                 min_duty as i32,
@@ -99,19 +99,17 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 
     // Sync main→ISR published state (main computes, ISR applies)
-    let published_arr = ctx.shared.tim1_arr();
-    if published_arr > 0 {
-        ctx.counters.tim1_arr = published_arr;
-    }
-    let published_max = ctx.shared.duty_maximum();
-    if published_max > 0 {
-        ctx.duty.maximum = published_max;
-    }
+    ctx.counters.tim1_arr = ctx.shared.tim1_arr();
+    ctx.duty.maximum = ctx.shared.duty_maximum();
     ctx.bemf.filter_level = ctx.shared.filter_level();
+    ctx.bemf.temp_advance = ctx.shared.auto_advance();
     let min_counts = ctx.shared.min_bemf_counts();
-    if min_counts > 0 {
-        ctx.bemf.min_counts_up = min_counts;
-        ctx.bemf.min_counts_down = min_counts;
+    ctx.bemf.min_counts_up = min_counts;
+    ctx.bemf.min_counts_down = min_counts;
+
+    // Enforce duty ceiling (eRPM/temperature protection)
+    if ctx.duty.cycle > ctx.duty.maximum {
+        ctx.duty.cycle = ctx.duty.maximum;
     }
 
     // PWM output

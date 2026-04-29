@@ -237,7 +237,9 @@ impl<LED: OutputPin> MainState<LED> {
             shared.set_send_telemetry(false);
         }
 
-        // Consumed current accumulation (1s interval at 20kHz)
+        // Consumed current accumulation (1s interval at ~20kHz)
+        // TODO: counter incremented in main loop (variable rate), not ISR.
+        // Matches C firmware behavior but integration is approximate.
         self.ten_khz_counter += 1;
         if self.ten_khz_counter > 20000 {
             self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
@@ -275,27 +277,33 @@ impl<LED: OutputPin> MainState<LED> {
             } else {
                 0
             };
+            // Rewritten to avoid 32/poles division (panics when poles > 32).
+            // Original: kv / 100 / (32 / poles) = kv * poles / 3200
             let poles = self.config.motor_poles.max(2) as i32;
-            let low_rpm = self.motor_kv as i32 / 100 / (32 / poles);
-            let high_rpm = self.motor_kv as i32 / 12 / (32 / poles);
-            let max_duty = if k_erpm > 0 && high_rpm > low_rpm {
+            let low_rpm = self.motor_kv as i32 * poles / 3200;
+            let high_rpm = self.motor_kv as i32 * poles / 384; // kv * poles / (12 * 32)
+            let erpm_max = if k_erpm > 0 && high_rpm > low_rpm {
                 crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000) as u16
             } else {
                 2000
             };
-            shared.set_duty_maximum(max_duty);
-        }
 
-        // Temperature limiting — reduces max duty when approaching limit
-        if self.measurements.degrees_celsius.0 > self.config.temperature_limit as i16 {
-            let max_duty = crate::functions::map(
-                self.measurements.degrees_celsius.0 as i32,
-                self.config.temperature_limit as i32 - 10,
-                self.config.temperature_limit as i32 + 10,
-                1000,
-                1,
-            ) as u16;
-            shared.set_duty_maximum(max_duty);
+            // Temperature limiting — reduces max duty when approaching limit
+            let temp_max =
+                if self.measurements.degrees_celsius.0 > self.config.temperature_limit as i16 {
+                    crate::functions::map(
+                        self.measurements.degrees_celsius.0 as i32,
+                        self.config.temperature_limit as i32 - 10,
+                        self.config.temperature_limit as i32 + 10,
+                        1000,
+                        1,
+                    ) as u16
+                } else {
+                    2000
+                };
+
+            // Publish the more restrictive ceiling (fixes #5: don't overwrite)
+            shared.set_duty_maximum(erpm_max.min(temp_max));
         }
 
         // Min BEMF counts adjustment — more lenient during startup
@@ -321,6 +329,12 @@ impl<LED: OutputPin> MainState<LED> {
             let level =
                 crate::functions::map(shared.duty_cycle_setpoint() as i32, 100, 2000, 13, 23) as u8;
             shared.set_auto_advance(level);
+        }
+
+        // ESC info response (clears flag after processing)
+        if shared.send_esc_info_flag() {
+            // Actual packet send happens in firmware main.rs; here we just clear the flag.
+            shared.set_send_esc_info_flag(false);
         }
 
         // Custom LED: blink with throttle, solid when high

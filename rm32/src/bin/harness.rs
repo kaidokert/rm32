@@ -463,7 +463,7 @@ impl Harness {
             self.duty.maximum,
             self.bemf.filter_level,
             self.shared.send_telemetry() as i32,
-            0i32, // send_esc_info_flag
+            self.shared.send_esc_info_flag() as i32,
         );
         io::stdout().flush().unwrap();
     }
@@ -551,7 +551,7 @@ impl Harness {
             "old_routine" => self.shared.set_old_routine(v != 0),
             "zero_crosses" => self.shared.set_zero_crosses(v as u32),
             "commutation_interval" => self.shared.set_commutation_interval(v as u32),
-            "zero_input_count" => {} // not in SharedState
+            "zero_input_count" => self.zero_input_count = v as u16,
             "EDT_ARMED" => self.edt_armed = v != 0,
             "EDT_ARM_ENABLE" => {}
             "dshot_telemetry" => {}
@@ -559,12 +559,18 @@ impl Harness {
             "cell_count" => self.main.cell_count = v as u8,
             "battery_voltage" => {
                 self.main.measurements.battery_voltage = rm32::units::MilliVolts(v as u16);
+                // Also set ADC raw so main.tick() doesn't overwrite on next cycle
+                // Approximate: raw = mV * 100 / (3300 * divider / 4095)
+                // For divider=110: raw ≈ mV * 4095 / 3630
+                self.adc.voltage = ((v as u32) * 4095 / 3630).min(4095) as u16;
             }
             "degrees_celsius" => {
                 self.adc.temperature = v as i16;
             }
             "actual_current" => {
                 self.main.measurements.actual_current = rm32::units::MilliAmps(v as i16);
+                // Route through ADC mock for persistence
+                self.adc.current = ((v as i32 * 20 + 498 * 100) * 41 / 3300).max(0) as u16;
             }
             "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8,
             "bemf_timeout" => self.main.protection.bemf_timeout = v as u8,
@@ -573,7 +579,9 @@ impl Harness {
             "last_duty_cycle" => self.duty.last = v as u16,
             "use_current_limit" => {}
             "use_speed_control_loop" => self.main.use_speed_control_loop = v != 0,
-            "send_esc_info_flag" => {}
+            "send_esc_info_flag" => {
+                self.shared.set_send_esc_info_flag(v != 0);
+            }
             "send_telemetry" => self.shared.set_send_telemetry(v != 0),
             "low_voltage_count" => self.main.protection.low_voltage_count = v as u16,
             "out_put" => {}

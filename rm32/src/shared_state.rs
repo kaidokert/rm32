@@ -501,6 +501,9 @@ impl crate::shared_comm::SharedComm for SharedState {
     fn set_min_bemf_counts(&self, v: u8) {
         SharedState::set_min_bemf_counts(self, v);
     }
+    fn auto_advance(&self) -> u8 {
+        SharedState::auto_advance(self)
+    }
     fn set_auto_advance(&self, v: u8) {
         SharedState::set_auto_advance(self, v);
     }

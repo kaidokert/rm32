@@ -110,29 +110,32 @@ pub trait SharedComm {
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {
-        0
+        1999
     }
     fn set_tim1_arr(&self, _v: u16) {}
 
     /// Max duty cycle (eRPM/temperature limiting). Main publishes, ISR applies.
     fn duty_maximum(&self) -> u16 {
-        0
+        2000
     }
     fn set_duty_maximum(&self, _v: u16) {}
 
     /// BEMF filter level. Main computes based on motor speed, ISR uses for ZC detection.
     fn filter_level(&self) -> u8 {
-        0
+        5
     }
     fn set_filter_level(&self, _v: u8) {}
 
     /// Min BEMF counts for zero-cross acceptance. Main adjusts during startup.
     fn min_bemf_counts(&self) -> u8 {
-        0
+        2
     }
     fn set_min_bemf_counts(&self, _v: u8) {}
 
     /// Auto advance level. Main computes from duty cycle, ISR uses for timing.
+    fn auto_advance(&self) -> u8 {
+        0
+    }
     fn set_auto_advance(&self, _v: u8) {}
 
     fn set_actual_current(&self, _v: i16) {}

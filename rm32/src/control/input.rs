@@ -62,7 +62,7 @@ pub fn process_input<S: SharedComm>(
                     input_state.prop_brake_active,
                     input_state.return_to_center,
                 );
-                shared.set_newinput(r.adjusted);
+                shared.set_adjusted_input(r.adjusted);
                 if r.reverse {
                     commutation.forward = !commutation.forward;
                     input_state.return_to_center = false;
@@ -85,7 +85,7 @@ pub fn process_input<S: SharedComm>(
                     shared.stepper_sine(),
                     input_state.reverse_speed_threshold,
                 );
-                shared.set_newinput(r.adjusted);
+                shared.set_adjusted_input(r.adjusted);
                 if r.reverse {
                     commutation.forward = !commutation.forward;
                     shared.set_zero_crosses(0);
@@ -188,8 +188,8 @@ mod tests {
         process_input(
             &shared, &mut comm, &config, &duty, &mut prot, &mut input, true,
         );
-        // newinput should be mapped to bidir value: ((1200-1048)*2+47)-1 = 350
-        assert_eq!(shared.newinput.get(), 350);
+        // adjusted_input should be mapped to bidir value: ((1200-1048)*2+47)-1 = 350
+        assert_eq!(shared.adjusted_input.get(), 350);
     }
 
     #[test]
