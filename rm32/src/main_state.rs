@@ -169,8 +169,11 @@ impl<LED: OutputPin> MainState<LED> {
         // Stall detection: if interval timer exceeds threshold, motor has stalled.
         // C: if (INTERVAL_TIMER_COUNT > 45000 && running == 1)
         if shared.interval_timer_count() > BEMF_STALL_TIMER_THRESHOLD && shared.running() {
-            self.protection.bemf_timeout_happened =
-                self.protection.bemf_timeout_happened.saturating_add(1);
+            // Only increment if not already latched (102 = confirmed stuck)
+            if self.protection.bemf_timeout_happened != BEMF_FAULT_LATCHED {
+                self.protection.bemf_timeout_happened =
+                    self.protection.bemf_timeout_happened.saturating_add(1);
+            }
             shared.set_old_routine(true);
             if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
                 shared.transition(crate::motor_mode::MotorEvent::StopMotor);
