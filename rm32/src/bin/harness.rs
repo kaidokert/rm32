@@ -626,6 +626,7 @@ impl Harness {
             | "eeprom.sine_mode_changeover_throttle_level" => {
                 self.config.sine_mode_changeover_throttle_level = v as u8;
             }
+            "eeprom.servo_dead_band" => self.config.servo_dead_band = v as u8,
             "eeprom.drag_brake_strength" => self.config.drag_brake_strength = v as u8,
             "eeprom.input_type" => self.config.input_type = v as u8,
             "eeprom.telemetry_on_interval" => self.config.telemetry_on_interval = v as u8,

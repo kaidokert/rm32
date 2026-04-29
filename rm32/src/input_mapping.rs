@@ -152,6 +152,162 @@ pub fn dshot_rc_car(
     }
 }
 
+/// Map servo bidirectional input (non-RC-car).
+/// Speed-gated direction reversal with dead band around center (1000).
+#[allow(clippy::too_many_arguments)]
+pub fn servo_bidir(
+    newinput: u16,
+    forward: bool,
+    dir_reversed: bool,
+    commutation_interval: u32,
+    duty_cycle: u16,
+    stepper_sine: bool,
+    reverse_speed_threshold: u16,
+    dead_band: u16,
+) -> BidirResult {
+    let db2 = dead_band << 1;
+    let center: u16 = 1000;
+    let can_reverse =
+        (commutation_interval > reverse_speed_threshold as u32 && duty_cycle < 200) || stepper_sine;
+
+    if newinput > center + db2 {
+        // Forward range
+        let want_forward = !dir_reversed;
+        let reverse = forward != want_forward && can_reverse;
+        let adjusted = map(
+            newinput as i32,
+            (center + db2) as i32,
+            2000,
+            THROTTLE_MIN_SIGNAL as i32,
+            DSHOT_MAX_THROTTLE as i32,
+        ) as u16;
+        BidirResult {
+            adjusted,
+            reverse,
+            prop_brake: false,
+        }
+    } else if newinput < center.saturating_sub(db2) {
+        // Reverse range
+        let needs_reversal = forward != dir_reversed;
+        let reverse = needs_reversal && can_reverse;
+        let adjusted = map(
+            newinput as i32,
+            0,
+            (center - db2) as i32,
+            DSHOT_MAX_THROTTLE as i32,
+            THROTTLE_MIN_SIGNAL as i32,
+        ) as u16;
+        BidirResult {
+            adjusted,
+            reverse,
+            prop_brake: false,
+        }
+    } else {
+        // Dead band
+        BidirResult {
+            adjusted: 0,
+            reverse: false,
+            prop_brake: false,
+        }
+    }
+}
+
+/// Map servo RC-car bidirectional input.
+/// Brake-and-reverse with return-to-center handshake, dead band around 1000.
+pub fn servo_rc_car(
+    newinput: u16,
+    forward: bool,
+    dir_reversed: bool,
+    prop_brake_active: bool,
+    return_to_center: bool,
+    dead_band: u16,
+) -> BidirResult {
+    let db2 = dead_band << 1;
+    let center: u16 = 1000;
+
+    if newinput > center + db2 {
+        let want_forward = !dir_reversed;
+        let fwd_adjusted = map(
+            newinput as i32,
+            (center + db2) as i32,
+            2000,
+            THROTTLE_MIN_SIGNAL as i32,
+            DSHOT_MAX_THROTTLE as i32,
+        ) as u16;
+        if forward != want_forward {
+            if return_to_center {
+                // Flip direction AND apply throttle (C falls through to map)
+                return BidirResult {
+                    adjusted: fwd_adjusted,
+                    reverse: true,
+                    prop_brake: false,
+                };
+            }
+            return BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: true,
+            };
+        }
+        if !prop_brake_active {
+            BidirResult {
+                adjusted: fwd_adjusted,
+                reverse: false,
+                prop_brake: false,
+            }
+        } else {
+            BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: true,
+            }
+        }
+    } else if newinput < center.saturating_sub(db2) {
+        let want_reverse = dir_reversed;
+        let rev_adjusted = map(
+            newinput as i32,
+            0,
+            (center - db2) as i32,
+            DSHOT_MAX_THROTTLE as i32,
+            THROTTLE_MIN_SIGNAL as i32,
+        ) as u16;
+        if forward != want_reverse {
+            if return_to_center {
+                return BidirResult {
+                    adjusted: rev_adjusted,
+                    reverse: true,
+                    prop_brake: false,
+                };
+            }
+            return BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: true,
+            };
+        }
+        if !prop_brake_active {
+            BidirResult {
+                adjusted: rev_adjusted,
+                reverse: false,
+                prop_brake: false,
+            }
+        } else {
+            BidirResult {
+                adjusted: 0,
+                reverse: false,
+                prop_brake: true,
+            }
+        }
+    } else {
+        // Dead band: clear brake, enable return_to_center
+        BidirResult {
+            adjusted: 0,
+            reverse: false,
+            prop_brake: false,
+        }
+    }
+}
+
 /// Map sine-start throttle to input value.
 /// Returns the mapped input value.
 pub fn sine_start_map(adjusted: u16, changeover_level: u8) -> u16 {

@@ -112,8 +112,52 @@ pub fn process_input<S: SharedComm>(
             }
         } else {
             // Servo bidirectional
-            // TODO: implement servo bidir reverse/brake mapping (currently passthrough)
-            shared.set_adjusted_input(newinput);
+            let dead_band = config.servo_dead_band as u16;
+            if config.rc_car_reverse != 0 {
+                let r = input_mapping::servo_rc_car(
+                    newinput,
+                    shared.forward(),
+                    config.dir_reversed != 0,
+                    input_state.prop_brake_active,
+                    input_state.return_to_center,
+                    dead_band,
+                );
+                shared.set_adjusted_input(r.adjusted);
+                if r.reverse {
+                    shared.set_forward(!shared.forward());
+                    input_state.return_to_center = false;
+                }
+                if r.prop_brake {
+                    input_state.prop_brake_active = true;
+                }
+                // Dead band with active brake → clear brake, enable return_to_center
+                let center: u16 = 1000;
+                let db2 = dead_band << 1;
+                if newinput >= center.saturating_sub(db2)
+                    && newinput <= center + db2
+                    && input_state.prop_brake_active
+                {
+                    input_state.prop_brake_active = false;
+                    input_state.return_to_center = true;
+                }
+            } else {
+                let r = input_mapping::servo_bidir(
+                    newinput,
+                    shared.forward(),
+                    config.dir_reversed != 0,
+                    shared.commutation_interval(),
+                    shared.duty_cycle(),
+                    shared.stepper_sine(),
+                    input_state.reverse_speed_threshold,
+                    dead_band,
+                );
+                shared.set_adjusted_input(r.adjusted);
+                if r.reverse {
+                    shared.set_forward(!shared.forward());
+                    shared.set_zero_crosses(0);
+                    shared.set_old_routine(true);
+                }
+            }
         }
     } else {
         // Unidirectional: adjusted = newinput
