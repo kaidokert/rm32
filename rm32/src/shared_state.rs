@@ -38,6 +38,8 @@ pub struct SharedState {
 
     // Control (main writes setpoint, ISR reads)
     duty_cycle_setpoint: AtomicU16,
+    duty_cycle: AtomicU16, // ISR writes, main reads (bidir speed gate)
+    forward: AtomicBool,   // direction: ISR reads, main writes on bidir change
     signal_timeout: AtomicU16,
     zero_input_count: AtomicU16,
 
@@ -82,6 +84,8 @@ impl SharedState {
             newinput: AtomicU16::new(0),
             adjusted_input: AtomicU16::new(0),
             duty_cycle_setpoint: AtomicU16::new(0),
+            duty_cycle: AtomicU16::new(0),
+            forward: AtomicBool::new(true),
             signal_timeout: AtomicU16::new(0),
             zero_input_count: AtomicU16::new(0),
             e_com_time: AtomicU32::new(0),
@@ -294,6 +298,20 @@ impl SharedState {
         self.duty_cycle_setpoint.store(v, REL);
     }
 
+    pub fn duty_cycle(&self) -> u16 {
+        self.duty_cycle.load(ACQ)
+    }
+    pub fn set_duty_cycle(&self, v: u16) {
+        self.duty_cycle.store(v, REL);
+    }
+
+    pub fn forward(&self) -> bool {
+        self.forward.load(ACQ)
+    }
+    pub fn set_forward(&self, v: bool) {
+        self.forward.store(v, REL);
+    }
+
     pub fn signal_timeout(&self) -> u16 {
         self.signal_timeout.load(ACQ)
     }
@@ -420,6 +438,18 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_duty_cycle_setpoint(&self, v: u16) {
         self.set_duty_cycle_setpoint(v);
+    }
+    fn duty_cycle(&self) -> u16 {
+        SharedState::duty_cycle(self)
+    }
+    fn set_duty_cycle(&self, v: u16) {
+        SharedState::set_duty_cycle(self, v);
+    }
+    fn forward(&self) -> bool {
+        SharedState::forward(self)
+    }
+    fn set_forward(&self, v: bool) {
+        SharedState::set_forward(self, v);
     }
 
     fn zero_crosses(&self) -> u32 {

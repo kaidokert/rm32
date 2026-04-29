@@ -293,7 +293,7 @@ impl Harness {
             self.shared.input_set(),
             self.dshot,
             self.servo_pwm,
-            false, // dshot_telemetry
+            self.shared.dshot_telemetry(),
             self.shared.armed(),
             false, // input_pin_high
             self.shared.adjusted_input(),
@@ -355,6 +355,8 @@ impl Harness {
                 }
                 _ => {}
             }
+            // Sync direction change to shared state (commands may flip forward)
+            self.shared.set_forward(self.commutation.forward);
         }
     }
 
@@ -377,9 +379,7 @@ impl Harness {
         // --- Input processing pipeline (library function) ---
         input::process_input(
             &self.shared,
-            &mut self.commutation,
             &self.config,
-            &self.duty,
             &mut self.main.protection,
             &mut self.input_state,
             self.dshot,
@@ -551,7 +551,10 @@ impl Harness {
             "inputSet" => self.shared.set_input_set(v != 0),
             "dshot" => self.dshot = v != 0,
             "servoPwm" => self.servo_pwm = v != 0,
-            "forward" => self.commutation.forward = v != 0,
+            "forward" => {
+                self.shared.set_forward(v != 0);
+                self.commutation.forward = v != 0;
+            }
             "step" => self.commutation.step = v as u8,
             "old_routine" => self.shared.set_old_routine(v != 0),
             "zero_crosses" => self.shared.set_zero_crosses(v as u32),

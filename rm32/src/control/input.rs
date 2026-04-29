@@ -4,10 +4,9 @@
 //! This is the "glue" between raw DShot/servo input and the ISR control loop.
 //! Called before `isr_logic::ten_khz_tick()` in both firmware and test harness.
 
-use crate::commutation::Commutation;
 use crate::config::EepromConfig;
 use crate::constants::BEMF_FAULT_LATCHED;
-use crate::control::state::{DutyState, ProtectionState};
+use crate::control::state::ProtectionState;
 use crate::input_mapping;
 use crate::shared_comm::SharedComm;
 
@@ -42,9 +41,7 @@ impl InputState {
 /// - Brake-on-stop activation
 pub fn process_input<S: SharedComm>(
     shared: &S,
-    commutation: &mut Commutation,
     config: &EepromConfig,
-    duty: &DutyState,
     protection: &mut ProtectionState,
     input_state: &mut InputState,
     is_dshot: bool,
@@ -57,14 +54,14 @@ pub fn process_input<S: SharedComm>(
             if config.rc_car_reverse != 0 {
                 let r = input_mapping::dshot_rc_car(
                     newinput,
-                    commutation.forward,
+                    shared.forward(),
                     config.dir_reversed != 0,
                     input_state.prop_brake_active,
                     input_state.return_to_center,
                 );
                 shared.set_adjusted_input(r.adjusted);
                 if r.reverse {
-                    commutation.forward = !commutation.forward;
+                    shared.set_forward(!shared.forward());
                     input_state.return_to_center = false;
                 }
                 if r.prop_brake {
@@ -78,22 +75,24 @@ pub fn process_input<S: SharedComm>(
             } else {
                 let r = input_mapping::dshot_bidir(
                     newinput,
-                    commutation.forward,
+                    shared.forward(),
                     config.dir_reversed != 0,
                     shared.commutation_interval(),
-                    duty.cycle,
+                    shared.duty_cycle(),
                     shared.stepper_sine(),
                     input_state.reverse_speed_threshold,
                 );
                 shared.set_adjusted_input(r.adjusted);
                 if r.reverse {
-                    commutation.forward = !commutation.forward;
+                    shared.set_forward(!shared.forward());
                     shared.set_zero_crosses(0);
                     shared.set_old_routine(true);
                 }
             }
+        } else {
+            // Servo bidirectional: pass through (mapping done in transfer.rs)
+            shared.set_adjusted_input(newinput);
         }
-        // Servo bidirectional: pass through (mapping done in transfer.rs)
     } else {
         // Unidirectional: adjusted = newinput (no mapping needed)
         shared.set_adjusted_input(newinput);
@@ -104,6 +103,8 @@ pub fn process_input<S: SharedComm>(
         && config.stuck_rotor_protection != 0
     {
         input_state.input = 0;
+        shared.set_adjusted_input(0);
+        shared.set_newinput(0);
         protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
         return;
     }
@@ -121,7 +122,7 @@ pub fn process_input<S: SharedComm>(
     // --- Brake-on-stop ---
     if shared.armed()
         && !shared.stepper_sine()
-        && input_state.input < 47
+        && input_state.input < crate::constants::THROTTLE_MIN_SIGNAL
         && config.brake_on_stop == 1
         && config.comp_pwm != 0
     {
@@ -135,21 +136,12 @@ mod tests {
     use crate::control::shared_impl::TestShared;
     use crate::motor_mode::MotorMode;
 
-    fn setup() -> (
-        TestShared,
-        Commutation,
-        EepromConfig,
-        DutyState,
-        ProtectionState,
-        InputState,
-    ) {
+    fn setup() -> (TestShared, EepromConfig, ProtectionState, InputState) {
         let shared = TestShared::new();
         shared.mode.set(MotorMode::Armed);
         (
             shared,
-            Commutation::new(),
             EepromConfig::default(),
-            DutyState::default(),
             ProtectionState::default(),
             InputState::new(),
         )
@@ -157,51 +149,42 @@ mod tests {
 
     #[test]
     fn unidirectional_passthrough() {
-        let (shared, mut comm, config, duty, mut prot, mut input) = setup();
+        let (shared, config, mut prot, mut input) = setup();
         shared.newinput.set(1000);
-        shared.adjusted_input.set(1000);
-        process_input(
-            &shared, &mut comm, &config, &duty, &mut prot, &mut input, true,
-        );
+        process_input(&shared, &config, &mut prot, &mut input, true);
         assert_eq!(input.input, 1000);
     }
 
     #[test]
     fn bemf_timeout_latches_input_zero() {
-        let (shared, mut comm, mut config, duty, mut prot, mut input) = setup();
+        let (shared, mut config, mut prot, mut input) = setup();
         config.stuck_rotor_protection = 1;
         prot.bemf_timeout_happened = 20;
         prot.bemf_timeout = 10;
         shared.newinput.set(500);
-        process_input(
-            &shared, &mut comm, &config, &duty, &mut prot, &mut input, true,
-        );
+        process_input(&shared, &config, &mut prot, &mut input, true);
         assert_eq!(input.input, 0);
+        assert_eq!(shared.adjusted_input.get(), 0);
         assert_eq!(prot.bemf_timeout_happened, BEMF_FAULT_LATCHED);
     }
 
     #[test]
     fn bidir_dshot_forward_maps() {
-        let (shared, mut comm, mut config, duty, mut prot, mut input) = setup();
+        let (shared, mut config, mut prot, mut input) = setup();
         config.bi_direction = 1;
         shared.newinput.set(1200);
-        process_input(
-            &shared, &mut comm, &config, &duty, &mut prot, &mut input, true,
-        );
-        // adjusted_input should be mapped to bidir value: ((1200-1048)*2+47)-1 = 350
+        process_input(&shared, &config, &mut prot, &mut input, true);
         assert_eq!(shared.adjusted_input.get(), 350);
     }
 
     #[test]
     fn brake_on_stop_activates() {
-        let (shared, mut comm, mut config, duty, mut prot, mut input) = setup();
+        let (shared, mut config, mut prot, mut input) = setup();
         config.brake_on_stop = 1;
         config.comp_pwm = 1;
         shared.newinput.set(0);
         shared.adjusted_input.set(0);
-        process_input(
-            &shared, &mut comm, &config, &duty, &mut prot, &mut input, true,
-        );
+        process_input(&shared, &config, &mut prot, &mut input, true);
         assert!(input.prop_brake_active);
     }
 }

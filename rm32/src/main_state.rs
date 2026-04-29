@@ -315,6 +315,9 @@ impl<LED: OutputPin> MainState<LED> {
             ));
         } else if self.config.variable_pwm == 2 {
             shared.set_tim1_arr(variable_pwm_mode2(self.average_interval, self.cpu_mhz));
+        } else {
+            // variable_pwm=0: publish the EEPROM-derived ARR so ISR uses it
+            shared.set_tim1_arr(self.timer1_max_arr);
         }
 
         // eRPM + temperature duty ceiling

@@ -75,6 +75,18 @@ pub trait SharedComm {
     fn duty_cycle_setpoint(&self) -> u16;
     fn set_duty_cycle_setpoint(&self, v: u16);
 
+    /// Current duty cycle (ISR writes each tick, main reads for bidir speed gate).
+    fn duty_cycle(&self) -> u16 {
+        0
+    }
+    fn set_duty_cycle(&self, _v: u16) {}
+
+    /// Motor direction (ISR reads, main writes on bidir direction change).
+    fn forward(&self) -> bool {
+        true
+    }
+    fn set_forward(&self, _v: bool) {}
+
     fn zero_crosses(&self) -> u32;
     fn set_zero_crosses(&self, v: u32);
     fn increment_zero_crosses(&self);

@@ -76,6 +76,11 @@ pub const BEMF_LENIENT_THROTTLE: u16 = 150;
 /// latched stuck-rotor fault that persists until motor conditions clear it.
 pub const BEMF_FAULT_LATCHED: u8 = 102;
 
+/// Base zero-cross count for startup phase. Below `STARTUP_ZC_BASE >> stall_protection`
+/// zero-crosses, startup duty limits (min_startup/startup_max) are enforced.
+/// Higher stall_protection narrows the window (15 for stall=1, 7 for stall=2, etc.).
+pub const STARTUP_ZC_BASE: u32 = 30;
+
 /// Fixed-point shift for commutation advance timing.
 /// `advance = (temp_advance * commutation_interval) >> ADVANCE_SHIFT`
 /// With ADVANCE_SHIFT=6, each unit of temp_advance ≈ 360°/64 ≈ 5.6° of advance.

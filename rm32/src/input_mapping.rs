@@ -4,6 +4,7 @@
 //! Used by the test harness to map raw throttle input before calling
 //! `isr_logic::ten_khz_tick()`.
 
+use crate::constants::{DSHOT_MAX_THROTTLE, DUTY_SCALE_MAX, STARTUP_ZC_BASE, THROTTLE_MIN_SIGNAL};
 use crate::functions::map;
 
 /// Result of bidirectional input mapping.
@@ -154,19 +155,52 @@ pub fn sine_start_map(adjusted: u16, changeover_level: u8) -> u16 {
     if adjusted < 30 {
         0
     } else if adjusted < changeover {
-        map(adjusted as i32, 30, changeover as i32, 47, 160) as u16
+        map(
+            adjusted as i32,
+            SINE_DEAD_BAND as i32,
+            changeover as i32,
+            THROTTLE_MIN_SIGNAL as i32,
+            SINE_MID_THROTTLE as i32,
+        ) as u16
     } else {
-        map(adjusted as i32, changeover as i32, 2047, 160, 2047) as u16
+        map(
+            adjusted as i32,
+            changeover as i32,
+            DSHOT_MAX_THROTTLE as i32,
+            SINE_MID_THROTTLE as i32,
+            DSHOT_MAX_THROTTLE as i32,
+        ) as u16
     }
 }
+
+/// Sine start: input dead band (below this = zero throttle).
+const SINE_DEAD_BAND: u16 = 30;
+/// Sine start: midpoint throttle for slow→fast transition.
+const SINE_MID_THROTTLE: u16 = 160;
+/// Sine start: minimum input for slow stepping (above changeover).
+const SINE_SLOW_STEP_MIN: u16 = 137;
+/// Sine start: extra minimum duty offset for sine mode.
+const SINE_DUTY_OFFSET: i32 = 40;
 
 /// Map throttle input to duty cycle setpoint.
 /// Returns the duty setpoint (0-2000 scale).
 pub fn throttle_to_setpoint(input: u16, use_sine_start: bool, minimum_duty: u16) -> u16 {
     if use_sine_start {
-        map(input as i32, 137, 2047, minimum_duty as i32 + 40, 2000) as u16
+        map(
+            input as i32,
+            SINE_SLOW_STEP_MIN as i32,
+            DSHOT_MAX_THROTTLE as i32,
+            minimum_duty as i32 + SINE_DUTY_OFFSET,
+            DUTY_SCALE_MAX as i32,
+        ) as u16
     } else {
-        map(input as i32, 47, 2047, minimum_duty as i32, 2000) as u16
+        map(
+            input as i32,
+            THROTTLE_MIN_SIGNAL as i32,
+            DSHOT_MAX_THROTTLE as i32,
+            minimum_duty as i32,
+            DUTY_SCALE_MAX as i32,
+        ) as u16
     }
 }
 
@@ -181,7 +215,7 @@ pub fn clamp_startup_duty(
     maximum: u16,
 ) -> u16 {
     let mut sp = setpoint;
-    if input >= 47 && zero_crosses < (30u32 >> stall_protection) {
+    if input >= THROTTLE_MIN_SIGNAL && zero_crosses < (STARTUP_ZC_BASE >> stall_protection) {
         if sp < min_startup {
             sp = min_startup;
         }

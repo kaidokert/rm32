@@ -239,6 +239,9 @@ fn main() -> ! {
 
     // --- Main loop ---
     let shared = isr::shared();
+    let mut input_state = rm32::control::input::InputState::new();
+    // TODO: detect actual input type from ISR transfer handler
+    let isr_input_is_dshot = true;
     loop {
         // Sine mode: step phases when stepper_sine is active
         if shared.stepper_sine() {
@@ -275,6 +278,16 @@ fn main() -> ! {
                 SineStepResult::Idle => {}
             }
         }
+
+        // Input processing: bidir mapping, stuck rotor protection, brake logic.
+        // Runs in main loop; communicates with ISR via SharedState atomics only.
+        rm32::control::input::process_input(
+            shared,
+            &main_state.config,
+            &mut main_state.protection,
+            &mut input_state,
+            isr_input_is_dshot,
+        );
 
         main_state.tick(shared, &mut adc, &mut telem);
 

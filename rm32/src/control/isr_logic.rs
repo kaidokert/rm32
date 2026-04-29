@@ -27,6 +27,9 @@ pub struct TickCounters {
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    // Sync direction from shared (main loop may flip for bidirectional)
+    ctx.commutation.forward = ctx.shared.forward();
+
     // Throttle → setpoint
     // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
     let input = ctx.shared.adjusted_input();
@@ -121,7 +124,11 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.pwm().set_duty_all(0);
     }
     ctx.duty.last = ctx.duty.cycle;
+    ctx.shared.set_duty_cycle(ctx.duty.cycle);
     ctx.hal.pwm().set_auto_reload(tim1_arr);
+
+    // Sync ISR→shared direction (Commutation owns truth, shared publishes for main loop)
+    ctx.shared.set_forward(ctx.commutation.forward);
 }
 
 /// BEMF polling (old_routine path).
