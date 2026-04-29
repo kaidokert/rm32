@@ -309,6 +309,7 @@ impl Harness {
         if actions.input_detected {
             if actions.input_is_dshot {
                 self.dshot = true;
+                self.shared.set_dshot(true);
             }
             if actions.input_is_servo {
                 self.servo_pwm = true;
@@ -382,7 +383,7 @@ impl Harness {
             &self.config,
             &mut self.main.protection,
             &mut self.input_state,
-            self.dshot,
+            self.shared.dshot(),
         );
 
         // Sync desync_check from commutation before main.tick()
@@ -549,7 +550,10 @@ impl Harness {
                 }
             }
             "inputSet" => self.shared.set_input_set(v != 0),
-            "dshot" => self.dshot = v != 0,
+            "dshot" => {
+                self.dshot = v != 0;
+                self.shared.set_dshot(v != 0);
+            }
             "servoPwm" => self.servo_pwm = v != 0,
             "forward" => {
                 self.shared.set_forward(v != 0);

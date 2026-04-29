@@ -68,6 +68,12 @@ pub trait SharedComm {
     fn set_input_set(&self, v: bool);
     fn dshot_telemetry(&self) -> bool;
 
+    /// Whether detected input is DShot (vs servo). ISR transfer handler sets this.
+    fn is_dshot(&self) -> bool {
+        false
+    }
+    fn set_is_dshot(&self, _v: bool) {}
+
     fn newinput(&self) -> u16;
     fn set_newinput(&self, v: u16);
     fn adjusted_input(&self) -> u16;

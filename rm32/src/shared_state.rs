@@ -431,6 +431,12 @@ impl crate::shared_comm::SharedComm for SharedState {
     fn dshot_telemetry(&self) -> bool {
         self.dshot_telemetry()
     }
+    fn is_dshot(&self) -> bool {
+        self.dshot()
+    }
+    fn set_is_dshot(&self, v: bool) {
+        self.set_dshot(v);
+    }
 
     fn newinput(&self) -> u16 {
         self.newinput()

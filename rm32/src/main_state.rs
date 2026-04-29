@@ -18,13 +18,10 @@ use crate::shared_state::SharedState;
 
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
 pub fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
-    crate::functions::map(
-        commutation_interval as i32,
-        96,
-        200,
-        timer1_max_arr as i32 / 2,
-        timer1_max_arr as i32,
-    ) as u16
+    let half = timer1_max_arr as i32 / 2;
+    let full = timer1_max_arr as i32;
+    let result = crate::functions::map(commutation_interval as i32, 96, 200, half, full);
+    result.clamp(half, full) as u16
 }
 
 /// Compute variable PWM auto-reload value for mode 2 (CPU-scaled).
@@ -57,7 +54,7 @@ pub fn duty_ceiling(
     let low_rpm = motor_kv as i32 * poles / 3200;
     let high_rpm = motor_kv as i32 * poles / 384;
     let erpm_max = if k_erpm > 0 && high_rpm > low_rpm {
-        crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000) as u16
+        crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000).clamp(1, 2000) as u16
     } else {
         2000
     };
@@ -69,7 +66,8 @@ pub fn duty_ceiling(
             temperature_limit as i32 + 10,
             1000,
             1,
-        ) as u16
+        )
+        .clamp(1, 2000) as u16
     } else {
         2000
     };
@@ -149,22 +147,20 @@ impl<LED: OutputPin> MainState<LED> {
         // Average interval
         self.average_interval = (e_com_time / 3) as u32;
 
-        // BEMF timeout clearing — dynamic thresholds matching C
+        // BEMF timeout clearing — uses raw newinput (not adjusted_input) so
+        // the user centering the stick can clear a latched fault. process_input
+        // zeroes adjusted_input on latch, so using adjusted here would never clear.
         let zc = shared.zero_crosses();
-        let adj_input = shared.adjusted_input();
-        // Don't clear if latched (BEMF_FAULT_LATCHED = stuck rotor confirmed)
-        if self.protection.bemf_timeout_happened != BEMF_FAULT_LATCHED {
-            if zc > 1000 || adj_input == 0 {
-                self.protection.bemf_timeout_happened = 0;
-            }
-            if zc > 100 && adj_input < 200 {
-                self.protection.bemf_timeout_happened = 0;
-            }
-            if self.config.use_sine_start != 0
-                && adj_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
-            {
-                self.protection.bemf_timeout_happened = 0;
-            }
+        let raw_input = shared.newinput();
+        if zc > 1000 || raw_input == 0 {
+            self.protection.bemf_timeout_happened = 0;
+        }
+        if zc > 100 && raw_input < 200 {
+            self.protection.bemf_timeout_happened = 0;
+        }
+        if self.config.use_sine_start != 0 && raw_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
+        {
+            self.protection.bemf_timeout_happened = 0;
         }
         // Stall detection: if interval timer exceeds threshold, motor has stalled.
         // C: if (INTERVAL_TIMER_COUNT > 45000 && running == 1)
@@ -183,7 +179,7 @@ impl<LED: OutputPin> MainState<LED> {
         }
 
         // Dynamic BEMF timeout threshold: lenient at low throttle
-        if adj_input < BEMF_LENIENT_THROTTLE {
+        if raw_input < BEMF_LENIENT_THROTTLE {
             self.protection.bemf_timeout = BEMF_TIMEOUT_LENIENT;
         } else {
             self.protection.bemf_timeout = BEMF_TIMEOUT_STRICT;

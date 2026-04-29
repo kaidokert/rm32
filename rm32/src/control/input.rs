@@ -3,9 +3,14 @@
 //!
 //! This is the "glue" between raw DShot/servo input and the ISR control loop.
 //! Called before `isr_logic::ten_khz_tick()` in both firmware and test harness.
+//!
+//! CRITICAL: Every exit path MUST publish the final mapped value to
+//! `shared.set_adjusted_input()`. The ISR reads ONLY `adjusted_input` for
+//! throttle→setpoint mapping. Any value not published there is invisible
+//! to the motor.
 
 use crate::config::EepromConfig;
-use crate::constants::BEMF_FAULT_LATCHED;
+use crate::constants::{BEMF_FAULT_LATCHED, THROTTLE_MIN_SIGNAL};
 use crate::control::state::ProtectionState;
 use crate::input_mapping;
 use crate::shared_comm::SharedComm;
@@ -16,7 +21,8 @@ pub struct InputState {
     pub prop_brake_active: bool,
     pub return_to_center: bool,
     pub reverse_speed_threshold: u16,
-    /// Mapped input value after all processing (0-2047)
+    /// Mapped input value after all processing (0-2047).
+    /// This is a local copy — the authoritative value is `shared.adjusted_input()`.
     pub input: u16,
 }
 
@@ -35,10 +41,13 @@ impl InputState {
 /// before `isr_logic::ten_khz_tick()` every tick.
 ///
 /// Handles:
-/// - Bidirectional DShot/RC-car throttle mapping
+/// - Bidirectional DShot/servo/RC-car throttle mapping
 /// - Stuck rotor (BEMF timeout) protection latch
 /// - Sine start throttle mapping
 /// - Brake-on-stop activation
+///
+/// All results are published to `shared.set_adjusted_input()` so the ISR
+/// can read them immediately.
 pub fn process_input<S: SharedComm>(
     shared: &S,
     config: &EepromConfig,
@@ -47,6 +56,19 @@ pub fn process_input<S: SharedComm>(
     is_dshot: bool,
 ) {
     let newinput = shared.newinput();
+
+    // --- Stuck rotor protection latch ---
+    // Check FIRST: if latched, force everything to zero regardless of input.
+    // Uses raw newinput (not adjusted) so the latch persists even though
+    // we ourselves zeroed adjusted_input on the previous tick.
+    if protection.bemf_timeout_happened > protection.bemf_timeout
+        && config.stuck_rotor_protection != 0
+    {
+        input_state.input = 0;
+        shared.set_adjusted_input(0);
+        protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
+        return;
+    }
 
     // --- Bidirectional throttle mapping ---
     if config.bi_direction != 0 {
@@ -67,8 +89,7 @@ pub fn process_input<S: SharedComm>(
                 if r.prop_brake {
                     input_state.prop_brake_active = true;
                 }
-                // Zero input with active brake → clear brake, enable return_to_center
-                if newinput <= 47 && input_state.prop_brake_active {
+                if newinput <= THROTTLE_MIN_SIGNAL && input_state.prop_brake_active {
                     input_state.prop_brake_active = false;
                     input_state.return_to_center = true;
                 }
@@ -90,38 +111,34 @@ pub fn process_input<S: SharedComm>(
                 }
             }
         } else {
-            // Servo bidirectional: pass through (mapping done in transfer.rs)
+            // Servo bidirectional
+            // TODO: implement servo bidir reverse/brake mapping (currently passthrough)
             shared.set_adjusted_input(newinput);
         }
     } else {
-        // Unidirectional: adjusted = newinput (no mapping needed)
+        // Unidirectional: adjusted = newinput
         shared.set_adjusted_input(newinput);
     }
 
-    // --- Stuck rotor protection latch ---
-    if protection.bemf_timeout_happened > protection.bemf_timeout
-        && config.stuck_rotor_protection != 0
-    {
-        input_state.input = 0;
-        shared.set_adjusted_input(0); // ISR reads this for setpoint → 0 duty
-        protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
-        return;
-    }
-
     // --- Sine start throttle mapping ---
+    // Maps adjusted_input through sine curve, then publishes BACK to adjusted_input
+    // so the ISR setpoint path sees the shaped value.
+    let adjusted = shared.adjusted_input();
     if config.use_sine_start != 0 {
-        input_state.input = input_mapping::sine_start_map(
-            shared.adjusted_input(),
-            config.sine_mode_changeover_throttle_level,
-        );
+        let mapped =
+            input_mapping::sine_start_map(adjusted, config.sine_mode_changeover_throttle_level);
+        input_state.input = mapped;
+        shared.set_adjusted_input(mapped); // ISR must see the sine-shaped value
     } else {
-        input_state.input = shared.adjusted_input();
+        input_state.input = adjusted;
     }
 
     // --- Brake-on-stop ---
+    // Skip for RC-car reverse (it has its own brake handshake)
     if shared.armed()
         && !shared.stepper_sine()
-        && input_state.input < crate::constants::THROTTLE_MIN_SIGNAL
+        && config.rc_car_reverse == 0
+        && input_state.input < THROTTLE_MIN_SIGNAL
         && config.brake_on_stop == 1
         && config.comp_pwm != 0
     {
@@ -152,6 +169,7 @@ mod tests {
         shared.newinput.set(1000);
         process_input(&shared, &config, &mut prot, &mut input, true);
         assert_eq!(input.input, 1000);
+        assert_eq!(shared.adjusted_input.get(), 1000);
     }
 
     #[test]
@@ -174,6 +192,7 @@ mod tests {
         shared.newinput.set(1200);
         process_input(&shared, &config, &mut prot, &mut input, true);
         assert_eq!(shared.adjusted_input.get(), 350);
+        assert_eq!(input.input, 350); // also synced to local
     }
 
     #[test]
@@ -182,8 +201,35 @@ mod tests {
         config.brake_on_stop = 1;
         config.comp_pwm = 1;
         shared.newinput.set(0);
-        shared.adjusted_input.set(0);
         process_input(&shared, &config, &mut prot, &mut input, true);
         assert!(input.prop_brake_active);
+    }
+
+    #[test]
+    fn sine_start_publishes_to_shared() {
+        let (shared, mut config, mut prot, mut input) = setup();
+        config.use_sine_start = 1;
+        config.sine_mode_changeover_throttle_level = 10; // changeover = 200
+        shared.newinput.set(100);
+        process_input(&shared, &config, &mut prot, &mut input, true);
+        // Sine mapping should produce a value and publish it
+        let mapped = shared.adjusted_input.get();
+        assert!(
+            mapped > 0,
+            "sine mapping should produce nonzero for input=100"
+        );
+        assert_eq!(input.input, mapped, "local and shared must agree");
+    }
+
+    #[test]
+    fn brake_on_stop_skipped_for_rc_car() {
+        let (shared, mut config, mut prot, mut input) = setup();
+        config.brake_on_stop = 1;
+        config.comp_pwm = 1;
+        config.rc_car_reverse = 1;
+        config.bi_direction = 1;
+        shared.newinput.set(0);
+        process_input(&shared, &config, &mut prot, &mut input, true);
+        assert!(!input.prop_brake_active, "RC-car has its own brake logic");
     }
 }

@@ -9,6 +9,7 @@ pub struct TestShared {
     pub mode: Cell<MotorMode>,
     pub input_set: Cell<bool>,
     pub dshot_telemetry: Cell<bool>,
+    pub is_dshot: Cell<bool>,
     pub newinput: Cell<u16>,
     pub adjusted_input: Cell<u16>,
     pub duty_cycle_setpoint: Cell<u16>,
@@ -40,6 +41,7 @@ impl TestShared {
             mode: Cell::new(MotorMode::Disarmed),
             input_set: Cell::new(false),
             dshot_telemetry: Cell::new(false),
+            is_dshot: Cell::new(false),
             newinput: Cell::new(0),
             adjusted_input: Cell::new(0),
             duty_cycle_setpoint: Cell::new(0),
@@ -76,6 +78,12 @@ impl SharedComm for TestShared {
     }
     fn dshot_telemetry(&self) -> bool {
         self.dshot_telemetry.get()
+    }
+    fn is_dshot(&self) -> bool {
+        self.is_dshot.get()
+    }
+    fn set_is_dshot(&self, v: bool) {
+        self.is_dshot.set(v);
     }
 
     fn newinput(&self) -> u16 {
