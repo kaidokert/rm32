@@ -25,6 +25,7 @@ pub struct TestShared {
     pub filter_level: Cell<u8>,
     pub min_bemf_counts: Cell<u8>,
     pub auto_advance: Cell<u8>,
+    pub interval_timer_count: Cell<u32>,
 }
 
 impl Default for TestShared {
@@ -54,6 +55,7 @@ impl TestShared {
             filter_level: Cell::new(5),
             min_bemf_counts: Cell::new(2),
             auto_advance: Cell::new(0),
+            interval_timer_count: Cell::new(0),
         }
     }
 }
@@ -175,5 +177,11 @@ impl SharedComm for TestShared {
     }
     fn set_auto_advance(&self, v: u8) {
         self.auto_advance.set(v);
+    }
+    fn interval_timer_count(&self) -> u32 {
+        self.interval_timer_count.get()
+    }
+    fn set_interval_timer_count(&self, v: u32) {
+        self.interval_timer_count.set(v);
     }
 }

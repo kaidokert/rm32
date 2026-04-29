@@ -54,6 +54,9 @@ pub struct SharedState {
     battery_voltage: AtomicU16, // mV
     degrees_celsius: AtomicU16, // stored as u16, interpreted as i16
 
+    // ISR→main: interval timer count for stall detection
+    interval_timer_count: AtomicU32,
+
     // Main→ISR published control (main computes, ISR applies)
     tim1_arr: AtomicU16,       // variable PWM auto-reload
     duty_maximum: AtomicU16,   // eRPM/temperature throttle restriction
@@ -89,6 +92,7 @@ impl SharedState {
             signal_timeout: AtomicU16::new(0),
             zero_input_count: AtomicU16::new(0),
             e_com_time: AtomicU32::new(0),
+            interval_timer_count: AtomicU32::new(0),
             stall_protection_adjust: AtomicU16::new(0),
             actual_current: AtomicU16::new(0),
             battery_voltage: AtomicU16::new(0),
@@ -361,6 +365,13 @@ impl SharedState {
         self.degrees_celsius.store(v as u16, REL);
     }
 
+    pub fn interval_timer_count(&self) -> u32 {
+        self.interval_timer_count.load(ACQ)
+    }
+    pub fn set_interval_timer_count(&self, v: u32) {
+        self.interval_timer_count.store(v, REL);
+    }
+
     // --- Main→ISR published control ---
 
     pub fn tim1_arr(&self) -> u16 {
@@ -545,6 +556,12 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_degrees_celsius(&self, v: i16) {
         SharedState::set_degrees_celsius(self, v);
+    }
+    fn interval_timer_count(&self) -> u32 {
+        SharedState::interval_timer_count(self)
+    }
+    fn set_interval_timer_count(&self, v: u32) {
+        SharedState::set_interval_timer_count(self, v);
     }
     fn set_e_com_time(&self, v: i32) {
         SharedState::set_e_com_time(self, v);

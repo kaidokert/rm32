@@ -71,6 +71,10 @@ pub const BEMF_TIMEOUT_STRICT: u8 = 10;
 /// Throttle level below which the lenient BEMF timeout is used.
 pub const BEMF_LENIENT_THROTTLE: u16 = 150;
 
+/// Interval timer threshold for stall detection (timer ticks at 2MHz).
+/// 45000 ticks = 22.5ms without a BEMF zero-cross → motor is stalled.
+pub const BEMF_STALL_TIMER_THRESHOLD: u32 = 45000;
+
 /// BEMF timeout fault latch value. When bemf_timeout_happened exceeds the
 /// threshold, it's set to this sentinel (> any threshold) to indicate a
 /// latched stuck-rotor fault that persists until motor conditions clear it.

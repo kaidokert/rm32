@@ -103,8 +103,7 @@ pub fn process_input<S: SharedComm>(
         && config.stuck_rotor_protection != 0
     {
         input_state.input = 0;
-        shared.set_adjusted_input(0);
-        shared.set_newinput(0);
+        shared.set_adjusted_input(0); // ISR reads this for setpoint → 0 duty
         protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
         return;
     }

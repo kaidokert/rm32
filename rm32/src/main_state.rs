@@ -152,16 +152,33 @@ impl<LED: OutputPin> MainState<LED> {
         // BEMF timeout clearing — dynamic thresholds matching C
         let zc = shared.zero_crosses();
         let adj_input = shared.adjusted_input();
-        if zc > 1000 || adj_input == 0 {
-            self.protection.bemf_timeout_happened = 0;
+        // Don't clear if latched (BEMF_FAULT_LATCHED = stuck rotor confirmed)
+        if self.protection.bemf_timeout_happened != BEMF_FAULT_LATCHED {
+            if zc > 1000 || adj_input == 0 {
+                self.protection.bemf_timeout_happened = 0;
+            }
+            if zc > 100 && adj_input < 200 {
+                self.protection.bemf_timeout_happened = 0;
+            }
+            if self.config.use_sine_start != 0
+                && adj_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
+            {
+                self.protection.bemf_timeout_happened = 0;
+            }
         }
-        if zc > 100 && adj_input < 200 {
-            self.protection.bemf_timeout_happened = 0;
+        // Stall detection: if interval timer exceeds threshold, motor has stalled.
+        // C: if (INTERVAL_TIMER_COUNT > 45000 && running == 1)
+        if shared.interval_timer_count() > BEMF_STALL_TIMER_THRESHOLD && shared.running() {
+            self.protection.bemf_timeout_happened =
+                self.protection.bemf_timeout_happened.saturating_add(1);
+            shared.set_old_routine(true);
+            if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
+                shared.transition(crate::motor_mode::MotorEvent::StopMotor);
+                shared.set_commutation_interval(DESYNC_RESET_INTERVAL);
+            }
+            shared.set_zero_crosses(0);
         }
-        if self.config.use_sine_start != 0 && adj_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
-        {
-            self.protection.bemf_timeout_happened = 0;
-        }
+
         // Dynamic BEMF timeout threshold: lenient at low throttle
         if adj_input < BEMF_LENIENT_THROTTLE {
             self.protection.bemf_timeout = BEMF_TIMEOUT_LENIENT;
@@ -447,5 +464,106 @@ mod tests {
         // Both limits active → should return the lower one
         let dc = duty_ceiling(100, 2000, 14, 85, 80);
         assert!(dc < 2000);
+    }
+
+    // --- Stall detection (BEMF timeout increment) ---
+
+    struct MockAdc;
+    impl MockAdc {
+        fn new() -> Self {
+            Self
+        }
+    }
+    impl crate::hal::Adc for MockAdc {
+        fn start_conversion(&mut self) {}
+        fn raw_voltage(&self) -> u16 {
+            0
+        }
+        fn raw_current(&self) -> u16 {
+            0
+        }
+        fn raw_temperature(&self) -> u16 {
+            0
+        }
+        fn calc_temperature(&self, _: u16) -> crate::units::DegreesCelsius {
+            crate::units::DegreesCelsius(25)
+        }
+    }
+
+    struct MockTelem;
+    impl crate::hal::TelemetryUart for MockTelem {
+        fn send_dma(&mut self, _: &[u8]) {}
+    }
+
+    fn make_test_main_state() -> MainState {
+        MainState {
+            protection: crate::control::state::ProtectionState::default(),
+            measurements: crate::control::state::Measurements::default(),
+            telemetry: crate::control::state::TelemetryState::default(),
+            config: crate::config::EepromConfig::default(),
+            current_pid: crate::pid::Pid::new(400, 0, 1000, 20000, 100000),
+            speed_pid: crate::pid::Pid::new(10, 0, 100, 10000, 50000),
+            stall_pid: crate::pid::Pid::new(1, 0, 50, 10000, 50000),
+            e_rpm: 0,
+            average_interval: 0,
+            last_average_interval: 0,
+            commutation_intervals: [0; 6],
+            cell_count: 0,
+            motor_kv: 2000,
+            low_cell_volt_cutoff: 330,
+            voltage_divider: 110,
+            millivolt_per_amp: 20,
+            current_offset: 0,
+            stall_protection_adjust: 0,
+            stall_protect_target_interval: 6500,
+            use_speed_control_loop: false,
+            speed_input_override: 0,
+            target_e_com_time: 0,
+            desync_check: false,
+            current_filter: crate::current::CurrentFilter::new(),
+            voltage_filter: crate::filter::EwmaPow2::new(),
+            last_armed: false,
+            just_armed: false,
+            use_ntc: false,
+            led: NoLed,
+            led_counter: 0,
+            timer1_max_arr: 1999,
+            cpu_mhz: 64,
+            ten_khz_counter: 0,
+        }
+    }
+
+    #[test]
+    fn stall_detection_increments_timeout() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine); // running=true
+        shared.set_interval_timer_count(50000); // > 45000 threshold
+        shared.set_adjusted_input(100); // above throttle min
+
+        let mut main = make_test_main_state();
+        assert_eq!(main.protection.bemf_timeout_happened, 0);
+
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(
+            main.protection.bemf_timeout_happened > 0,
+            "bemf_timeout_happened should increment on stall"
+        );
+    }
+
+    #[test]
+    fn stall_detection_does_not_trigger_below_threshold() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+        shared.set_interval_timer_count(40000); // below 45000
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(main.protection.bemf_timeout_happened, 0);
     }
 }

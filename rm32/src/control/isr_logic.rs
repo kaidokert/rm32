@@ -127,8 +127,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.shared.set_duty_cycle(ctx.duty.cycle);
     ctx.hal.pwm().set_auto_reload(tim1_arr);
 
-    // Sync ISR→shared direction (Commutation owns truth, shared publishes for main loop)
+    // Sync ISR→shared (Commutation owns truth, shared publishes for main loop)
     ctx.shared.set_forward(ctx.commutation.forward);
+    ctx.shared
+        .set_interval_timer_count(ctx.hal.interval().count());
 }
 
 /// BEMF polling (old_routine path).
