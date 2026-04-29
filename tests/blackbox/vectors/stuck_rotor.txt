@@ -6,7 +6,7 @@
 # (10 at high throttle), stuck_rotor_protection latches input=0, running=0.
 #
 # Note: interval_timer must be set EACH tick (zcfoundroutine resets it).
-# Rust harness latches 2 ticks later than C due to main-before-ISR ordering.
+# C latches at tick 13, Rust at tick 14 (1-tick atomic publish delay).
 
 @config
 armed=1

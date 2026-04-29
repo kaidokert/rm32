@@ -34,11 +34,12 @@ pub fn dshot_bidir(
     let can_reverse =
         (commutation_interval > reverse_speed_threshold as u32 && duty_cycle < 200) || stepper_sine;
 
-    if newinput > 1047 {
+    if newinput > crate::constants::DSHOT_BIDIR_BRAKE_LIMIT {
         let want_forward = !dir_reversed;
         let reverse = forward != want_forward && can_reverse;
         let adjusted = if reverse || forward == want_forward {
-            ((newinput.saturating_sub(1048)) * 2 + 47).saturating_sub(reversing_dead_band)
+            ((newinput.saturating_sub(crate::constants::BIDIR_MIDPOINT)) * 2 + THROTTLE_MIN_SIGNAL)
+                .saturating_sub(reversing_dead_band)
         } else {
             0 // blocked: can't reverse at this speed
         };
@@ -47,12 +48,13 @@ pub fn dshot_bidir(
             reverse,
             prop_brake: false,
         }
-    } else if newinput > 47 {
+    } else if newinput > THROTTLE_MIN_SIGNAL {
         // Motor needs to be going in the "normal forward" direction to need reversal
         let needs_reversal = forward != dir_reversed;
         let reverse = needs_reversal && can_reverse;
         let adjusted = if reverse || !needs_reversal {
-            ((newinput.saturating_sub(48)) * 2 + 47).saturating_sub(reversing_dead_band)
+            ((newinput.saturating_sub(THROTTLE_MIN_SIGNAL + 1)) * 2 + THROTTLE_MIN_SIGNAL)
+                .saturating_sub(reversing_dead_band)
         } else {
             0
         };
@@ -79,7 +81,7 @@ pub fn dshot_rc_car(
     return_to_center: bool,
 ) -> BidirResult {
     let reversing_dead_band = 1u16;
-    if newinput > 1047 {
+    if newinput > crate::constants::DSHOT_BIDIR_BRAKE_LIMIT {
         let want_forward = !dir_reversed;
         if forward != want_forward {
             // Wrong direction — brake or reverse on center return
@@ -98,7 +100,8 @@ pub fn dshot_rc_car(
         }
         if !prop_brake_active {
             BidirResult {
-                adjusted: ((newinput - 1048) * 2 + 47).saturating_sub(reversing_dead_band),
+                adjusted: ((newinput - crate::constants::BIDIR_MIDPOINT) * 2 + THROTTLE_MIN_SIGNAL)
+                    .saturating_sub(reversing_dead_band),
                 reverse: false,
                 prop_brake: false,
             }
@@ -109,7 +112,7 @@ pub fn dshot_rc_car(
                 prop_brake: true,
             }
         }
-    } else if newinput > 47 {
+    } else if newinput > THROTTLE_MIN_SIGNAL {
         let want_reverse = dir_reversed;
         if forward != want_reverse {
             if return_to_center {
@@ -127,7 +130,8 @@ pub fn dshot_rc_car(
         }
         if !prop_brake_active {
             BidirResult {
-                adjusted: ((newinput - 48) * 2 + 47).saturating_sub(reversing_dead_band),
+                adjusted: ((newinput - (THROTTLE_MIN_SIGNAL + 1)) * 2 + THROTTLE_MIN_SIGNAL)
+                    .saturating_sub(reversing_dead_band),
                 reverse: false,
                 prop_brake: false,
             }

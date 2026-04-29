@@ -377,7 +377,7 @@ impl Harness {
             self.do_transfer = false;
         }
 
-        // --- Input processing pipeline (library function) ---
+        // --- Input processing (equivalent to C setInput) ---
         input::process_input(
             &self.shared,
             &self.config,
@@ -386,22 +386,8 @@ impl Harness {
             self.shared.dshot(),
         );
 
-        // Sync desync_check from commutation before main.tick()
-        if self.commutation.desync_check {
-            self.main.desync_check = true;
-            self.commutation.desync_check = false;
-        }
-
-        // --- main_loop: runs first so published values are available to ISR ---
-        self.main.config = self.config;
-        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
-
-        // Firmware main.rs handles ESC info send + flag clear; harness just clears it.
-        if self.shared.send_esc_info_flag() {
-            self.shared.set_send_esc_info_flag(false);
-        }
-
-        // --- ISR tick: reads main-published atomics (tim1_arr, duty_max, etc.) ---
+        // --- ISR tick (equivalent to C tenKhzRoutine) ---
+        // Runs BEFORE main_loop, matching C ordering.
         let mut ctx = MotorContext {
             commutation: &mut self.commutation,
             bemf: &mut self.bemf,
@@ -412,6 +398,22 @@ impl Harness {
             hal: &mut self.hal,
         };
         isr_logic::ten_khz_tick(&mut ctx);
+
+        // Sync desync_check from commutation before main.tick()
+        if self.commutation.desync_check {
+            self.main.desync_check = true;
+            self.commutation.desync_check = false;
+        }
+
+        // --- main_loop (equivalent to C main_loop) ---
+        // Runs AFTER ISR tick, matching C ordering.
+        self.main.config = self.config;
+        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
+
+        // ESC info flag: firmware main.rs handles send+clear; harness just clears.
+        if self.shared.send_esc_info_flag() {
+            self.shared.set_send_esc_info_flag(false);
+        }
 
         self.tick_count += 1;
     }
@@ -466,7 +468,7 @@ impl Harness {
             self.hal.pwm.duty,
             self.hal.pwm.arr,
             self.hal.pwm.duty_count,
-            self.duty.maximum,
+            self.shared.duty_maximum(),
             self.bemf.filter_level,
             self.shared.send_telemetry() as i32,
             self.shared.send_esc_info_flag() as i32,
@@ -679,7 +681,31 @@ fn main() {
         } else if line.starts_with("state") {
             harness.print_state();
         } else if line.starts_with("load_eeprom") {
-            // No-op for v2 (config set directly)
+            // Apply EEPROM settings: derive motor config and update state
+            let mc = harness.config.derive_motor_config(
+                harness.counters.tim1_arr,
+                60,    // default dead_time
+                1,     // default kv_divider
+                false, // startup_boost
+            );
+            harness.main.motor_kv = mc.motor_kv;
+            harness.main.low_cell_volt_cutoff = mc.low_cell_volt_cutoff;
+            harness.main.current_pid.kp = mc.current_kp;
+            harness.main.current_pid.ki = mc.current_ki;
+            harness.main.current_pid.kd = mc.current_kd;
+            harness.main.timer1_max_arr = mc.timer1_max_arr;
+            harness.duty.minimum = mc.minimum_duty;
+            harness.duty.min_startup = mc.min_startup_duty;
+            harness.duty.startup_max = mc.startup_max_duty;
+            // Apply advance level
+            let adv = harness.config.advance_level;
+            if (10..43).contains(&adv) {
+                harness.bemf.temp_advance = adv - 10;
+            }
+            // Apply current limit
+            if harness.config.current_limit > 0 && harness.config.current_limit < 100 {
+                // use_current_limit flag — not in MainState, but affects PID path
+            }
             println!("ok");
             io::stdout().flush().unwrap();
         } else if let Some(rest) = line.strip_prefix("config ") {
