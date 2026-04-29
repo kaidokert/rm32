@@ -351,11 +351,8 @@ impl<LED: OutputPin> MainState<LED> {
             shared.set_auto_advance(level);
         }
 
-        // ESC info response (clears flag after processing)
-        if shared.send_esc_info_flag() {
-            // Actual packet send happens in firmware main.rs; here we just clear the flag.
-            shared.set_send_esc_info_flag(false);
-        }
+        // Note: send_esc_info_flag is checked and cleared by firmware main.rs
+        // after sending the actual packet. MainState does not own this flag.
 
         // Custom LED: blink with throttle, solid when high
         {

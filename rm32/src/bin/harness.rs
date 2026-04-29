@@ -395,6 +395,11 @@ impl Harness {
         self.main.config = self.config;
         self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
 
+        // Firmware main.rs handles ESC info send + flag clear; harness just clears it.
+        if self.shared.send_esc_info_flag() {
+            self.shared.set_send_esc_info_flag(false);
+        }
+
         // --- ISR tick: reads main-published atomics (tim1_arr, duty_max, etc.) ---
         let mut ctx = MotorContext {
             commutation: &mut self.commutation,
@@ -621,7 +626,10 @@ impl Harness {
             "eeprom.limits.temperature" => self.config.temperature_limit = v as u8,
             "eeprom.limits.current" => self.config.current_limit = v as u8,
             "eeprom.beep_volume" => self.config.beep_volume = v as u8,
-            "eeprom.motor_kv" => self.config.motor_kv = v as u8,
+            "eeprom.motor_kv" => {
+                self.config.motor_kv = v as u8;
+                self.main.motor_kv = (v as u16) * 40 + 20;
+            }
             "eeprom.motor_poles" => self.config.motor_poles = v as u8,
             "eeprom.advance_level" => self.config.advance_level = v as u8,
             "eeprom.max_ramp" => self.config.max_ramp = v as u8,
