@@ -93,4 +93,53 @@ pub trait SharedComm {
     fn battery_voltage(&self) -> u16 {
         0
     }
+
+    // --- Main→ISR published state (main computes, ISR reads) ---
+
+    fn send_telemetry(&self) -> bool;
+    fn set_send_telemetry(&self, v: bool);
+
+    fn save_settings_flag(&self) -> bool {
+        false
+    }
+    fn set_save_settings_flag(&self, _v: bool) {}
+    fn send_esc_info_flag(&self) -> bool {
+        false
+    }
+    fn set_send_esc_info_flag(&self, _v: bool) {}
+
+    /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
+    fn tim1_arr(&self) -> u16 {
+        1999
+    }
+    fn set_tim1_arr(&self, _v: u16) {}
+
+    /// Max duty cycle (eRPM/temperature limiting). Main publishes, ISR applies.
+    fn duty_maximum(&self) -> u16 {
+        2000
+    }
+    fn set_duty_maximum(&self, _v: u16) {}
+
+    /// BEMF filter level. Main computes based on motor speed, ISR uses for ZC detection.
+    fn filter_level(&self) -> u8 {
+        5
+    }
+    fn set_filter_level(&self, _v: u8) {}
+
+    /// Min BEMF counts for zero-cross acceptance. Main adjusts during startup.
+    fn min_bemf_counts(&self) -> u8 {
+        2
+    }
+    fn set_min_bemf_counts(&self, _v: u8) {}
+
+    /// Auto advance level. Main computes from duty cycle, ISR uses for timing.
+    fn auto_advance(&self) -> u8 {
+        0
+    }
+    fn set_auto_advance(&self, _v: u8) {}
+
+    fn set_actual_current(&self, _v: i16) {}
+    fn set_battery_voltage(&self, _v: u16) {}
+    fn set_degrees_celsius(&self, _v: i16) {}
+    fn set_e_com_time(&self, _v: i32) {}
 }

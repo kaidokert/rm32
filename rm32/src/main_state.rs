@@ -16,6 +16,67 @@ use embedded_hal::digital::OutputPin;
 
 use crate::shared_state::SharedState;
 
+/// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
+pub fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
+    crate::functions::map(
+        commutation_interval as i32,
+        96,
+        200,
+        timer1_max_arr as i32 / 2,
+        timer1_max_arr as i32,
+    ) as u16
+}
+
+/// Compute variable PWM auto-reload value for mode 2 (CPU-scaled).
+pub fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
+    let scale = cpu_mhz as u32 / 9;
+    if average_interval < 100 && average_interval > 0 {
+        (100 * scale) as u16
+    } else if average_interval >= 250 || average_interval == 0 {
+        (250 * scale) as u16
+    } else {
+        (average_interval * scale) as u16
+    }
+}
+
+/// Compute duty ceiling from eRPM and temperature limits.
+/// Returns the more restrictive of the two (or 2000 if neither applies).
+pub fn duty_ceiling(
+    e_com_time: i32,
+    motor_kv: u16,
+    motor_poles: u8,
+    degrees_celsius: i16,
+    temperature_limit: u8,
+) -> u16 {
+    let k_erpm = if e_com_time > 0 {
+        (600000 / e_com_time) / 10
+    } else {
+        0
+    };
+    let poles = motor_poles.max(2) as i32;
+    let low_rpm = motor_kv as i32 * poles / 3200;
+    let high_rpm = motor_kv as i32 * poles / 384;
+    let erpm_max = if k_erpm > 0 && high_rpm > low_rpm {
+        crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000) as u16
+    } else {
+        2000
+    };
+
+    let temp_max = if degrees_celsius > temperature_limit as i16 {
+        crate::functions::map(
+            degrees_celsius as i32,
+            temperature_limit as i32 - 10,
+            temperature_limit as i32 + 10,
+            1000,
+            1,
+        ) as u16
+    } else {
+        2000
+    };
+
+    erpm_max.min(temp_max)
+}
+
 /// Marker type for boards without a custom LED.
 pub struct NoLed;
 impl OutputPin for NoLed {
@@ -69,6 +130,12 @@ pub struct MainState<LED: OutputPin = NoLed> {
     /// Custom LED pin (NoLed if board has no custom LED)
     pub led: LED,
     pub led_counter: u16,
+    /// TIM1 max auto-reload (from PWM frequency config)
+    pub timer1_max_arr: u16,
+    /// CPU MHz for variable PWM mode 2 scaling
+    pub cpu_mhz: u8,
+    /// Main-loop tick counter for consumed current accumulation
+    pub ten_khz_counter: u32,
 }
 
 impl<LED: OutputPin> MainState<LED> {
@@ -231,6 +298,62 @@ impl<LED: OutputPin> MainState<LED> {
             shared.set_send_telemetry(false);
         }
 
+        // Consumed current accumulation (1s interval at ~20kHz)
+        // TODO: counter incremented in main loop (variable rate), not ISR.
+        // Matches C firmware behavior but integration is approximate.
+        self.ten_khz_counter += 1;
+        if self.ten_khz_counter > 20000 {
+            self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
+            self.ten_khz_counter = 0;
+        }
+
+        // Variable PWM — adjust tim1_arr based on commutation speed
+        if self.config.variable_pwm == 1 {
+            shared.set_tim1_arr(variable_pwm_mode1(
+                shared.commutation_interval(),
+                self.timer1_max_arr,
+            ));
+        } else if self.config.variable_pwm == 2 {
+            shared.set_tim1_arr(variable_pwm_mode2(self.average_interval, self.cpu_mhz));
+        }
+
+        // eRPM + temperature duty ceiling
+        shared.set_duty_maximum(duty_ceiling(
+            e_com_time,
+            self.motor_kv,
+            self.config.motor_poles,
+            self.measurements.degrees_celsius.0,
+            self.config.temperature_limit,
+        ));
+
+        // Min BEMF counts adjustment — more lenient during startup
+        if zc < 5 {
+            let counts = if self.config.bi_direction != 0 { 3 } else { 4 };
+            shared.set_min_bemf_counts(counts);
+        } else {
+            shared.set_min_bemf_counts(2);
+        }
+
+        // Filter level — dynamic based on motor speed
+        let filter = if zc < 100 && shared.commutation_interval() > 500 {
+            12u8
+        } else if shared.commutation_interval() < 50 {
+            2
+        } else {
+            crate::functions::map(self.average_interval as i32, 100, 500, 3, 12) as u8
+        };
+        shared.set_filter_level(filter);
+
+        // Auto advance — scales with duty cycle
+        if self.config.auto_advance != 0 {
+            let level =
+                crate::functions::map(shared.duty_cycle_setpoint() as i32, 100, 2000, 13, 23) as u8;
+            shared.set_auto_advance(level);
+        }
+
+        // Note: send_esc_info_flag is checked and cleared by firmware main.rs
+        // after sending the actual packet. MainState does not own this flag.
+
         // Custom LED: blink with throttle, solid when high
         {
             let input = shared.adjusted_input();
@@ -250,5 +373,76 @@ impl<LED: OutputPin> MainState<LED> {
                 let _ = self.led.set_low();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Variable PWM mode 2 ---
+
+    #[test]
+    fn vpwm2_clamps_low() {
+        // avg < 100 → floor at 100 * scale
+        assert_eq!(variable_pwm_mode2(50, 64), (100 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_clamps_high() {
+        // avg >= 250 → ceiling at 250 * scale
+        assert_eq!(variable_pwm_mode2(300, 64), (250 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_scales_mid() {
+        // 100 <= avg < 250 → avg * scale
+        assert_eq!(variable_pwm_mode2(150, 64), (150 * (64 / 9)) as u16);
+    }
+
+    #[test]
+    fn vpwm2_zero_interval_clamps_high() {
+        assert_eq!(variable_pwm_mode2(0, 64), (250 * (64 / 9)) as u16);
+    }
+
+    // --- Variable PWM mode 1 ---
+
+    #[test]
+    fn vpwm1_fast_interval() {
+        let arr = variable_pwm_mode1(96, 1999);
+        assert_eq!(arr, 999); // maps to max_arr/2
+    }
+
+    #[test]
+    fn vpwm1_slow_interval() {
+        let arr = variable_pwm_mode1(200, 1999);
+        assert_eq!(arr, 1999); // maps to max_arr
+    }
+
+    // --- Duty ceiling ---
+
+    #[test]
+    fn duty_ceiling_no_limits() {
+        assert_eq!(duty_ceiling(0, 2000, 14, 25, 80), 2000);
+    }
+
+    #[test]
+    fn duty_ceiling_temp_reduces() {
+        let dc = duty_ceiling(0, 2000, 14, 85, 80);
+        assert!(dc < 2000, "expected reduced duty, got {}", dc);
+    }
+
+    #[test]
+    fn duty_ceiling_high_poles_no_panic() {
+        // motor_poles > 32 must not divide by zero
+        let dc = duty_ceiling(1000, 2000, 40, 25, 80);
+        assert!(dc > 0);
+    }
+
+    #[test]
+    fn duty_ceiling_takes_minimum() {
+        // Both limits active → should return the lower one
+        let dc = duty_ceiling(100, 2000, 14, 85, 80);
+        assert!(dc < 2000);
     }
 }

@@ -51,6 +51,13 @@ pub struct SharedState {
     actual_current: AtomicU16,  // mA, stored as u16
     battery_voltage: AtomicU16, // mV
     degrees_celsius: AtomicU16, // stored as u16, interpreted as i16
+
+    // Main→ISR published control (main computes, ISR applies)
+    tim1_arr: AtomicU16,       // variable PWM auto-reload
+    duty_maximum: AtomicU16,   // eRPM/temperature throttle restriction
+    filter_level: AtomicU8,    // BEMF comparator filter samples
+    min_bemf_counts: AtomicU8, // min zero-cross detection threshold
+    auto_advance: AtomicU8,    // commutation timing advance level
 }
 
 impl Default for SharedState {
@@ -82,6 +89,11 @@ impl SharedState {
             actual_current: AtomicU16::new(0),
             battery_voltage: AtomicU16::new(0),
             degrees_celsius: AtomicU16::new(0),
+            tim1_arr: AtomicU16::new(1999),
+            duty_maximum: AtomicU16::new(2000),
+            filter_level: AtomicU8::new(5),
+            min_bemf_counts: AtomicU8::new(2),
+            auto_advance: AtomicU8::new(0),
         }
     }
 
@@ -330,6 +342,43 @@ impl SharedState {
     pub fn set_degrees_celsius(&self, v: i16) {
         self.degrees_celsius.store(v as u16, REL);
     }
+
+    // --- Main→ISR published control ---
+
+    pub fn tim1_arr(&self) -> u16 {
+        self.tim1_arr.load(ACQ)
+    }
+    pub fn set_tim1_arr(&self, v: u16) {
+        self.tim1_arr.store(v, REL);
+    }
+
+    pub fn duty_maximum(&self) -> u16 {
+        self.duty_maximum.load(ACQ)
+    }
+    pub fn set_duty_maximum(&self, v: u16) {
+        self.duty_maximum.store(v, REL);
+    }
+
+    pub fn filter_level(&self) -> u8 {
+        self.filter_level.load(ACQ)
+    }
+    pub fn set_filter_level(&self, v: u8) {
+        self.filter_level.store(v, REL);
+    }
+
+    pub fn min_bemf_counts(&self) -> u8 {
+        self.min_bemf_counts.load(ACQ)
+    }
+    pub fn set_min_bemf_counts(&self, v: u8) {
+        self.min_bemf_counts.store(v, REL);
+    }
+
+    pub fn auto_advance(&self) -> u8 {
+        self.auto_advance.load(ACQ)
+    }
+    pub fn set_auto_advance(&self, v: u8) {
+        self.auto_advance.store(v, REL);
+    }
 }
 
 impl crate::shared_comm::SharedComm for SharedState {
@@ -408,5 +457,66 @@ impl crate::shared_comm::SharedComm for SharedState {
 
     fn battery_voltage(&self) -> u16 {
         self.battery_voltage()
+    }
+
+    fn send_telemetry(&self) -> bool {
+        self.send_telemetry()
+    }
+    fn set_send_telemetry(&self, v: bool) {
+        self.set_send_telemetry(v);
+    }
+    fn save_settings_flag(&self) -> bool {
+        self.save_settings_flag()
+    }
+    fn set_save_settings_flag(&self, v: bool) {
+        self.set_save_settings_flag(v);
+    }
+    fn send_esc_info_flag(&self) -> bool {
+        self.send_esc_info_flag()
+    }
+    fn set_send_esc_info_flag(&self, v: bool) {
+        self.set_send_esc_info_flag(v);
+    }
+    fn tim1_arr(&self) -> u16 {
+        SharedState::tim1_arr(self)
+    }
+    fn set_tim1_arr(&self, v: u16) {
+        SharedState::set_tim1_arr(self, v);
+    }
+    fn duty_maximum(&self) -> u16 {
+        SharedState::duty_maximum(self)
+    }
+    fn set_duty_maximum(&self, v: u16) {
+        SharedState::set_duty_maximum(self, v);
+    }
+    fn filter_level(&self) -> u8 {
+        SharedState::filter_level(self)
+    }
+    fn set_filter_level(&self, v: u8) {
+        SharedState::set_filter_level(self, v);
+    }
+    fn min_bemf_counts(&self) -> u8 {
+        SharedState::min_bemf_counts(self)
+    }
+    fn set_min_bemf_counts(&self, v: u8) {
+        SharedState::set_min_bemf_counts(self, v);
+    }
+    fn auto_advance(&self) -> u8 {
+        SharedState::auto_advance(self)
+    }
+    fn set_auto_advance(&self, v: u8) {
+        SharedState::set_auto_advance(self, v);
+    }
+    fn set_actual_current(&self, v: i16) {
+        SharedState::set_actual_current(self, v);
+    }
+    fn set_battery_voltage(&self, v: u16) {
+        SharedState::set_battery_voltage(self, v);
+    }
+    fn set_degrees_celsius(&self, v: i16) {
+        SharedState::set_degrees_celsius(self, v);
+    }
+    fn set_e_com_time(&self, v: i32) {
+        SharedState::set_e_com_time(self, v);
     }
 }
