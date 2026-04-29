@@ -684,7 +684,7 @@ fn main() {
         } else if line.starts_with("load_eeprom") {
             // Apply EEPROM settings: derive motor config and update state
             let mc = harness.config.derive_motor_config(
-                harness.counters.tim1_arr,
+                1999,  // base TIM1 ARR (matches firmware Chip::TIM1_AUTORELOAD)
                 60,    // default dead_time
                 1,     // default kv_divider
                 false, // startup_boost

@@ -151,12 +151,21 @@ impl<LED: OutputPin> MainState<LED> {
         // Average interval
         self.average_interval = (e_com_time / 3) as u32;
 
-        // BEMF timeout clearing — uses raw newinput (not adjusted_input) so
-        // the user centering the stick can clear a latched fault. process_input
-        // zeroes adjusted_input on latch, so using adjusted here would never clear.
+        // BEMF timeout clearing — check whether the user has released the throttle.
+        // For unidirectional: newinput == 0 means stick centered.
+        // For bidirectional: newinput near SERVO_CENTER means stick centered.
+        // process_input zeros adjusted_input on latch, so we can't use it directly.
         let zc = shared.zero_crosses();
         let raw_input = shared.newinput();
-        if zc > 1000 || raw_input == 0 {
+        let stick_released = if self.config.bi_direction != 0 {
+            // Bidir: centered near servo center or at DShot zero
+            raw_input == 0
+                || (raw_input >= crate::constants::SERVO_CENTER.saturating_sub(200)
+                    && raw_input <= crate::constants::SERVO_CENTER + 200)
+        } else {
+            raw_input == 0
+        };
+        if zc > 1000 || stick_released {
             self.protection.bemf_timeout_happened = 0;
         }
         if zc > 100 && raw_input < 200 {
@@ -298,6 +307,10 @@ impl<LED: OutputPin> MainState<LED> {
                 .current_limit_adjust
                 .clamp(self.config.minimum_duty_cycle as i16 * 10, 2000);
             shared.set_current_limit_adjust(self.current_limit_adjust as u16);
+        } else {
+            // Reset ceiling when inactive to prevent stale cap on next start
+            self.current_limit_adjust = 2000;
+            shared.set_current_limit_adjust(2000);
         }
 
         // Speed control PID — closed-loop RPM control

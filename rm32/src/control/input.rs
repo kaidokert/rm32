@@ -57,20 +57,9 @@ pub fn process_input<S: SharedComm>(
 ) {
     let newinput = shared.newinput();
 
-    // --- Stuck rotor protection latch ---
-    // Check FIRST: if latched, force everything to zero regardless of input.
-    // Uses raw newinput (not adjusted) so the latch persists even though
-    // we ourselves zeroed adjusted_input on the previous tick.
-    if protection.bemf_timeout_happened > protection.bemf_timeout
-        && config.stuck_rotor_protection != 0
-    {
-        input_state.input = 0;
-        shared.set_adjusted_input(0);
-        protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
-        return;
-    }
-
     // --- Bidirectional throttle mapping ---
+    // Runs BEFORE the stuck rotor check so adjusted_input reflects the user's
+    // stick position even during a fault latch (needed for clearing logic).
     if config.bi_direction != 0 {
         if is_dshot {
             if config.rc_car_reverse != 0 {
@@ -162,6 +151,18 @@ pub fn process_input<S: SharedComm>(
     } else {
         // Unidirectional: adjusted = newinput
         shared.set_adjusted_input(newinput);
+    }
+
+    // --- Stuck rotor protection latch ---
+    // Checked AFTER bidir mapping so adjusted_input reflects stick position.
+    // Zero adjusted_input for ISR safety (stops motor), latch the fault.
+    if protection.bemf_timeout_happened > protection.bemf_timeout
+        && config.stuck_rotor_protection != 0
+    {
+        input_state.input = 0;
+        shared.set_adjusted_input(0);
+        protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
+        return;
     }
 
     // --- Sine start throttle mapping ---
