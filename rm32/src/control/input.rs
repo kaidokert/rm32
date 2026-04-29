@@ -168,11 +168,12 @@ pub fn process_input<S: SharedComm>(
     // Maps adjusted_input through sine curve, then publishes BACK to adjusted_input
     // so the ISR setpoint path sees the shaped value.
     let adjusted = shared.adjusted_input();
-    if config.use_sine_start != 0 {
+    if config.use_sine_start != 0 && adjusted > THROTTLE_MIN_SIGNAL {
+        // Only remap actual throttle values — preserve DShot commands (0-47)
         let mapped =
             input_mapping::sine_start_map(adjusted, config.sine_mode_changeover_throttle_level);
         input_state.input = mapped;
-        shared.set_adjusted_input(mapped); // ISR must see the sine-shaped value
+        shared.set_adjusted_input(mapped);
     } else {
         input_state.input = adjusted;
     }
