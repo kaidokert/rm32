@@ -5,12 +5,11 @@
 
 use crate::config::EepromConfig;
 use crate::constants::*;
-use crate::control::state::{Measurements, ProtectionState, TelemetryState};
+use crate::control::state::{Measurements, PidState, ProtectionState, TelemetryState};
 use crate::current::CurrentFilter;
 use crate::filter::EwmaPow2;
 use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
-use crate::pid::Pid;
 use crate::telemetry;
 use embedded_hal::digital::OutputPin;
 
@@ -97,9 +96,7 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub config: EepromConfig,
 
     // PID controllers (main computes adjustments, ISR applies)
-    pub current_pid: Pid,
-    pub speed_pid: Pid,
-    pub stall_pid: Pid,
+    pub pid: PidState,
 
     // Derived values
     pub e_rpm: u16,
@@ -112,15 +109,6 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub voltage_divider: u16,
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
-    pub stall_protection_adjust: i32,
-    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
-    pub current_limit_adjust: i16,
-    /// Whether current limiting is active (set by loadEEpromSettings).
-    pub use_current_limit: bool,
-    pub stall_protect_target_interval: u16,
-    pub use_speed_control_loop: bool,
-    pub speed_input_override: i32,
-    pub target_e_com_time: u32,
     pub desync_check: bool,
     pub current_filter: CurrentFilter,
     pub voltage_filter: EwmaPow2<3>,
@@ -167,9 +155,10 @@ impl MainState<NoLed> {
             measurements: Measurements::default(),
             telemetry: TelemetryState::default(),
             config: EepromConfig::default(),
-            current_pid: Pid::new(400, 0, 1000, 20000, 100000),
-            speed_pid: Pid::new(10, 0, 100, 10000, 50000),
-            stall_pid: Pid::new(1, 0, 50, 10000, 50000),
+            pid: PidState {
+                stall_protect_target_interval: params.stall_protect_interval,
+                ..PidState::default()
+            },
             e_rpm: 0,
             average_interval: 0,
             last_average_interval: 0,
@@ -180,13 +169,6 @@ impl MainState<NoLed> {
             voltage_divider: params.voltage_divider,
             millivolt_per_amp: params.millivolt_per_amp,
             current_offset: params.current_offset,
-            stall_protection_adjust: 0,
-            current_limit_adjust: 2000,
-            use_current_limit: false,
-            stall_protect_target_interval: params.stall_protect_interval,
-            use_speed_control_loop: false,
-            speed_input_override: 0,
-            target_e_com_time: 0,
             desync_check: false,
             current_filter: CurrentFilter::new(),
             voltage_filter: EwmaPow2::new(),
@@ -209,13 +191,14 @@ impl<LED: OutputPin> MainState<LED> {
     /// command (harness). Updates PID tuning, motor KV, voltage cutoff, and
     /// current limit flag from the derived `MotorConfig`.
     pub fn apply_motor_config(&mut self, motor_cfg: &crate::config::MotorConfig) {
-        self.current_pid.kp = motor_cfg.current_kp;
-        self.current_pid.ki = motor_cfg.current_ki;
-        self.current_pid.kd = motor_cfg.current_kd;
+        self.pid.current.kp = motor_cfg.current_kp;
+        self.pid.current.ki = motor_cfg.current_ki;
+        self.pid.current.kd = motor_cfg.current_kd;
         self.motor_kv = motor_cfg.motor_kv;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
-        self.use_current_limit = self.config.current_limit > 0 && self.config.current_limit < 100;
+        self.pid.use_current_limit =
+            self.config.current_limit > 0 && self.config.current_limit < 100;
     }
 
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
@@ -371,42 +354,44 @@ impl<LED: OutputPin> MainState<LED> {
         // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
         if self.config.stall_protection != 0 && shared.running() {
             let ci = shared.commutation_interval() as i32;
-            let target = self.stall_protect_target_interval as i32;
-            self.stall_protection_adjust += self.stall_pid.calculate(ci, target);
-            self.stall_protection_adjust = self.stall_protection_adjust.clamp(0, 150 * 10000);
+            let target = self.pid.stall_protect_target_interval as i32;
+            self.pid.stall_adjust += self.pid.stall.calculate(ci, target);
+            self.pid.stall_adjust = self.pid.stall_adjust.clamp(0, 150 * 10000);
             // Publish to ISR via shared state (ISR adds to duty)
-            shared.set_stall_protection_adjust((self.stall_protection_adjust / 10000) as u16);
+            shared.set_stall_protection_adjust((self.pid.stall_adjust / 10000) as u16);
         }
 
         // Current limit PID — reduces duty when current exceeds limit
-        if self.use_current_limit && shared.running() {
+        if self.pid.use_current_limit && shared.running() {
             let target = self.config.current_limit as i32 * 200;
             let adj = self
-                .current_pid
+                .pid
+                .current
                 .calculate(self.measurements.actual_current.0 as i32, target)
                 / 10000;
-            self.current_limit_adjust -= adj as i16;
+            self.pid.current_limit_adjust -= adj as i16;
             let lower = (self.config.minimum_duty_cycle.min(50) as i16) * 10;
-            self.current_limit_adjust = self.current_limit_adjust.clamp(lower, 2000);
-            shared.set_current_limit_adjust(self.current_limit_adjust as u16);
+            self.pid.current_limit_adjust = self.pid.current_limit_adjust.clamp(lower, 2000);
+            shared.set_current_limit_adjust(self.pid.current_limit_adjust as u16);
         } else {
             // Reset ceiling when inactive to prevent stale cap on next start
-            self.current_limit_adjust = 2000;
+            self.pid.current_limit_adjust = 2000;
             shared.set_current_limit_adjust(2000);
         }
 
         // Speed control PID — closed-loop RPM control
-        if self.use_speed_control_loop && shared.running() {
+        if self.pid.use_speed_control && shared.running() {
             let e_com = shared.e_com_time();
-            self.speed_input_override += self
-                .speed_pid
-                .calculate(e_com, self.target_e_com_time as i32);
-            self.speed_input_override = self.speed_input_override.clamp(0, 2047 * 10000);
+            self.pid.input_override += self
+                .pid
+                .speed
+                .calculate(e_com, self.pid.target_e_com_time as i32);
+            self.pid.input_override = self.pid.input_override.clamp(0, 2047 * 10000);
             if shared.zero_crosses() < 100 {
-                self.speed_pid.integral = 0;
+                self.pid.speed.integral = 0;
             }
             // Override throttle input with PID output
-            let override_input = (self.speed_input_override / 10000) as u16;
+            let override_input = (self.pid.input_override / 10000) as u16;
             shared.set_newinput(override_input.clamp(48, 2047));
         }
 
@@ -608,43 +593,15 @@ mod tests {
     }
 
     fn make_test_main_state() -> MainState {
-        MainState {
-            protection: crate::control::state::ProtectionState::default(),
-            measurements: crate::control::state::Measurements::default(),
-            telemetry: crate::control::state::TelemetryState::default(),
-            config: crate::config::EepromConfig::default(),
-            current_pid: crate::pid::Pid::new(400, 0, 1000, 20000, 100000),
-            speed_pid: crate::pid::Pid::new(10, 0, 100, 10000, 50000),
-            stall_pid: crate::pid::Pid::new(1, 0, 50, 10000, 50000),
-            e_rpm: 0,
-            average_interval: 0,
-            last_average_interval: 0,
-            commutation_intervals: [0; 6],
-            cell_count: 0,
-            motor_kv: 2000,
-            low_cell_volt_cutoff: 330,
+        MainState::new(&MainStateParams {
             voltage_divider: 110,
             millivolt_per_amp: 20,
             current_offset: 0,
-            stall_protection_adjust: 0,
-            current_limit_adjust: 2000,
-            use_current_limit: false,
-            stall_protect_target_interval: 6500,
-            use_speed_control_loop: false,
-            speed_input_override: 0,
-            target_e_com_time: 0,
-            desync_check: false,
-            current_filter: crate::current::CurrentFilter::new(),
-            voltage_filter: crate::filter::EwmaPow2::new(),
-            last_armed: false,
-            just_armed: false,
+            stall_protect_interval: 6500,
             use_ntc: false,
-            led: NoLed,
-            led_counter: 0,
             timer1_max_arr: 1999,
             cpu_mhz: 64,
-            ten_khz_counter: 0,
-        }
+        })
     }
 
     #[test]
