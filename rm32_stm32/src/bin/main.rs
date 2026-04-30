@@ -94,7 +94,7 @@ fn main() -> ! {
     isr::init_isr_state(isr_state);
 
     // --- Build main loop state ---
-    let mut main_state = MainState::new(&rm32::main_state::MainStateParams {
+    let mut main_state = MainState::new(rm32::main_state::BoardParams {
         voltage_divider: BOARD.voltage_divider,
         millivolt_per_amp: BOARD.millivolt_per_amp,
         current_offset: BOARD.current_offset,

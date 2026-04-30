@@ -221,7 +221,7 @@ impl Harness {
                 temperature: 25,
             },
             telem: MockTelem,
-            main: rm32::main_state::MainState::new(&rm32::main_state::MainStateParams {
+            main: rm32::main_state::MainState::new(rm32::main_state::BoardParams {
                 voltage_divider: 110,
                 millivolt_per_amp: 20,
                 current_offset: 0,
