@@ -11,7 +11,7 @@ use fixed::types::U16F16;
 /// Power-of-2 EWMA filter state.
 /// K is the shift amount: α = 1/2^K.
 #[derive(Clone)]
-pub struct EwmaPow2<const K: u8> {
+pub(crate) struct EwmaPow2<const K: u8> {
     state: U16F16,
     initialized: bool,
 }
@@ -23,7 +23,7 @@ impl<const K: u8> Default for EwmaPow2<K> {
 }
 
 impl<const K: u8> EwmaPow2<K> {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             state: U16F16::ZERO,
             initialized: false,
@@ -33,7 +33,7 @@ impl<const K: u8> EwmaPow2<K> {
     /// Feed a new sample, return the filtered value (truncated to u16).
     /// Uses direct bit manipulation for exact C identity — no double conversion.
     #[inline]
-    pub fn update(&mut self, sample: u16) -> u16 {
+    pub(crate) fn update(&mut self, sample: u16) -> u16 {
         if !self.initialized {
             self.state = U16F16::from_num(sample);
             self.initialized = true;
@@ -46,11 +46,6 @@ impl<const K: u8> EwmaPow2<K> {
         bits += (((sample as i32) << 16) - bits) >> K;
         self.state = U16F16::from_bits(bits as u32);
         // Truncate to integer part (matches C's integer truncation)
-        self.state.to_num::<u16>()
-    }
-
-    /// Current filtered value without feeding a new sample.
-    pub fn value(&self) -> u16 {
         self.state.to_num::<u16>()
     }
 }
@@ -73,7 +68,7 @@ mod tests {
             f.update(800);
         }
         // With fractional state, convergence is exact (no dead zone)
-        let v = f.value();
+        let v = f.update(800);
         assert!(v >= 799 && v <= 800, "expected ~800, got {}", v);
     }
 

@@ -45,7 +45,6 @@ mod tests {
             wait_time: 0,
             last_zc_time: 0,
             this_zc_time: 0,
-            advance: 0,
             temp_advance: 0,
         }
     }

@@ -19,17 +19,17 @@ use crate::shared_comm::SharedComm;
 #[derive(Clone, Default)]
 pub struct InputState {
     pub prop_brake_active: bool,
-    pub return_to_center: bool,
-    pub reverse_speed_threshold: u16,
+    pub(crate) return_to_center: bool,
+    pub(crate) reverse_speed_threshold: u16,
     /// Mapped input value after all processing (0-2047).
     /// This is a local copy — the authoritative value is `shared.adjusted_input()`.
     pub input: u16,
     /// Cached input mode — recomputed every tick in SystemTick::tick_input.
-    pub mode: InputMode,
+    pub(crate) mode: InputMode,
 }
 
 impl InputState {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             reverse_speed_threshold: 1500,
             ..Default::default()
@@ -50,7 +50,7 @@ impl InputState {
 ///
 /// All results are published to `shared.set_adjusted_input()` so the ISR
 /// can read them immediately.
-pub fn process_input<S: SharedComm>(
+pub(crate) fn process_input<S: SharedComm>(
     shared: &S,
     config: &EepromConfig,
     protection: &mut ProtectionState,

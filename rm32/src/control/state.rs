@@ -9,15 +9,14 @@ use crate::pid::Pid;
 pub struct BemfState {
     pub counter: u8,
     pub zc_found: bool,
-    pub min_counts_up: u8,
-    pub min_counts_down: u8,
-    pub bad_count: u8,
-    pub bad_count_threshold: u8,
+    pub(crate) min_counts_up: u8,
+    pub(crate) min_counts_down: u8,
+    pub(crate) bad_count: u8,
+    pub(crate) bad_count_threshold: u8,
     pub filter_level: u8,
-    pub wait_time: u16,
-    pub last_zc_time: u16,
-    pub this_zc_time: u16,
-    pub advance: u16,
+    pub(crate) wait_time: u16,
+    pub(crate) last_zc_time: u16,
+    pub(crate) this_zc_time: u16,
     pub temp_advance: u8,
 }
 
@@ -25,36 +24,18 @@ pub struct BemfState {
 #[derive(Clone)]
 pub struct DutyState {
     pub cycle: u16,
-    pub maximum: u16,
+    pub(crate) maximum: u16,
     pub last: u16,
     pub adjusted: u16,
     pub min_startup: u16,
     pub startup_max: u16,
     pub minimum: u16,
-    pub max_change: u8,
-    pub ramp_count: u16,
-    pub ramp_divider: u8,
-    pub max_ramp_startup: u8,
-    pub max_ramp_low_rpm: u8,
-    pub max_ramp_high_rpm: u8,
-}
-
-/// Input signal state.
-#[derive(Clone, Default)]
-pub struct InputState {
-    pub input: u16,
-    pub adjusted: u16,
-    pub newinput: u16,
-    pub input_set: bool,
-    pub dshot: bool,
-    pub servo_pwm: bool,
-    pub signal_timeout: u16,
-    pub zero_input_count: u16,
-    pub dshot_telemetry: bool,
-    pub edt_armed: bool,
-    pub servo_low_threshold: u16,
-    pub servo_high_threshold: u16,
-    pub servo_neutral: u16,
+    pub(crate) max_change: u8,
+    pub(crate) ramp_count: u16,
+    pub(crate) ramp_divider: u8,
+    pub(crate) max_ramp_startup: u8,
+    pub(crate) max_ramp_low_rpm: u8,
+    pub(crate) max_ramp_high_rpm: u8,
 }
 
 /// PID controllers and associated state.
@@ -63,29 +44,23 @@ pub struct InputState {
 /// and their output accumulators. `MainState` holds this as `pub pid: PidState`.
 #[derive(Clone)]
 pub struct PidState {
-    pub current: Pid,
-    pub speed: Pid,
-    pub stall: Pid,
+    pub(crate) current: Pid,
+    pub(crate) speed: Pid,
+    pub(crate) stall: Pid,
     /// Whether current limiting is active (from EEPROM config).
     pub use_current_limit: bool,
     /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
-    pub current_limit_adjust: i16,
+    pub(crate) current_limit_adjust: i16,
     /// Stall protection PID output accumulator.
-    pub stall_adjust: i32,
+    pub(crate) stall_adjust: i32,
     /// Stall protection target commutation interval.
-    pub stall_protect_target_interval: u16,
+    pub(crate) stall_protect_target_interval: u16,
     /// Whether closed-loop speed control is active.
     pub use_speed_control: bool,
     /// Speed PID output accumulator (throttle override).
-    pub input_override: i32,
+    pub(crate) input_override: i32,
     /// Speed PID target e_com_time.
-    pub target_e_com_time: u32,
-}
-
-/// Telemetry scheduling state.
-#[derive(Clone, Default)]
-pub struct TelemetryState {
-    pub send_telemetry: bool,
+    pub(crate) target_e_com_time: u32,
 }
 
 /// Protection system state.
@@ -94,7 +69,7 @@ pub struct ProtectionState {
     pub bemf_timeout_happened: u8,
     pub bemf_timeout: u8,
     pub low_voltage_count: u16,
-    pub low_voltage_cutoff: bool,
+    pub(crate) low_voltage_cutoff: bool,
 }
 
 /// Sensor measurements.
@@ -103,11 +78,11 @@ pub struct Measurements {
     pub battery_voltage: crate::units::MilliVolts,
     pub actual_current: crate::units::MilliAmps,
     pub degrees_celsius: crate::units::DegreesCelsius,
-    pub consumed_current: i32,
+    pub(crate) consumed_current: i32,
     /// EWMA filter for ADC voltage readings.
-    pub voltage_filter: crate::filter::EwmaPow2<3>,
+    pub(crate) voltage_filter: crate::filter::EwmaPow2<3>,
     /// Multi-stage filter for ADC current readings.
-    pub current_filter: crate::current::CurrentFilter,
+    pub(crate) current_filter: crate::current::CurrentFilter,
 }
 
 /// Main-loop timing state — eRPM and commutation interval tracking.
@@ -134,7 +109,6 @@ impl Default for BemfState {
             wait_time: 0,
             last_zc_time: 0,
             this_zc_time: 0,
-            advance: 0,
             temp_advance: 0,
         }
     }
