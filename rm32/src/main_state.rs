@@ -215,9 +215,7 @@ impl<LED: OutputPin> MainState<LED> {
         self.motor_kv = motor_cfg.motor_kv;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
-        if self.config.current_limit > 0 && self.config.current_limit < 100 {
-            self.use_current_limit = true;
-        }
+        self.use_current_limit = self.config.current_limit > 0 && self.config.current_limit < 100;
     }
 
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.

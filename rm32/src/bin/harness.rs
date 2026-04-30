@@ -654,6 +654,7 @@ fn main() {
                 1,     // default kv_divider
                 false, // startup_boost
             );
+            harness.main.config = harness.config;
             harness.main.apply_motor_config(&mc);
             harness.duty.minimum = mc.minimum_duty;
             harness.duty.min_startup = mc.min_startup_duty;
