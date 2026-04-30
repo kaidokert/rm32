@@ -112,17 +112,16 @@ pub struct Measurements {
     pub consumed_current: i32,
 }
 
-/// Timing and commutation interval tracking.
-#[derive(Clone)]
+/// Main-loop timing state — eRPM and commutation interval tracking.
+///
+/// Owns the main-loop side of timing computation. ISR-owned timing
+/// (commutation_interval, zero_crosses, e_com_time) lives in SharedComm.
+#[derive(Clone, Default)]
 pub struct TimingState {
-    pub commutation_interval: u32,
     pub commutation_intervals: [u16; 6],
     pub average_interval: u32,
     pub last_average_interval: u32,
-    pub zero_crosses: u32,
-    pub e_com_time: i32,
     pub e_rpm: u16,
-    pub polling_mode_changeover: u32,
 }
 
 impl Default for BemfState {
@@ -179,21 +178,6 @@ impl Default for PidState {
             use_speed_control: false,
             input_override: 0,
             target_e_com_time: 0,
-        }
-    }
-}
-
-impl Default for TimingState {
-    fn default() -> Self {
-        Self {
-            commutation_interval: 12500,
-            commutation_intervals: [0; 6],
-            average_interval: 0,
-            last_average_interval: 0,
-            zero_crosses: 0,
-            e_com_time: 0,
-            e_rpm: 0,
-            polling_mode_changeover: 0,
         }
     }
 }
