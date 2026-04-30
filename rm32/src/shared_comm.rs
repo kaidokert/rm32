@@ -163,6 +163,12 @@ pub trait SharedComm {
     }
     fn set_current_limit_adjust(&self, _v: u16) {}
 
+    /// Proportional brake active (main sets, ISR reads for brake-on-stop mode 1).
+    fn prop_brake_active(&self) -> bool {
+        false
+    }
+    fn set_prop_brake_active(&self, _v: bool) {}
+
     // --- ISR→Main published state ---
 
     /// Interval timer count (ISR publishes, main reads for stall detection).

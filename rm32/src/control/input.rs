@@ -190,10 +190,11 @@ pub fn process_input<S: SharedComm>(
         {
             input_state.prop_brake_active = true;
         } else if input_state.input >= THROTTLE_MIN_SIGNAL {
-            // Clear brake when throttle applied (prevents permanent latch)
             input_state.prop_brake_active = false;
         }
     }
+    // Publish brake state for ISR
+    shared.set_prop_brake_active(input_state.prop_brake_active);
 }
 
 #[cfg(test)]

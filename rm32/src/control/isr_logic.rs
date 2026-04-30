@@ -43,6 +43,15 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 min_duty as i32,
                 DUTY_SCALE_MAX as i32,
             ) as u16;
+            // Startup duty clamping: during early commutations, enforce
+            // min_startup/startup_max to prevent stall or overcurrent.
+            let setpoint = if ctx.shared.zero_crosses()
+                < (crate::constants::STARTUP_ZC_BASE >> ctx.config.stall_protection.min(5))
+            {
+                setpoint.clamp(ctx.duty.min_startup, ctx.duty.startup_max)
+            } else {
+                setpoint
+            };
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
                 ctx.shared.transition(MotorEvent::StartMotor);
@@ -127,6 +136,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
         let adj = ((ctx.duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
+        ctx.hal.pwm().set_duty_all(adj);
+    } else if ctx.shared.prop_brake_active() {
+        // Proportional brake: apply drag brake duty (complement of brake strength)
+        let brake_duty = ctx.config.drag_brake_strength as u32 * 200;
+        let adj =
+            tim1_arr.saturating_sub((brake_duty * tim1_arr as u32 / DUTY_SCALE_MAX as u32) as u16);
         ctx.hal.pwm().set_duty_all(adj);
     } else {
         ctx.hal.pwm().set_duty_all(0);

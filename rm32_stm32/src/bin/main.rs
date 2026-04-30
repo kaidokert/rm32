@@ -192,6 +192,9 @@ fn main() -> ! {
     main_state.motor_kv = motor_cfg.motor_kv;
     main_state.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
     main_state.timer1_max_arr = motor_cfg.timer1_max_arr;
+    if main_state.config.current_limit > 0 && main_state.config.current_limit < 100 {
+        main_state.use_current_limit = true;
+    }
 
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {
