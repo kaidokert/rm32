@@ -221,43 +221,15 @@ impl Harness {
                 temperature: 25,
             },
             telem: MockTelem,
-            main: rm32::main_state::MainState {
-                protection: rm32::control::state::ProtectionState::default(),
-                measurements: rm32::control::state::Measurements::default(),
-                telemetry: rm32::control::state::TelemetryState::default(),
-                config: EepromConfig::default(),
-                current_pid: rm32::pid::Pid::new(400, 0, 1000, 20000, 100000),
-                speed_pid: rm32::pid::Pid::new(10, 0, 100, 10000, 50000),
-                stall_pid: rm32::pid::Pid::new(1, 0, 50, 10000, 50000),
-                e_rpm: 0,
-                average_interval: 0,
-                last_average_interval: 0,
-                commutation_intervals: [0; 6],
-                cell_count: 0,
-                motor_kv: 2000,
-                low_cell_volt_cutoff: 330,
+            main: rm32::main_state::MainState::new(&rm32::main_state::MainStateParams {
                 voltage_divider: 110,
                 millivolt_per_amp: 20,
                 current_offset: 0,
-                stall_protection_adjust: 0,
-                current_limit_adjust: 2000,
-                use_current_limit: false,
-                stall_protect_target_interval: 6500,
-                use_speed_control_loop: false,
-                speed_input_override: 0,
-                target_e_com_time: 0,
-                desync_check: false,
-                current_filter: rm32::current::CurrentFilter::new(),
-                voltage_filter: rm32::filter::EwmaPow2::new(),
-                last_armed: false,
-                just_armed: false,
+                stall_protect_interval: 6500,
                 use_ntc: false,
-                led: rm32::main_state::NoLed,
-                led_counter: 0,
                 timer1_max_arr: 1999,
                 cpu_mhz: 64,
-                ten_khz_counter: 0,
-            },
+            }),
         }
     }
 
@@ -682,12 +654,7 @@ fn main() {
                 1,     // default kv_divider
                 false, // startup_boost
             );
-            harness.main.motor_kv = mc.motor_kv;
-            harness.main.low_cell_volt_cutoff = mc.low_cell_volt_cutoff;
-            harness.main.current_pid.kp = mc.current_kp;
-            harness.main.current_pid.ki = mc.current_ki;
-            harness.main.current_pid.kd = mc.current_kd;
-            harness.main.timer1_max_arr = mc.timer1_max_arr;
+            harness.main.apply_motor_config(&mc);
             harness.duty.minimum = mc.minimum_duty;
             harness.duty.min_startup = mc.min_startup_duty;
             harness.duty.startup_max = mc.startup_max_duty;
@@ -695,10 +662,6 @@ fn main() {
             let adv = harness.config.advance_level;
             if (10..43).contains(&adv) {
                 harness.bemf.temp_advance = adv - 10;
-            }
-            // Apply current limit
-            if harness.config.current_limit > 0 && harness.config.current_limit < 100 {
-                harness.main.use_current_limit = true;
             }
             println!("ok");
             io::stdout().flush().unwrap();
