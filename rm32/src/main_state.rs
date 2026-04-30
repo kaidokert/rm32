@@ -171,7 +171,8 @@ impl<LED: OutputPin> MainState<LED> {
         if zc > 1000 || stick_released {
             self.protection.bemf_timeout_happened = 0;
         }
-        if zc > 100 && raw_input < 200 {
+        if zc > 100 && raw_input < 200 && !(self.config.bi_direction != 0 && shared.dshot()) {
+            // Skip for DShot bidir: raw_input 48-199 is active reverse throttle
             self.protection.bemf_timeout_happened = 0;
         }
         if self.config.use_sine_start != 0 && raw_input < crate::constants::SINE_BEMF_CLEAR_THROTTLE
