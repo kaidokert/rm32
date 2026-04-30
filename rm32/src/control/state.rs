@@ -118,7 +118,6 @@ pub struct Measurements {
 /// (commutation_interval, zero_crosses, e_com_time) lives in SharedComm.
 #[derive(Clone, Default)]
 pub struct TimingState {
-    pub commutation_intervals: [u16; 6],
     pub average_interval: u32,
     pub last_average_interval: u32,
     pub e_rpm: u16,

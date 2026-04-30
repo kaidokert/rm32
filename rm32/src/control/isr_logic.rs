@@ -57,6 +57,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 ctx.shared.transition(MotorEvent::StartMotor);
                 ctx.duty.last = ctx.duty.min_startup;
                 let step = ctx.commutation.advance();
+                let e_com = ctx
+                    .commutation
+                    .record_interval(ctx.shared.commutation_interval() as u16);
+                ctx.shared.set_e_com_time(e_com);
                 ctx.hal.phase().com_step(step);
                 ctx.hal.comp().set_step(step, ctx.commutation.rising);
                 ctx.hal.comp().change_input();
@@ -196,6 +200,10 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         let zc = ctx.shared.zero_crosses();
         if zc < MIN_ZC_FOR_ADVANCE {
             let step = ctx.commutation.advance();
+            let e_com = ctx
+                .commutation
+                .record_interval(ctx.shared.commutation_interval() as u16);
+            ctx.shared.set_e_com_time(e_com);
             ctx.hal.phase().com_step(step);
             ctx.hal.phase().pulse_toggle(step);
             ctx.hal.comp().set_step(step, ctx.commutation.rising);
@@ -259,6 +267,8 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
 {
     com_timer.disable_interrupt();
     let step = commutation.advance();
+    let e_com = commutation.record_interval(shared.commutation_interval() as u16);
+    shared.set_e_com_time(e_com);
     phase.com_step(step);
     phase.pulse_toggle(step);
     comp.set_step(step, commutation.rising);

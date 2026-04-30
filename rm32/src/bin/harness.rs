@@ -476,12 +476,6 @@ impl Harness {
                         &mut self.hal.comp,
                         &mut self.hal.phase,
                     );
-                    // Sync commutation interval to intervals array for main_loop e_com_time calc
-                    let ci = self.shared.commutation_interval() as u16;
-                    let step = self.commutation.step;
-                    if (1..=6).contains(&step) {
-                        self.main.timing.commutation_intervals[(step - 1) as usize] = ci;
-                    }
                 }
             }
             "interval_timer" => self.hal.interval.count = v as u32,
