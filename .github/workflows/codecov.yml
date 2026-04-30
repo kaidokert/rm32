@@ -25,15 +25,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
 
       - name: Generate unit test coverage
-        run: cargo llvm-cov --lcov --output-path unit-lcov.info -p rm32
+        run: cargo llvm-cov nextest --lcov --output-path unit-lcov.info -p rm32 --profile ci
 
       - name: Upload unit test coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: unit-lcov.info
+          flags: unittests
+          name: unit-tests
+          fail_ci_if_error: true
+
+      - name: Upload unit test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/nextest/ci/junit.xml
           flags: unittests
           name: unit-tests
           fail_ci_if_error: true
@@ -60,14 +71,14 @@ jobs:
           python-version: '3.12'
 
       - name: Install pytest
-        run: pip install pytest
+        run: pip install pytest pytest-junit-xml
 
       - name: Build instrumented harness and run blackbox tests
         run: |
           source <(cargo llvm-cov show-env --export-prefix)
           cargo llvm-cov clean --workspace
           cargo build -p rm32 --bin rm32_harness
-          AM32_HARNESS=target/debug/rm32_harness python -m pytest tests/blackbox/test_vectors.py -v || true
+          AM32_HARNESS=target/debug/rm32_harness python -m pytest tests/blackbox/test_vectors.py -v --junit-xml=blackbox-junit.xml || true
           cargo llvm-cov report --lcov --output-path blackbox-lcov.info
 
       - name: Upload blackbox test coverage to Codecov
@@ -75,6 +86,16 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: blackbox-lcov.info
+          flags: blackboxtests
+          name: blackbox-tests
+          fail_ci_if_error: true
+
+      - name: Upload blackbox test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: blackbox-junit.xml
           flags: blackboxtests
           name: blackbox-tests
           fail_ci_if_error: true
