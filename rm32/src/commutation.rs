@@ -6,6 +6,9 @@ pub struct Commutation {
     pub forward: bool,
     pub rising: bool,
     pub desync_check: bool,
+    /// Per-step commutation intervals for e_com_time averaging.
+    /// Written by ISR on each step advance, read by main loop.
+    pub intervals: [u16; 6],
 }
 
 impl Commutation {
@@ -15,7 +18,15 @@ impl Commutation {
             forward: true,
             rising: true,
             desync_check: false,
+            intervals: [0; 6],
         }
+    }
+
+    /// Record the current commutation interval for this step.
+    /// Called by ISR after each step advance, matching C:
+    /// `commutation_intervals[step - 1] = commutation_interval`
+    pub fn record_interval(&mut self, commutation_interval: u16) {
+        self.intervals[(self.step - 1) as usize] = commutation_interval;
     }
 
     /// Advance one commutation step. Returns the new step number.

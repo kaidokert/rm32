@@ -198,15 +198,8 @@ impl<LED: OutputPin> MainState<LED> {
 
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
     pub fn tick(&mut self, shared: &SharedState, adc: &mut dyn Adc, telem: &mut dyn TelemetryUart) {
-        // e_com_time calculation
-        let sum: u32 = self
-            .timing
-            .commutation_intervals
-            .iter()
-            .map(|&v| v as u32)
-            .sum();
-        let e_com_time = ((sum + 4) >> 1) as i32;
-        shared.set_e_com_time(e_com_time);
+        // e_com_time: read from SharedComm (ISR computes from per-step intervals)
+        let e_com_time = shared.e_com_time();
 
         // Average interval
         self.timing.average_interval = (e_com_time / 3) as u32;
