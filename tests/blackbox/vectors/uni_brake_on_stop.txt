@@ -1,0 +1,23 @@
+# Unidirectional brake-on-stop (mode 1 with comp_pwm)
+# Covers: prop_brake_active + pwm_duty output (Physical Effect, not just flag)
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.comp_pwm=1
+eeprom.brake_on_stop=1
+eeprom.drag_brake_strength=5
+running=0
+
+@sequence
+# Not running + zero throttle: brake engages, pwm_duty = brake value
+tick 1  | throttle=0   | prop_brake_active=1 pwm_duty=1000
+
+# Still braking
+tick 1  | throttle=0   | prop_brake_active=1
+
+# Apply throttle: brake clears, normal pwm
+tick 1  | throttle=500 | prop_brake_active=0 pwm_duty>0
