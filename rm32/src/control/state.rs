@@ -19,14 +19,12 @@ pub struct BemfState {
     pub this_zc_time: u16,
     pub advance: u16,
     pub temp_advance: u8,
-    pub auto_advance_level: u8,
 }
 
 /// Duty cycle and ramp control.
 #[derive(Clone)]
 pub struct DutyState {
     pub cycle: u16,
-    pub setpoint: u16,
     pub maximum: u16,
     pub last: u16,
     pub adjusted: u16,
@@ -54,7 +52,6 @@ pub struct InputState {
     pub zero_input_count: u16,
     pub dshot_telemetry: bool,
     pub edt_armed: bool,
-    pub edt_arm_enable: bool,
     pub servo_low_threshold: u16,
     pub servo_high_threshold: u16,
     pub servo_neutral: u16,
@@ -89,8 +86,6 @@ pub struct PidState {
 #[derive(Clone, Default)]
 pub struct TelemetryState {
     pub send_telemetry: bool,
-    pub send_esc_info: bool,
-    pub ms_count: u16,
 }
 
 /// Protection system state.
@@ -100,7 +95,6 @@ pub struct ProtectionState {
     pub bemf_timeout: u8,
     pub low_voltage_count: u16,
     pub low_voltage_cutoff: bool,
-    pub desync_happened: u32,
 }
 
 /// Sensor measurements.
@@ -142,7 +136,6 @@ impl Default for BemfState {
             this_zc_time: 0,
             advance: 0,
             temp_advance: 0,
-            auto_advance_level: 0,
         }
     }
 }
@@ -151,7 +144,6 @@ impl Default for DutyState {
     fn default() -> Self {
         Self {
             cycle: 0,
-            setpoint: 0,
             maximum: 2000,
             last: 0,
             adjusted: 0,
@@ -192,7 +184,6 @@ impl Default for ProtectionState {
             bemf_timeout: 10,
             low_voltage_count: 0,
             low_voltage_cutoff: false,
-            desync_happened: 0,
         }
     }
 }

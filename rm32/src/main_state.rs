@@ -258,7 +258,6 @@ impl<LED: OutputPin> MainState<LED> {
                     self.timing.average_interval = DESYNC_RESET_INTERVAL;
                 }
                 shared.set_zero_crosses(0);
-                self.protection.desync_happened += 1;
                 if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
                     || shared.commutation_interval() > 1000
                 {

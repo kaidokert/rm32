@@ -47,7 +47,6 @@ mod tests {
             this_zc_time: 0,
             advance: 0,
             temp_advance: 0,
-            auto_advance_level: 0,
         }
     }
 
