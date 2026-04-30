@@ -1,0 +1,27 @@
+# RC-car reverse preserves zero_crosses (no commutation reset)
+# Contrast with speed-gated bidir which resets zero_crosses on direction flip.
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=1
+forward=1
+running=0
+
+@sequence
+# Reverse throttle while forward → prop brake (no direction change yet)
+tick 1  | throttle=500 | prop_brake_active=1 forward=1
+
+# Zero throttle → clear brake, set return_to_center
+tick 1  | throttle=0 | prop_brake_active=0 forward=1
+
+# Inject zero_crosses=50 right before direction flip
+config zero_crosses=50
+
+# Reverse throttle again → direction flips via return_to_center
+# Key assertion: zero_crosses=50 (PRESERVED, not reset)
+tick 1  | throttle=500 | forward=0 zero_crosses=50
