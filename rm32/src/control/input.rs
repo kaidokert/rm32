@@ -181,14 +181,18 @@ pub fn process_input<S: SharedComm>(
 
     // --- Brake-on-stop ---
     // Skip for RC-car reverse (it has its own brake handshake)
-    if shared.armed()
-        && !shared.stepper_sine()
-        && config.rc_car_reverse == 0
-        && input_state.input < THROTTLE_MIN_SIGNAL
-        && config.brake_on_stop == 1
-        && config.comp_pwm != 0
-    {
-        input_state.prop_brake_active = true;
+    if config.rc_car_reverse == 0 {
+        if shared.armed()
+            && !shared.stepper_sine()
+            && input_state.input < THROTTLE_MIN_SIGNAL
+            && config.brake_on_stop == 1
+            && config.comp_pwm != 0
+        {
+            input_state.prop_brake_active = true;
+        } else if input_state.input >= THROTTLE_MIN_SIGNAL {
+            // Clear brake when throttle applied (prevents permanent latch)
+            input_state.prop_brake_active = false;
+        }
     }
 }
 

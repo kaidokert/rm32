@@ -105,7 +105,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.counters.tim1_arr = ctx.shared.tim1_arr();
     ctx.duty.maximum = ctx.shared.duty_maximum();
     ctx.bemf.filter_level = ctx.shared.filter_level();
-    ctx.bemf.temp_advance = ctx.shared.auto_advance();
+    let auto_adv = ctx.shared.auto_advance();
+    if auto_adv > 0 {
+        ctx.bemf.temp_advance = auto_adv;
+    }
     let min_counts = ctx.shared.min_bemf_counts();
     ctx.bemf.min_counts_up = min_counts;
     ctx.bemf.min_counts_down = min_counts;

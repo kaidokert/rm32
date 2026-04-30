@@ -157,11 +157,14 @@ impl<LED: OutputPin> MainState<LED> {
         // process_input zeros adjusted_input on latch, so we can't use it directly.
         let zc = shared.zero_crosses();
         let raw_input = shared.newinput();
-        let stick_released = if self.config.bi_direction != 0 {
-            // Bidir: centered near servo center or at DShot zero
+        let stick_released = if self.config.bi_direction != 0 && shared.dshot() {
+            // DShot bidir: zero means no throttle (commands are 1-47)
             raw_input == 0
-                || (raw_input >= crate::constants::SERVO_CENTER.saturating_sub(200)
-                    && raw_input <= crate::constants::SERVO_CENTER + 200)
+        } else if self.config.bi_direction != 0 {
+            // Servo bidir: dead band around center means stick released
+            let db = (self.config.servo_dead_band as u16) << 1;
+            let center = crate::constants::SERVO_CENTER;
+            raw_input >= center.saturating_sub(db) && raw_input <= center + db
         } else {
             raw_input == 0
         };
