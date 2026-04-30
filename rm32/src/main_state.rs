@@ -5,7 +5,7 @@
 
 use crate::config::EepromConfig;
 use crate::constants::*;
-use crate::control::state::{Measurements, PidState, ProtectionState, TelemetryState};
+use crate::control::state::{Measurements, PidState, ProtectionState, TelemetryState, TimingState};
 use crate::current::CurrentFilter;
 use crate::filter::EwmaPow2;
 use crate::functions::get_abs_dif;
@@ -98,11 +98,8 @@ pub struct MainState<LED: OutputPin = NoLed> {
     // PID controllers (main computes adjustments, ISR applies)
     pub pid: PidState,
 
-    // Derived values
-    pub e_rpm: u16,
-    pub average_interval: u32,
-    pub last_average_interval: u32,
-    pub commutation_intervals: [u16; 6],
+    // Timing (main-loop side — ISR timing is in SharedComm)
+    pub timing: TimingState,
     pub cell_count: u8,
     pub motor_kv: u16,
     pub low_cell_volt_cutoff: u16,
@@ -159,10 +156,7 @@ impl MainState<NoLed> {
                 stall_protect_target_interval: params.stall_protect_interval,
                 ..PidState::default()
             },
-            e_rpm: 0,
-            average_interval: 0,
-            last_average_interval: 0,
-            commutation_intervals: [0; 6],
+            timing: TimingState::default(),
             cell_count: 0,
             motor_kv: 2000,
             low_cell_volt_cutoff: 330,
@@ -205,12 +199,17 @@ impl<LED: OutputPin> MainState<LED> {
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
     pub fn tick(&mut self, shared: &SharedState, adc: &mut dyn Adc, telem: &mut dyn TelemetryUart) {
         // e_com_time calculation
-        let sum: u32 = self.commutation_intervals.iter().map(|&v| v as u32).sum();
+        let sum: u32 = self
+            .timing
+            .commutation_intervals
+            .iter()
+            .map(|&v| v as u32)
+            .sum();
         let e_com_time = ((sum + 4) >> 1) as i32;
         shared.set_e_com_time(e_com_time);
 
         // Average interval
-        self.average_interval = (e_com_time / 3) as u32;
+        self.timing.average_interval = (e_com_time / 3) as u32;
 
         // BEMF timeout clearing — check whether the user has released the throttle.
         // For unidirectional: newinput == 0 means stick centered.
@@ -268,14 +267,16 @@ impl<LED: OutputPin> MainState<LED> {
         // Desync detection
         if self.desync_check && zc > 10 {
             let diff = get_abs_dif(
-                self.last_average_interval as i32,
-                self.average_interval as i32,
+                self.timing.last_average_interval as i32,
+                self.timing.average_interval as i32,
             );
-            if diff > (self.average_interval >> 1) && self.average_interval < DESYNC_MAX_INTERVAL {
+            if diff > (self.timing.average_interval >> 1)
+                && self.timing.average_interval < DESYNC_MAX_INTERVAL
+            {
                 // Reset interval to 5000 if motor was running (>100 ZCs)
                 // Check before zeroing zero_crosses (C has this after, which is a bug)
                 if zc > 100 {
-                    self.average_interval = DESYNC_RESET_INTERVAL;
+                    self.timing.average_interval = DESYNC_RESET_INTERVAL;
                 }
                 shared.set_zero_crosses(0);
                 self.protection.desync_happened += 1;
@@ -287,7 +288,7 @@ impl<LED: OutputPin> MainState<LED> {
                 shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
             }
             self.desync_check = false;
-            self.last_average_interval = self.average_interval;
+            self.timing.last_average_interval = self.timing.average_interval;
         }
 
         // Signal timeout
@@ -298,7 +299,7 @@ impl<LED: OutputPin> MainState<LED> {
 
         // eRPM
         if !shared.stepper_sine() && e_com_time > 0 {
-            self.e_rpm = if shared.running() {
+            self.timing.e_rpm = if shared.running() {
                 (600000 / e_com_time) as u16
             } else {
                 0
@@ -407,7 +408,7 @@ impl<LED: OutputPin> MainState<LED> {
                 voltage_cv,
                 current_ca,
                 (self.measurements.consumed_current / 1000) as u16, // µAh → mAh
-                self.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
+                self.timing.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
             );
             telem.send_dma(&pkt);
             shared.set_send_telemetry(false);
@@ -429,7 +430,10 @@ impl<LED: OutputPin> MainState<LED> {
                 self.timer1_max_arr,
             ));
         } else if self.config.variable_pwm == 2 {
-            shared.set_tim1_arr(variable_pwm_mode2(self.average_interval, self.cpu_mhz));
+            shared.set_tim1_arr(variable_pwm_mode2(
+                self.timing.average_interval,
+                self.cpu_mhz,
+            ));
         } else {
             // variable_pwm=0: publish the EEPROM-derived ARR so ISR uses it
             shared.set_tim1_arr(self.timer1_max_arr);
@@ -458,7 +462,7 @@ impl<LED: OutputPin> MainState<LED> {
         } else if shared.commutation_interval() < 50 {
             2
         } else {
-            crate::functions::map(self.average_interval as i32, 100, 500, 3, 12) as u8
+            crate::functions::map(self.timing.average_interval as i32, 100, 500, 3, 12) as u8
         };
         shared.set_filter_level(filter);
 

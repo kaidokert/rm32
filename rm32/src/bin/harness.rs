@@ -408,9 +408,9 @@ impl Harness {
             self.shared.duty_cycle_setpoint(),
             self.duty.adjusted,
             self.shared.commutation_interval(),
-            self.main.average_interval,
+            self.main.timing.average_interval,
             self.shared.e_com_time(),
-            self.main.e_rpm,
+            self.main.timing.e_rpm,
             self.shared.zero_crosses(),
             self.system.input_state.input,
             self.shared.adjusted_input(),
@@ -480,7 +480,7 @@ impl Harness {
                     let ci = self.shared.commutation_interval() as u16;
                     let step = self.commutation.step;
                     if (1..=6).contains(&step) {
-                        self.main.commutation_intervals[(step - 1) as usize] = ci;
+                        self.main.timing.commutation_intervals[(step - 1) as usize] = ci;
                     }
                 }
             }
@@ -567,8 +567,8 @@ impl Harness {
             "duty_cycle" => self.duty.cycle = v as u16,
             "adjusted_input" => self.shared.set_adjusted_input(v as u16),
             "desync_check" => self.main.desync_check = v != 0,
-            "average_interval" => self.main.average_interval = v as u32,
-            "last_average_interval" => self.main.last_average_interval = v as u32,
+            "average_interval" => self.main.timing.average_interval = v as u32,
+            "last_average_interval" => self.main.timing.last_average_interval = v as u32,
             "process_adc" => {}
             // Calibration state (not implemented in v2)
             "calibration_required"
