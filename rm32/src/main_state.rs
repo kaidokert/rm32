@@ -309,9 +309,8 @@ impl<LED: OutputPin> MainState<LED> {
                 .calculate(self.measurements.actual_current.0 as i32, target)
                 / 10000;
             self.current_limit_adjust -= adj as i16;
-            self.current_limit_adjust = self
-                .current_limit_adjust
-                .clamp(self.config.minimum_duty_cycle as i16 * 10, 2000);
+            let lower = (self.config.minimum_duty_cycle.min(50) as i16) * 10;
+            self.current_limit_adjust = self.current_limit_adjust.clamp(lower, 2000);
             shared.set_current_limit_adjust(self.current_limit_adjust as u16);
         } else {
             // Reset ceiling when inactive to prevent stale cap on next start
