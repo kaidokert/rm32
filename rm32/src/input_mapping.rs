@@ -4,8 +4,55 @@
 //! Used by the test harness to map raw throttle input before calling
 //! `isr_logic::ten_khz_tick()`.
 
+use crate::config::EepromConfig;
 use crate::constants::{DSHOT_MAX_THROTTLE, DUTY_SCALE_MAX, STARTUP_ZC_BASE, THROTTLE_MIN_SIGNAL};
 use crate::functions::map;
+
+/// How direction reversal is handled in bidirectional modes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReverseMode {
+    /// Speed-gated: direction flip only when motor is slow enough.
+    SpeedGated,
+    /// RC-car: brake-and-reverse with return-to-center handshake.
+    RcCar,
+}
+
+/// Input pipeline mode — computed once from EEPROM config.
+///
+/// Replaces the boolean explosion of `bi_direction × rc_car_reverse × is_dshot`
+/// with explicit variants. Each variant maps to exactly one mapping function.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum InputMode {
+    /// No direction control — raw throttle passthrough.
+    #[default]
+    Unidirectional,
+    /// DShot bidirectional (0-47 commands, 48-1047 reverse, 1048-2047 forward).
+    BidirDshot(ReverseMode),
+    /// Servo bidirectional (center=1000, dead band from config).
+    BidirServo { mode: ReverseMode, dead_band: u16 },
+}
+
+impl InputMode {
+    /// Derive input mode from EEPROM config and detected protocol.
+    pub fn from_config(config: &EepromConfig, is_dshot: bool) -> Self {
+        if !config.is_bidirectional() {
+            return InputMode::Unidirectional;
+        }
+        let reverse_mode = if config.is_rc_car_reverse() {
+            ReverseMode::RcCar
+        } else {
+            ReverseMode::SpeedGated
+        };
+        if is_dshot {
+            InputMode::BidirDshot(reverse_mode)
+        } else {
+            InputMode::BidirServo {
+                mode: reverse_mode,
+                dead_band: config.servo_dead_band as u16,
+            }
+        }
+    }
+}
 
 /// Result of bidirectional input mapping.
 pub struct BidirResult {

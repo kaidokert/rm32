@@ -32,12 +32,15 @@ impl SystemTick {
     /// Call this BEFORE the ISR tick (harness) or independently (firmware,
     /// where the ISR tick runs in the actual interrupt).
     pub fn tick_input<LED: OutputPin>(&mut self, shared: &SharedState, main: &mut MainState<LED>) {
+        // Recompute input mode from config + detected protocol each tick.
+        // Cheap (a few comparisons) and ensures mode stays in sync with config.
+        self.input_state.mode =
+            crate::input_mapping::InputMode::from_config(&main.config, shared.dshot());
         input::process_input(
             shared,
             &main.config,
             &mut main.protection,
             &mut self.input_state,
-            shared.dshot(),
         );
     }
 
