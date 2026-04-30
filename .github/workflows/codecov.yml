@@ -36,7 +36,7 @@ jobs:
           files: unit-lcov.info
           flags: unittests
           name: unit-tests
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
   # ── Blackbox test coverage ──────────────────────────────────────
   blackbox-tests:
@@ -77,4 +77,4 @@ jobs:
           files: blackbox-lcov.info
           flags: blackboxtests
           name: blackbox-tests
-          fail_ci_if_error: false
+          fail_ci_if_error: true
