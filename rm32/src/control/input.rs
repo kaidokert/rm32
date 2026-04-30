@@ -160,7 +160,9 @@ pub fn process_input<S: SharedComm>(
         && config.stuck_rotor_protection != 0
     {
         input_state.input = 0;
+        input_state.prop_brake_active = false;
         shared.set_adjusted_input(0);
+        shared.set_prop_brake_active(false);
         protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
         return;
     }
