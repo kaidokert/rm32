@@ -114,6 +114,8 @@ fn main() -> ! {
         millivolt_per_amp: BOARD.millivolt_per_amp,
         current_offset: BOARD.current_offset,
         stall_protection_adjust: 0,
+        current_limit_adjust: 2000,
+        use_current_limit: false,
         stall_protect_target_interval: BOARD.stall_protect_interval,
         use_speed_control_loop: false,
         speed_input_override: 0,
@@ -126,6 +128,9 @@ fn main() -> ! {
         use_ntc: BOARD.use_ntc,
         led: rm32::main_state::NoLed,
         led_counter: 0,
+        timer1_max_arr: Chip::TIM1_AUTORELOAD,
+        cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
+        ten_khz_counter: 0,
     };
 
     // --- Check bootloader device info for dynamic EEPROM address ---
@@ -186,6 +191,7 @@ fn main() -> ! {
     main_state.current_pid.kd = motor_cfg.current_kd;
     main_state.motor_kv = motor_cfg.motor_kv;
     main_state.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
+    main_state.timer1_max_arr = motor_cfg.timer1_max_arr;
 
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {
@@ -235,6 +241,7 @@ fn main() -> ! {
 
     // --- Main loop ---
     let shared = isr::shared();
+    let mut input_state = rm32::control::input::InputState::new();
     loop {
         // Sine mode: step phases when stepper_sine is active
         if shared.stepper_sine() {
@@ -271,6 +278,16 @@ fn main() -> ! {
                 SineStepResult::Idle => {}
             }
         }
+
+        // Input processing: bidir mapping, stuck rotor protection, brake logic.
+        // Runs in main loop; communicates with ISR via SharedState atomics only.
+        rm32::control::input::process_input(
+            shared,
+            &main_state.config,
+            &mut main_state.protection,
+            &mut input_state,
+            shared.dshot(),
+        );
 
         main_state.tick(shared, &mut adc, &mut telem);
 
