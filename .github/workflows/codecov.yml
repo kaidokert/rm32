@@ -71,7 +71,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install pytest
-        run: pip install pytest pytest-junit-xml
+        run: pip install pytest
 
       - name: Build instrumented harness and run blackbox tests
         run: |
