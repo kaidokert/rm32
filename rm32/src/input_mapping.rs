@@ -17,10 +17,11 @@ pub enum ReverseMode {
     RcCar,
 }
 
-/// Input pipeline mode — computed once from EEPROM config.
+/// Input pipeline mode — derived from EEPROM config and detected protocol.
 ///
-/// Replaces the boolean explosion of `bi_direction × rc_car_reverse × is_dshot`
-/// with explicit variants. Each variant maps to exactly one mapping function.
+/// Recomputed every tick by `SystemTick::tick_input()` to stay in sync with
+/// runtime config changes. Replaces the boolean explosion of
+/// `bi_direction × rc_car_reverse × is_dshot` with explicit variants.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum InputMode {
     /// No direction control — raw throttle passthrough.
@@ -33,6 +34,18 @@ pub enum InputMode {
 }
 
 impl InputMode {
+    /// Whether this mode uses RC-car brake-and-reverse handshake.
+    pub fn is_rc_car(self) -> bool {
+        matches!(
+            self,
+            InputMode::BidirDshot(ReverseMode::RcCar)
+                | InputMode::BidirServo {
+                    mode: ReverseMode::RcCar,
+                    ..
+                }
+        )
+    }
+
     /// Derive input mode from EEPROM config and detected protocol.
     pub fn from_config(config: &EepromConfig, is_dshot: bool) -> Self {
         if !config.is_bidirectional() {

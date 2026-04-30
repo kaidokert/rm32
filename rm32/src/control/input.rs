@@ -24,7 +24,7 @@ pub struct InputState {
     /// Mapped input value after all processing (0-2047).
     /// This is a local copy — the authoritative value is `shared.adjusted_input()`.
     pub input: u16,
-    /// Cached input mode — recomputed on config change, not every tick.
+    /// Cached input mode — recomputed every tick in SystemTick::tick_input.
     pub mode: InputMode,
 }
 
@@ -167,14 +167,7 @@ pub fn process_input<S: SharedComm>(
 
     // --- Brake-on-stop ---
     // RC-car modes have their own brake handshake (handled in apply_rc_car_result).
-    if !matches!(
-        input_state.mode,
-        InputMode::BidirDshot(ReverseMode::RcCar)
-            | InputMode::BidirServo {
-                mode: ReverseMode::RcCar,
-                ..
-            }
-    ) {
+    if !input_state.mode.is_rc_car() {
         if shared.armed()
             && !shared.stepper_sine()
             && input_state.input < THROTTLE_MIN_SIGNAL
