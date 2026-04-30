@@ -12,7 +12,7 @@
 use crate::config::EepromConfig;
 use crate::constants::{BEMF_FAULT_LATCHED, THROTTLE_MIN_SIGNAL};
 use crate::control::state::ProtectionState;
-use crate::input_mapping;
+use crate::input_mapping::{self, InputMode, ReverseMode};
 use crate::shared_comm::SharedComm;
 
 /// Persistent state for bidirectional input processing.
@@ -24,6 +24,8 @@ pub struct InputState {
     /// Mapped input value after all processing (0-2047).
     /// This is a local copy — the authoritative value is `shared.adjusted_input()`.
     pub input: u16,
+    /// Cached input mode — recomputed every tick in SystemTick::tick_input.
+    pub mode: InputMode,
 }
 
 impl InputState {
@@ -41,7 +43,7 @@ impl InputState {
 /// before `isr_logic::ten_khz_tick()` every tick.
 ///
 /// Handles:
-/// - Bidirectional DShot/servo/RC-car throttle mapping
+/// - Bidirectional DShot/servo/RC-car throttle mapping (via `InputMode` match)
 /// - Stuck rotor (BEMF timeout) protection latch
 /// - Sine start throttle mapping
 /// - Brake-on-stop activation
@@ -53,104 +55,86 @@ pub fn process_input<S: SharedComm>(
     config: &EepromConfig,
     protection: &mut ProtectionState,
     input_state: &mut InputState,
-    is_dshot: bool,
 ) {
     let newinput = shared.newinput();
 
     // --- Bidirectional throttle mapping ---
     // Runs BEFORE the stuck rotor check so adjusted_input reflects the user's
     // stick position even during a fault latch (needed for clearing logic).
-    if config.bi_direction != 0 {
-        if is_dshot {
-            if config.rc_car_reverse != 0 {
-                let r = input_mapping::dshot_rc_car(
-                    newinput,
-                    shared.forward(),
-                    config.dir_reversed != 0,
-                    input_state.prop_brake_active,
-                    input_state.return_to_center,
-                );
-                shared.set_adjusted_input(r.adjusted);
-                if r.reverse {
-                    shared.set_forward(!shared.forward());
-                    input_state.return_to_center = false;
-                }
-                if r.prop_brake {
-                    input_state.prop_brake_active = true;
-                }
-                if newinput <= THROTTLE_MIN_SIGNAL && input_state.prop_brake_active {
-                    input_state.prop_brake_active = false;
-                    input_state.return_to_center = true;
-                }
-            } else {
-                let r = input_mapping::dshot_bidir(
-                    newinput,
-                    shared.forward(),
-                    config.dir_reversed != 0,
-                    shared.commutation_interval(),
-                    shared.duty_cycle(),
-                    shared.stepper_sine(),
-                    input_state.reverse_speed_threshold,
-                );
-                shared.set_adjusted_input(r.adjusted);
-                if r.reverse {
-                    shared.set_forward(!shared.forward());
-                    shared.set_zero_crosses(0);
-                    shared.set_old_routine(true);
-                }
-            }
-        } else {
-            // Servo bidirectional
-            let dead_band = config.servo_dead_band as u16;
-            if config.rc_car_reverse != 0 {
-                let r = input_mapping::servo_rc_car(
-                    newinput,
-                    shared.forward(),
-                    config.dir_reversed != 0,
-                    input_state.prop_brake_active,
-                    input_state.return_to_center,
-                    dead_band,
-                );
-                shared.set_adjusted_input(r.adjusted);
-                if r.reverse {
-                    shared.set_forward(!shared.forward());
-                    input_state.return_to_center = false;
-                }
-                if r.prop_brake {
-                    input_state.prop_brake_active = true;
-                }
-                // Dead band with active brake → clear brake, enable return_to_center
-                let center = crate::constants::SERVO_CENTER;
-                let db2 = dead_band << 1;
-                if newinput >= center.saturating_sub(db2)
-                    && newinput <= center + db2
-                    && input_state.prop_brake_active
-                {
-                    input_state.prop_brake_active = false;
-                    input_state.return_to_center = true;
-                }
-            } else {
-                let r = input_mapping::servo_bidir(
-                    newinput,
-                    shared.forward(),
-                    config.dir_reversed != 0,
-                    shared.commutation_interval(),
-                    shared.duty_cycle(),
-                    shared.stepper_sine(),
-                    input_state.reverse_speed_threshold,
-                    dead_band,
-                );
-                shared.set_adjusted_input(r.adjusted);
-                if r.reverse {
-                    shared.set_forward(!shared.forward());
-                    shared.set_zero_crosses(0);
-                    shared.set_old_routine(true);
-                }
+    match input_state.mode {
+        InputMode::Unidirectional => {
+            shared.set_adjusted_input(newinput);
+        }
+        InputMode::BidirDshot(ReverseMode::SpeedGated) => {
+            let r = input_mapping::dshot_bidir(
+                newinput,
+                shared.forward(),
+                config.dir_reversed != 0,
+                shared.commutation_interval(),
+                shared.duty_cycle(),
+                shared.stepper_sine(),
+                input_state.reverse_speed_threshold,
+            );
+            shared.set_adjusted_input(r.adjusted);
+            if r.reverse {
+                shared.set_forward(!shared.forward());
+                shared.set_zero_crosses(0);
+                shared.set_old_routine(true);
             }
         }
-    } else {
-        // Unidirectional: adjusted = newinput
-        shared.set_adjusted_input(newinput);
+        InputMode::BidirDshot(ReverseMode::RcCar) => {
+            let r = input_mapping::dshot_rc_car(
+                newinput,
+                shared.forward(),
+                config.dir_reversed != 0,
+                input_state.prop_brake_active,
+                input_state.return_to_center,
+            );
+            shared.set_adjusted_input(r.adjusted);
+            if r.reverse {
+                shared.set_forward(!shared.forward());
+            }
+            apply_rc_car_result(input_state, &r, newinput, None);
+        }
+        InputMode::BidirServo {
+            mode: ReverseMode::SpeedGated,
+            dead_band,
+        } => {
+            let r = input_mapping::servo_bidir(
+                newinput,
+                shared.forward(),
+                config.dir_reversed != 0,
+                shared.commutation_interval(),
+                shared.duty_cycle(),
+                shared.stepper_sine(),
+                input_state.reverse_speed_threshold,
+                dead_band,
+            );
+            shared.set_adjusted_input(r.adjusted);
+            if r.reverse {
+                shared.set_forward(!shared.forward());
+                shared.set_zero_crosses(0);
+                shared.set_old_routine(true);
+            }
+        }
+        InputMode::BidirServo {
+            mode: ReverseMode::RcCar,
+            dead_band,
+        } => {
+            let r = input_mapping::servo_rc_car(
+                newinput,
+                shared.forward(),
+                config.dir_reversed != 0,
+                input_state.prop_brake_active,
+                input_state.return_to_center,
+                dead_band,
+            );
+            shared.set_adjusted_input(r.adjusted);
+            if r.reverse {
+                shared.set_forward(!shared.forward());
+            }
+            apply_rc_car_result(input_state, &r, newinput, Some(dead_band));
+        }
     }
 
     // --- Stuck rotor protection latch ---
@@ -182,8 +166,8 @@ pub fn process_input<S: SharedComm>(
     }
 
     // --- Brake-on-stop ---
-    // Skip for RC-car reverse (it has its own brake handshake)
-    if config.rc_car_reverse == 0 {
+    // RC-car modes have their own brake handshake (handled in apply_rc_car_result).
+    if !input_state.mode.is_rc_car() {
         if shared.armed()
             && !shared.stepper_sine()
             && input_state.input < THROTTLE_MIN_SIGNAL
@@ -197,6 +181,38 @@ pub fn process_input<S: SharedComm>(
     }
     // Publish brake state for ISR
     shared.set_prop_brake_active(input_state.prop_brake_active);
+}
+
+/// Apply RC-car mapping result: direction flip, brake handshake, return-to-center.
+/// Shared between DShot and servo RC-car modes.
+/// `dead_band`: `Some(db)` for servo (uses center ± 2*db), `None` for DShot (uses THROTTLE_MIN_SIGNAL).
+fn apply_rc_car_result(
+    input_state: &mut InputState,
+    r: &input_mapping::BidirResult,
+    newinput: u16,
+    dead_band: Option<u16>,
+) {
+    if r.reverse {
+        // Direction flip handled by caller via shared.set_forward()
+        // but return_to_center handshake is RC-car specific
+        input_state.return_to_center = false;
+    }
+    if r.prop_brake {
+        input_state.prop_brake_active = true;
+    }
+    // Clear brake when input returns to center
+    let in_center = match dead_band {
+        Some(db) => {
+            let center = crate::constants::SERVO_CENTER;
+            let db2 = db << 1;
+            newinput >= center.saturating_sub(db2) && newinput <= center + db2
+        }
+        None => newinput <= THROTTLE_MIN_SIGNAL,
+    };
+    if in_center && input_state.prop_brake_active {
+        input_state.prop_brake_active = false;
+        input_state.return_to_center = true;
+    }
 }
 
 #[cfg(test)]
@@ -220,7 +236,7 @@ mod tests {
     fn unidirectional_passthrough() {
         let (shared, config, mut prot, mut input) = setup();
         shared.newinput.set(1000);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         assert_eq!(input.input, 1000);
         assert_eq!(shared.adjusted_input.get(), 1000);
     }
@@ -232,7 +248,7 @@ mod tests {
         prot.bemf_timeout_happened = 20;
         prot.bemf_timeout = 10;
         shared.newinput.set(500);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         assert_eq!(input.input, 0);
         assert_eq!(shared.adjusted_input.get(), 0);
         assert_eq!(prot.bemf_timeout_happened, BEMF_FAULT_LATCHED);
@@ -242,8 +258,9 @@ mod tests {
     fn bidir_dshot_forward_maps() {
         let (shared, mut config, mut prot, mut input) = setup();
         config.bi_direction = 1;
+        input.mode = InputMode::from_config(&config, true);
         shared.newinput.set(1200);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         assert_eq!(shared.adjusted_input.get(), 350);
         assert_eq!(input.input, 350); // also synced to local
     }
@@ -254,7 +271,7 @@ mod tests {
         config.brake_on_stop = 1;
         config.comp_pwm = 1;
         shared.newinput.set(0);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         assert!(input.prop_brake_active);
     }
 
@@ -264,7 +281,7 @@ mod tests {
         config.use_sine_start = 1;
         config.sine_mode_changeover_throttle_level = 10; // changeover = 200
         shared.newinput.set(100);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         // Sine mapping should produce a value and publish it
         let mapped = shared.adjusted_input.get();
         assert!(
@@ -281,8 +298,9 @@ mod tests {
         config.comp_pwm = 1;
         config.rc_car_reverse = 1;
         config.bi_direction = 1;
+        input.mode = InputMode::from_config(&config, true);
         shared.newinput.set(0);
-        process_input(&shared, &config, &mut prot, &mut input, true);
+        process_input(&shared, &config, &mut prot, &mut input);
         assert!(!input.prop_brake_active, "RC-car has its own brake logic");
     }
 }
