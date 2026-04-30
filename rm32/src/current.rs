@@ -2,6 +2,7 @@
 
 const NUM_READINGS: usize = 50;
 
+#[derive(Clone)]
 pub struct CurrentFilter {
     readings: [u16; NUM_READINGS],
     index: usize,
