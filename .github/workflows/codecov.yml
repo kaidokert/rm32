@@ -1,0 +1,80 @@
+name: Codecov
+
+on:
+  push:
+    branches: ['*']
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Unit test coverage ──────────────────────────────────────────
+  unit-tests:
+    name: Unit test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate unit test coverage
+        run: cargo llvm-cov --lcov --output-path unit-lcov.info -p rm32
+
+      - name: Upload unit test coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: unit-lcov.info
+          flags: unittests
+          name: unit-tests
+          fail_ci_if_error: true
+
+  # ── Blackbox test coverage ──────────────────────────────────────
+  blackbox-tests:
+    name: Blackbox test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Build instrumented harness and run blackbox tests
+        run: |
+          source <(cargo llvm-cov show-env --export-prefix)
+          cargo llvm-cov clean --workspace
+          cargo build -p rm32 --bin rm32_harness
+          AM32_HARNESS=target/debug/rm32_harness python -m pytest tests/blackbox/test_vectors.py -v
+          cargo llvm-cov report --lcov --output-path blackbox-lcov.info
+
+      - name: Upload blackbox test coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: blackbox-lcov.info
+          flags: blackboxtests
+          name: blackbox-tests
+          fail_ci_if_error: true
