@@ -194,6 +194,7 @@ impl<LED: OutputPin> MainState<LED> {
         self.pid.current.kp = motor_cfg.current_kp;
         self.pid.current.ki = motor_cfg.current_ki;
         self.pid.current.kd = motor_cfg.current_kd;
+        self.pid.current.reset();
         self.motor_kv = motor_cfg.motor_kv;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
