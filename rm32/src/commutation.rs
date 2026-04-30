@@ -7,8 +7,8 @@ pub struct Commutation {
     pub rising: bool,
     pub desync_check: bool,
     /// Per-step commutation intervals for e_com_time averaging.
-    /// Written by ISR on each step advance, read by main loop.
-    pub(crate) intervals: [u16; 6],
+    /// Written by ISR on each step advance via record_interval().
+    intervals: [u16; 6],
 }
 
 impl Commutation {

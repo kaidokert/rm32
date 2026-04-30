@@ -4,16 +4,16 @@
 
 #[derive(Clone, Default)]
 pub(crate) struct Pid {
-    pub(crate) error: i32,
-    pub(crate) kp: u32,
-    pub(crate) ki: u32,
-    pub(crate) kd: u32,
-    pub(crate) integral: i32,
-    pub(crate) derivative: i32,
-    pub(crate) last_error: i32,
-    pub(crate) pid_output: i32,
-    pub(crate) integral_limit: i32,
-    pub(crate) output_limit: i32,
+    error: i32,
+    kp: u32,
+    ki: u32,
+    kd: u32,
+    integral: i32,
+    derivative: i32,
+    last_error: i32,
+    pid_output: i32,
+    integral_limit: i32,
+    output_limit: i32,
 }
 
 impl Pid {
@@ -54,6 +54,14 @@ impl Pid {
         }
 
         self.pid_output
+    }
+
+    /// Update PID gains and reset accumulated state.
+    pub(crate) fn set_gains(&mut self, kp: u32, ki: u32, kd: u32) {
+        self.kp = kp;
+        self.ki = ki;
+        self.kd = kd;
+        self.reset();
     }
 
     pub(crate) fn reset(&mut self) {

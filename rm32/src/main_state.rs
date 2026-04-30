@@ -169,10 +169,11 @@ impl<LED: OutputPin> MainState<LED> {
     /// command (harness). Updates PID tuning, motor KV, voltage cutoff, and
     /// current limit flag from the derived `MotorConfig`.
     pub fn apply_motor_config(&mut self, motor_cfg: &crate::config::MotorConfig) {
-        self.pid.current.kp = motor_cfg.current_kp;
-        self.pid.current.ki = motor_cfg.current_ki;
-        self.pid.current.kd = motor_cfg.current_kd;
-        self.pid.current.reset();
+        self.pid.current.set_gains(
+            motor_cfg.current_kp,
+            motor_cfg.current_ki,
+            motor_cfg.current_kd,
+        );
         self.motor_kv = motor_cfg.motor_kv;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
@@ -371,7 +372,7 @@ impl<LED: OutputPin> MainState<LED> {
                 .calculate(e_com, self.pid.target_e_com_time as i32);
             self.pid.input_override = self.pid.input_override.clamp(0, 2047 * 10000);
             if shared.zero_crosses() < 100 {
-                self.pid.speed.integral = 0;
+                self.pid.speed.reset();
             }
             // Override throttle input with PID output
             let override_input = (self.pid.input_override / 10000) as u16;
