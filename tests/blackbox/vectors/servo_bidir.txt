@@ -1,0 +1,30 @@
+# Servo bidirectional throttle mapping (non-RC-car)
+# Covers: direction flip with speed gate, dead band
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=0
+servoPwm=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=0
+eeprom.servo_dead_band=100
+running=1
+old_routine=1
+commutation_interval=5000
+forward=1
+
+@sequence
+# Forward: newinput=1500 (above dead band 1200), motor already forward
+tick 1  | throttle=1500 | forward=1 adjusted_input>0
+
+# Reverse: newinput=500 (below dead band 800), direction flips
+tick 1  | throttle=500  | forward=0 adjusted_input>0
+
+# Dead band: newinput=1000 (between 800-1200), adjusted=0
+tick 1  | throttle=1000 | adjusted_input=0
+
+# Reverse again (already reversed): same direction, throttle maps
+tick 1  | throttle=500  | forward=0 adjusted_input>0
