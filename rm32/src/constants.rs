@@ -41,6 +41,10 @@ pub const OLD_ROUTINE_EXIT_INTERVAL: u32 = 2000;
 /// Ensures enough successful commutations before trusting interrupt-driven mode.
 pub const OLD_ROUTINE_EXIT_ZC: u32 = 20;
 
+/// Servo PWM neutral/center position (pulse width mapped to 0-2047 scale).
+/// Used as the center point for servo bidirectional dead band calculations.
+pub const SERVO_CENTER: u16 = 1000;
+
 /// Bidir DShot midpoint. Values 0-1047 = reverse, 1048-2047 = forward.
 pub const BIDIR_MIDPOINT: u16 = 1048;
 
@@ -71,10 +75,19 @@ pub const BEMF_TIMEOUT_STRICT: u8 = 10;
 /// Throttle level below which the lenient BEMF timeout is used.
 pub const BEMF_LENIENT_THROTTLE: u16 = 150;
 
+/// Interval timer threshold for stall detection (timer ticks at 2MHz).
+/// 45000 ticks = 22.5ms without a BEMF zero-cross → motor is stalled.
+pub const BEMF_STALL_TIMER_THRESHOLD: u32 = 45000;
+
 /// BEMF timeout fault latch value. When bemf_timeout_happened exceeds the
 /// threshold, it's set to this sentinel (> any threshold) to indicate a
 /// latched stuck-rotor fault that persists until motor conditions clear it.
 pub const BEMF_FAULT_LATCHED: u8 = 102;
+
+/// Base zero-cross count for startup phase. Below `STARTUP_ZC_BASE >> stall_protection`
+/// zero-crosses, startup duty limits (min_startup/startup_max) are enforced.
+/// Higher stall_protection narrows the window (15 for stall=1, 7 for stall=2, etc.).
+pub const STARTUP_ZC_BASE: u32 = 30;
 
 /// Fixed-point shift for commutation advance timing.
 /// `advance = (temp_advance * commutation_interval) >> ADVANCE_SHIFT`
