@@ -6,8 +6,6 @@
 use crate::config::EepromConfig;
 use crate::constants::*;
 use crate::control::state::{Measurements, PidState, ProtectionState, TelemetryState, TimingState};
-use crate::current::CurrentFilter;
-use crate::filter::EwmaPow2;
 use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
 use crate::telemetry;
@@ -107,8 +105,6 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
     pub desync_check: bool,
-    pub current_filter: CurrentFilter,
-    pub voltage_filter: EwmaPow2<3>,
     pub last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
@@ -164,8 +160,6 @@ impl MainState<NoLed> {
             millivolt_per_amp: params.millivolt_per_amp,
             current_offset: params.current_offset,
             desync_check: false,
-            current_filter: CurrentFilter::new(),
-            voltage_filter: EwmaPow2::new(),
             last_armed: false,
             just_armed: false,
             use_ntc: params.use_ntc,
@@ -321,8 +315,8 @@ impl<LED: OutputPin> MainState<LED> {
 
         // ADC measurements — typed conversions via AdcCount
         use crate::units::AdcCount;
-        let smoothed_v = AdcCount(self.voltage_filter.update(adc.raw_voltage()));
-        let smoothed_c = AdcCount(self.current_filter.update(adc.raw_current()));
+        let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
+        let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
         self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
         self.measurements.actual_current =
             smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);

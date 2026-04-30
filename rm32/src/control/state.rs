@@ -110,6 +110,10 @@ pub struct Measurements {
     pub actual_current: crate::units::MilliAmps,
     pub degrees_celsius: crate::units::DegreesCelsius,
     pub consumed_current: i32,
+    /// EWMA filter for ADC voltage readings.
+    pub voltage_filter: crate::filter::EwmaPow2<3>,
+    /// Multi-stage filter for ADC current readings.
+    pub current_filter: crate::current::CurrentFilter,
 }
 
 /// Main-loop timing state — eRPM and commutation interval tracking.

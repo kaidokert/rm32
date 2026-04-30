@@ -10,6 +10,7 @@ use fixed::types::U16F16;
 
 /// Power-of-2 EWMA filter state.
 /// K is the shift amount: α = 1/2^K.
+#[derive(Clone)]
 pub struct EwmaPow2<const K: u8> {
     state: U16F16,
     initialized: bool,
