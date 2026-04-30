@@ -24,8 +24,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov,nextest
 
       - name: Generate unit test coverage
         run: cargo llvm-cov nextest --lcov --output-path unit-lcov.info -p rm32 --profile ci
@@ -44,7 +45,7 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/nextest/ci/junit.xml
+          files: target/nextest/ci/junit-unit.xml
           flags: unittests
           name: unit-tests
           fail_ci_if_error: true
@@ -64,7 +65,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - uses: actions/setup-python@v5
         with:
