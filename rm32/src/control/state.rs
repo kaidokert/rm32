@@ -61,16 +61,28 @@ pub struct InputState {
 }
 
 /// PID controllers and associated state.
+///
+/// Owns all three PID loops (current limit, stall protection, speed control)
+/// and their output accumulators. `MainState` holds this as `pub pid: PidState`.
 #[derive(Clone)]
 pub struct PidState {
     pub current: Pid,
     pub speed: Pid,
     pub stall: Pid,
+    /// Whether current limiting is active (from EEPROM config).
     pub use_current_limit: bool,
+    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
     pub current_limit_adjust: i16,
+    /// Stall protection PID output accumulator.
     pub stall_adjust: i32,
+    /// Stall protection target commutation interval.
+    pub stall_protect_target_interval: u16,
+    /// Whether closed-loop speed control is active.
     pub use_speed_control: bool,
+    /// Speed PID output accumulator (throttle override).
     pub input_override: i32,
+    /// Speed PID target e_com_time.
+    pub target_e_com_time: u32,
 }
 
 /// Telemetry scheduling state.
@@ -163,8 +175,10 @@ impl Default for PidState {
             use_current_limit: false,
             current_limit_adjust: 2000,
             stall_adjust: 0,
+            stall_protect_target_interval: 0,
             use_speed_control: false,
             input_override: 0,
+            target_e_com_time: 0,
         }
     }
 }
