@@ -1,0 +1,24 @@
+# Verify e_com_time is computed from ISR commutation intervals
+# Regression test: commutation_intervals array was never populated
+# by the firmware ISR, causing e_com_time to always be zero.
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=1
+
+@sequence
+# Motor running with throttle — ISR processes BEMF and advances steps
+tick 1  | throttle=500 |
+tick 1  | throttle=500 |
+tick 1  | throttle=500 |
+tick 1  | throttle=500 |
+
+# After commutation step advances, e_com_time must reflect actual intervals.
+# Before the fix, this was 2 (rounding bias from empty array).
+# With ISR recording intervals, it should be well above 100.
+ticks 3 | throttle=500 | e_com_time>100
