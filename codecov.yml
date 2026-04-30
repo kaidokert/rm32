@@ -1,0 +1,19 @@
+coverage:
+  status:
+    project:
+      unittests:
+        flags:
+          - unittests
+      blackboxtests:
+        flags:
+          - blackboxtests
+
+flags:
+  unittests:
+    paths:
+      - rm32/src/
+    carryforward: true
+  blackboxtests:
+    paths:
+      - rm32/src/
+    carryforward: true
