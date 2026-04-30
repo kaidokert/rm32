@@ -59,11 +59,12 @@ pub struct SharedState {
     interval_timer_count: AtomicU32,
 
     // Main→ISR published control (main computes, ISR applies)
-    tim1_arr: AtomicU16,       // variable PWM auto-reload
-    duty_maximum: AtomicU16,   // eRPM/temperature throttle restriction
-    filter_level: AtomicU8,    // BEMF comparator filter samples
-    min_bemf_counts: AtomicU8, // min zero-cross detection threshold
-    auto_advance: AtomicU8,    // commutation timing advance level
+    tim1_arr: AtomicU16,           // variable PWM auto-reload
+    duty_maximum: AtomicU16,       // eRPM/temperature throttle restriction
+    filter_level: AtomicU8,        // BEMF comparator filter samples
+    min_bemf_counts: AtomicU8,     // min zero-cross detection threshold
+    auto_advance: AtomicU8,        // commutation timing advance level
+    prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
 }
 
 impl Default for SharedState {
@@ -104,6 +105,7 @@ impl SharedState {
             filter_level: AtomicU8::new(5),
             min_bemf_counts: AtomicU8::new(2),
             auto_advance: AtomicU8::new(0),
+            prop_brake_active: AtomicBool::new(false),
         }
     }
 
@@ -417,6 +419,13 @@ impl SharedState {
     pub fn set_auto_advance(&self, v: u8) {
         self.auto_advance.store(v, REL);
     }
+
+    pub fn prop_brake_active(&self) -> bool {
+        self.prop_brake_active.load(ACQ)
+    }
+    pub fn set_prop_brake_active(&self, v: bool) {
+        self.prop_brake_active.store(v, REL);
+    }
 }
 
 impl crate::shared_comm::SharedComm for SharedState {
@@ -586,5 +595,11 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_e_com_time(&self, v: i32) {
         SharedState::set_e_com_time(self, v);
+    }
+    fn prop_brake_active(&self) -> bool {
+        SharedState::prop_brake_active(self)
+    }
+    fn set_prop_brake_active(&self, v: bool) {
+        SharedState::set_prop_brake_active(self, v);
     }
 }

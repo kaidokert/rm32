@@ -27,6 +27,7 @@ pub struct TestShared {
     pub min_bemf_counts: Cell<u8>,
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
+    pub prop_brake_active: Cell<bool>,
 }
 
 impl Default for TestShared {
@@ -58,6 +59,7 @@ impl TestShared {
             min_bemf_counts: Cell::new(2),
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
+            prop_brake_active: Cell::new(false),
         }
     }
 }
@@ -191,5 +193,11 @@ impl SharedComm for TestShared {
     }
     fn set_interval_timer_count(&self, v: u32) {
         self.interval_timer_count.set(v);
+    }
+    fn prop_brake_active(&self) -> bool {
+        self.prop_brake_active.get()
+    }
+    fn set_prop_brake_active(&self, v: bool) {
+        self.prop_brake_active.set(v);
     }
 }

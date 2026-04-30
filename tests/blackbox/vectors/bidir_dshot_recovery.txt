@@ -1,0 +1,47 @@
+# Bidirectional DShot stuck rotor recovery
+# Covers: fault clear by centering stick (DShot input=0)
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.stuck_rotor_protection=1
+running=1
+old_routine=1
+
+@sequence
+# Trigger fault via sustained stall
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+
+# Verify fault is latched
+tick 1  | throttle=1500 interval_timer=50000 | input=0 running=0
+
+# Center stick (DShot 0) to clear fault
+tick 1  | throttle=0 |
+tick 1  | throttle=0 |
+tick 1  | throttle=0 |
+
+# Re-apply throttle: motor should recover
+tick 1  | throttle=1500 | input>0 running=1

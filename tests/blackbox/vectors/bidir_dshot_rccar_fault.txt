@@ -1,0 +1,37 @@
+# Bidirectional DShot RC-car stuck rotor fault
+# Golden values captured from C harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.bi_direction=1
+eeprom.rc_car_reverse=1
+eeprom.stuck_rotor_protection=1
+running=1
+old_routine=1
+
+@sequence
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+tick 1  | throttle=1500 interval_timer=50000 |
+
+tick 1  | throttle=1500 interval_timer=50000 | input=0 running=0
