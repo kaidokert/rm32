@@ -3,14 +3,14 @@
 const NUM_READINGS: usize = 50;
 
 #[derive(Clone)]
-pub struct CurrentFilter {
+pub(crate) struct CurrentFilter {
     readings: [u16; NUM_READINGS],
     index: usize,
     total: u32,
 }
 
 impl CurrentFilter {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             readings: [0; NUM_READINGS],
             index: 0,
@@ -19,7 +19,7 @@ impl CurrentFilter {
     }
 
     /// Feed a new raw ADC current reading, returns smoothed value.
-    pub fn update(&mut self, raw: u16) -> u16 {
+    pub(crate) fn update(&mut self, raw: u16) -> u16 {
         self.total -= self.readings[self.index] as u32;
         self.readings[self.index] = raw;
         self.total += raw as u32;
@@ -28,12 +28,6 @@ impl CurrentFilter {
             self.index = 0;
         }
         (self.total / NUM_READINGS as u32) as u16
-    }
-
-    pub fn reset(&mut self) {
-        self.readings = [0; NUM_READINGS];
-        self.index = 0;
-        self.total = 0;
     }
 }
 
@@ -70,18 +64,6 @@ mod tests {
         let f = CurrentFilter::new();
         assert_eq!(f.total, 0);
         assert_eq!(f.index, 0);
-    }
-
-    #[test]
-    fn reset_clears() {
-        let mut f = CurrentFilter::new();
-        for _ in 0..30 {
-            f.update(500);
-        }
-        f.reset();
-        assert_eq!(f.total, 0);
-        assert_eq!(f.index, 0);
-        assert_eq!(f.update(0), 0);
     }
 
     #[test]

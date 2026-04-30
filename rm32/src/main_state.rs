@@ -5,7 +5,7 @@
 
 use crate::config::EepromConfig;
 use crate::constants::*;
-use crate::control::state::{Measurements, PidState, ProtectionState, TelemetryState, TimingState};
+use crate::control::state::{Measurements, PidState, ProtectionState, TimingState};
 use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
 use crate::telemetry;
@@ -14,7 +14,7 @@ use embedded_hal::digital::OutputPin;
 use crate::shared_state::SharedState;
 
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
-pub fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
+pub(crate) fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
     let half = timer1_max_arr as i32 / 2;
     let full = timer1_max_arr as i32;
     let result = crate::functions::map(commutation_interval as i32, 96, 200, half, full);
@@ -22,7 +22,7 @@ pub fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16
 }
 
 /// Compute variable PWM auto-reload value for mode 2 (CPU-scaled).
-pub fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
+pub(crate) fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
     let scale = cpu_mhz as u32 / 9;
     if average_interval < 100 && average_interval > 0 {
         (100 * scale) as u16
@@ -35,7 +35,7 @@ pub fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
 
 /// Compute duty ceiling from eRPM and temperature limits.
 /// Returns the more restrictive of the two (or 2000 if neither applies).
-pub fn duty_ceiling(
+pub(crate) fn duty_ceiling(
     e_com_time: i32,
     motor_kv: u16,
     motor_poles: u8,
@@ -90,7 +90,6 @@ impl embedded_hal::digital::ErrorType for NoLed {
 pub struct MainState<LED: OutputPin = NoLed> {
     pub protection: ProtectionState,
     pub measurements: Measurements,
-    pub telemetry: TelemetryState,
     pub config: EepromConfig,
 
     // PID controllers (main computes adjustments, ISR applies)
@@ -99,21 +98,21 @@ pub struct MainState<LED: OutputPin = NoLed> {
     // Timing (main-loop side — ISR timing is in SharedComm)
     pub timing: TimingState,
     // Board-level hardware constants (set once, never change at runtime)
-    pub board: BoardParams,
+    pub(crate) board: BoardParams,
     pub cell_count: u8,
     pub motor_kv: u16,
-    pub low_cell_volt_cutoff: u16,
+    pub(crate) low_cell_volt_cutoff: u16,
     pub desync_check: bool,
-    pub last_armed: bool,
+    pub(crate) last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
     /// Custom LED pin (NoLed if board has no custom LED)
-    pub led: LED,
-    pub led_counter: u16,
+    pub(crate) led: LED,
+    pub(crate) led_counter: u16,
     /// TIM1 max auto-reload (from PWM frequency config, overwritten by apply_motor_config)
-    pub timer1_max_arr: u16,
+    pub(crate) timer1_max_arr: u16,
     /// Main-loop tick counter for consumed current accumulation
-    pub ten_khz_counter: u32,
+    pub(crate) ten_khz_counter: u32,
 }
 
 /// Board-level hardware constants — set once at init, never change at runtime.
@@ -142,7 +141,6 @@ impl MainState<NoLed> {
         Self {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
-            telemetry: TelemetryState::default(),
             config: EepromConfig::default(),
             pid: PidState {
                 stall_protect_target_interval: params.stall_protect_interval,
@@ -183,7 +181,12 @@ impl<LED: OutputPin> MainState<LED> {
     }
 
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
-    pub fn tick(&mut self, shared: &SharedState, adc: &mut dyn Adc, telem: &mut dyn TelemetryUart) {
+    pub(crate) fn tick(
+        &mut self,
+        shared: &SharedState,
+        adc: &mut dyn Adc,
+        telem: &mut dyn TelemetryUart,
+    ) {
         // e_com_time: read from SharedComm (ISR computes from per-step intervals)
         let e_com_time = shared.e_com_time();
 

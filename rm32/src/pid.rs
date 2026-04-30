@@ -3,21 +3,21 @@
 //! Matches the C `fastPID` struct behavior exactly.
 
 #[derive(Clone, Default)]
-pub struct Pid {
-    pub error: i32,
-    pub kp: u32,
-    pub ki: u32,
-    pub kd: u32,
-    pub integral: i32,
-    pub derivative: i32,
-    pub last_error: i32,
-    pub pid_output: i32,
-    pub integral_limit: i32,
-    pub output_limit: i32,
+pub(crate) struct Pid {
+    pub(crate) error: i32,
+    pub(crate) kp: u32,
+    pub(crate) ki: u32,
+    pub(crate) kd: u32,
+    pub(crate) integral: i32,
+    pub(crate) derivative: i32,
+    pub(crate) last_error: i32,
+    pub(crate) pid_output: i32,
+    pub(crate) integral_limit: i32,
+    pub(crate) output_limit: i32,
 }
 
 impl Pid {
-    pub fn new(kp: u32, ki: u32, kd: u32, integral_limit: i32, output_limit: i32) -> Self {
+    pub(crate) fn new(kp: u32, ki: u32, kd: u32, integral_limit: i32, output_limit: i32) -> Self {
         Self {
             kp,
             ki,
@@ -30,7 +30,7 @@ impl Pid {
 
     /// Compute one PID iteration. Returns clamped output.
     /// Mirrors `doPidCalculations` from main.c exactly.
-    pub fn calculate(&mut self, actual: i32, target: i32) -> i32 {
+    pub(crate) fn calculate(&mut self, actual: i32, target: i32) -> i32 {
         self.error = actual - target;
         self.integral += self.error * self.ki as i32;
 
@@ -56,7 +56,7 @@ impl Pid {
         self.pid_output
     }
 
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.error = 0;
         self.integral = 0;
         self.derivative = 0;

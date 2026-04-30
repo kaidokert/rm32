@@ -5,12 +5,12 @@
 //! `isr_logic::ten_khz_tick()`.
 
 use crate::config::EepromConfig;
-use crate::constants::{DSHOT_MAX_THROTTLE, DUTY_SCALE_MAX, STARTUP_ZC_BASE, THROTTLE_MIN_SIGNAL};
+use crate::constants::{DSHOT_MAX_THROTTLE, THROTTLE_MIN_SIGNAL};
 use crate::functions::map;
 
 /// How direction reversal is handled in bidirectional modes.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReverseMode {
+pub(crate) enum ReverseMode {
     /// Speed-gated: direction flip only when motor is slow enough.
     SpeedGated,
     /// RC-car: brake-and-reverse with return-to-center handshake.
@@ -23,7 +23,7 @@ pub enum ReverseMode {
 /// runtime config changes. Replaces the boolean explosion of
 /// `bi_direction × rc_car_reverse × is_dshot` with explicit variants.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum InputMode {
+pub(crate) enum InputMode {
     /// No direction control — raw throttle passthrough.
     #[default]
     Unidirectional,
@@ -35,7 +35,7 @@ pub enum InputMode {
 
 impl InputMode {
     /// Whether this mode uses RC-car brake-and-reverse handshake.
-    pub fn is_rc_car(self) -> bool {
+    pub(crate) fn is_rc_car(self) -> bool {
         matches!(
             self,
             InputMode::BidirDshot(ReverseMode::RcCar)
@@ -47,7 +47,7 @@ impl InputMode {
     }
 
     /// Derive input mode from EEPROM config and detected protocol.
-    pub fn from_config(config: &EepromConfig, is_dshot: bool) -> Self {
+    pub(crate) fn from_config(config: &EepromConfig, is_dshot: bool) -> Self {
         if !config.is_bidirectional() {
             return InputMode::Unidirectional;
         }
@@ -68,20 +68,20 @@ impl InputMode {
 }
 
 /// Result of bidirectional input mapping.
-pub struct BidirResult {
+pub(crate) struct BidirResult {
     /// Mapped throttle value (0-2047)
-    pub adjusted: u16,
+    pub(crate) adjusted: u16,
     /// Whether direction should be reversed
-    pub reverse: bool,
+    pub(crate) reverse: bool,
     /// Whether prop brake is active
-    pub prop_brake: bool,
+    pub(crate) prop_brake: bool,
 }
 
 /// Map DShot bidirectional input.
 ///
 /// DShot bidir: 0-47 = commands, 48-1047 = reverse, 1048-2047 = forward.
 /// Returns adjusted throttle (0-2047) and direction change flags.
-pub fn dshot_bidir(
+pub(crate) fn dshot_bidir(
     newinput: u16,
     forward: bool,
     dir_reversed: bool,
@@ -133,7 +133,7 @@ pub fn dshot_bidir(
 }
 
 /// Map DShot RC-car reverse input.
-pub fn dshot_rc_car(
+pub(crate) fn dshot_rc_car(
     newinput: u16,
     forward: bool,
     dir_reversed: bool,
@@ -219,7 +219,7 @@ pub fn dshot_rc_car(
 /// Map servo bidirectional input (non-RC-car).
 /// Speed-gated direction reversal with dead band around center (1000).
 #[allow(clippy::too_many_arguments)]
-pub fn servo_bidir(
+pub(crate) fn servo_bidir(
     newinput: u16,
     forward: bool,
     dir_reversed: bool,
@@ -320,7 +320,7 @@ pub fn servo_bidir(
 
 /// Map servo RC-car bidirectional input.
 /// Brake-and-reverse with return-to-center handshake, dead band around 1000.
-pub fn servo_rc_car(
+pub(crate) fn servo_rc_car(
     newinput: u16,
     forward: bool,
     dir_reversed: bool,
@@ -416,7 +416,7 @@ pub fn servo_rc_car(
 
 /// Map sine-start throttle to input value.
 /// Returns the mapped input value.
-pub fn sine_start_map(adjusted: u16, changeover_level: u8) -> u16 {
+pub(crate) fn sine_start_map(adjusted: u16, changeover_level: u8) -> u16 {
     let changeover = (changeover_level as u16) * 20;
     if adjusted < 30 {
         0
@@ -443,58 +443,6 @@ pub fn sine_start_map(adjusted: u16, changeover_level: u8) -> u16 {
 const SINE_DEAD_BAND: u16 = 30;
 /// Sine start: midpoint throttle for slow→fast transition.
 const SINE_MID_THROTTLE: u16 = 160;
-/// Sine start: minimum input for slow stepping (above changeover).
-const SINE_SLOW_STEP_MIN: u16 = 137;
-/// Sine start: extra minimum duty offset for sine mode.
-const SINE_DUTY_OFFSET: i32 = 40;
-
-/// Map throttle input to duty cycle setpoint.
-/// Returns the duty setpoint (0-2000 scale).
-pub fn throttle_to_setpoint(input: u16, use_sine_start: bool, minimum_duty: u16) -> u16 {
-    if use_sine_start {
-        map(
-            input as i32,
-            SINE_SLOW_STEP_MIN as i32,
-            DSHOT_MAX_THROTTLE as i32,
-            minimum_duty as i32 + SINE_DUTY_OFFSET,
-            DUTY_SCALE_MAX as i32,
-        ) as u16
-    } else {
-        map(
-            input as i32,
-            THROTTLE_MIN_SIGNAL as i32,
-            DSHOT_MAX_THROTTLE as i32,
-            minimum_duty as i32,
-            DUTY_SCALE_MAX as i32,
-        ) as u16
-    }
-}
-
-/// Apply startup duty floor/ceiling limits.
-pub fn clamp_startup_duty(
-    setpoint: u16,
-    input: u16,
-    zero_crosses: u32,
-    stall_protection: u8,
-    min_startup: u16,
-    startup_max: u16,
-    maximum: u16,
-) -> u16 {
-    let mut sp = setpoint;
-    let safe_shift = stall_protection.min(5); // clamp to prevent shift overflow
-    if input >= THROTTLE_MIN_SIGNAL && zero_crosses < (STARTUP_ZC_BASE >> safe_shift) {
-        if sp < min_startup {
-            sp = min_startup;
-        }
-        if sp > startup_max {
-            sp = startup_max;
-        }
-    }
-    if sp > maximum {
-        sp = maximum;
-    }
-    sp
-}
 
 #[cfg(test)]
 mod tests {
@@ -518,18 +466,6 @@ mod tests {
     }
 
     #[test]
-    fn throttle_to_setpoint_normal() {
-        let sp = throttle_to_setpoint(1000, false, 50);
-        assert!(sp > 50 && sp < 2000);
-    }
-
-    #[test]
-    fn throttle_to_setpoint_sine() {
-        let sp = throttle_to_setpoint(1000, true, 50);
-        assert!(sp > 50 && sp < 2000);
-    }
-
-    #[test]
     fn dshot_bidir_forward() {
         let r = dshot_bidir(1500, true, false, 5000, 100, false, 1500);
         assert!(r.adjusted > 0);
@@ -540,15 +476,5 @@ mod tests {
     fn dshot_bidir_zero_input() {
         let r = dshot_bidir(0, true, false, 5000, 100, false, 1500);
         assert_eq!(r.adjusted, 0);
-    }
-
-    #[test]
-    fn clamp_startup_limits() {
-        // During startup (low zero_crosses), clamp to min_startup
-        assert_eq!(clamp_startup_duty(10, 100, 5, 0, 120, 200, 2000), 120);
-        // Above startup_max
-        assert_eq!(clamp_startup_duty(300, 100, 5, 0, 120, 200, 2000), 200);
-        // After startup (high zero_crosses), no clamping
-        assert_eq!(clamp_startup_duty(300, 100, 100, 0, 120, 200, 2000), 300);
     }
 }
