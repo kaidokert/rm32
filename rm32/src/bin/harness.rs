@@ -7,13 +7,13 @@
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::context::MotorContext;
-use rm32::control::input::{self, InputState};
 use rm32::control::isr_logic::{self, TickCounters};
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
+use rm32::system::SystemTick;
 use std::io::{self, BufRead, Write};
 
 // --- Mock HAL (same as harness.rs) ---
@@ -163,8 +163,8 @@ struct Harness {
     do_transfer: bool,
     dma_buffer: [u32; 64],
 
-    // Input processing (uses library functions)
-    input_state: InputState,
+    // Unified system tick (shared with firmware)
+    system: SystemTick,
     transfer: rm32::transfer::TransferState,
     cmd_proc: rm32::dshot_commands::CommandProcessor,
     dshot: bool,
@@ -206,7 +206,7 @@ impl Harness {
             throttle_value: 0,
             do_transfer: false,
             dma_buffer: [0; 64],
-            input_state: InputState::new(),
+            system: SystemTick::new(),
             transfer: rm32::transfer::TransferState::default(),
             cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
             dshot: false,
@@ -382,17 +382,11 @@ impl Harness {
             self.do_transfer = false;
         }
 
-        // --- Input processing (equivalent to C setInput) ---
-        input::process_input(
-            &self.shared,
-            &self.config,
-            &mut self.main.protection,
-            &mut self.input_state,
-            self.shared.dshot(),
-        );
+        // --- Input processing (shared library function) ---
+        self.main.config = self.config;
+        self.system.tick_input(&self.shared, &mut self.main);
 
-        // --- ISR tick (equivalent to C tenKhzRoutine) ---
-        // Runs BEFORE main_loop, matching C ordering.
+        // --- ISR tick (harness runs inline, firmware runs in actual ISR) ---
         let mut ctx = MotorContext {
             commutation: &mut self.commutation,
             bemf: &mut self.bemf,
@@ -410,10 +404,9 @@ impl Harness {
             self.commutation.desync_check = false;
         }
 
-        // --- main_loop (equivalent to C main_loop) ---
-        // Runs AFTER ISR tick, matching C ordering.
-        self.main.config = self.config;
-        self.main.tick(&self.shared, &mut self.adc, &mut self.telem);
+        // --- Main loop (shared library function) ---
+        self.system
+            .tick_main(&self.shared, &mut self.main, &mut self.adc, &mut self.telem);
 
         self.tick_count += 1;
     }
@@ -447,7 +440,7 @@ impl Harness {
             self.shared.e_com_time(),
             self.main.e_rpm,
             self.shared.zero_crosses(),
-            self.input_state.input,
+            self.system.input_state.input,
             self.shared.adjusted_input(),
             self.shared.newinput(),
             self.bemf.counter,
@@ -461,7 +454,7 @@ impl Harness {
             self.main.measurements.actual_current.0,
             self.main.measurements.degrees_celsius.0,
             self.duty.last,
-            self.input_state.prop_brake_active as i32,
+            self.system.input_state.prop_brake_active as i32,
             self.shared.input_set() as i32,
             self.dshot as i32,
             self.servo_pwm as i32,
@@ -588,7 +581,7 @@ impl Harness {
             }
             "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8,
             "bemf_timeout" => self.main.protection.bemf_timeout = v as u8,
-            "prop_brake_active" => self.input_state.prop_brake_active = v != 0,
+            "prop_brake_active" => self.system.input_state.prop_brake_active = v != 0,
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.last = v as u16,
             "use_current_limit" => self.main.use_current_limit = v != 0,

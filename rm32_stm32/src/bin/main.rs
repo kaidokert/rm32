@@ -244,7 +244,7 @@ fn main() -> ! {
 
     // --- Main loop ---
     let shared = isr::shared();
-    let mut input_state = rm32::control::input::InputState::new();
+    let mut system = rm32::system::SystemTick::new();
     loop {
         // Sine mode: step phases when stepper_sine is active
         if shared.stepper_sine() {
@@ -282,17 +282,10 @@ fn main() -> ! {
             }
         }
 
-        // Input processing: bidir mapping, stuck rotor protection, brake logic.
-        // Runs in main loop; communicates with ISR via SharedState atomics only.
-        rm32::control::input::process_input(
-            shared,
-            &main_state.config,
-            &mut main_state.protection,
-            &mut input_state,
-            shared.dshot(),
-        );
-
-        main_state.tick(shared, &mut adc, &mut telem);
+        // Shared system tick: input processing + main loop pipeline.
+        // Same function called by harness — eliminates divergence.
+        system.tick_input(shared, &mut main_state);
+        system.tick_main(shared, &mut main_state, &mut adc, &mut telem);
 
         // Arming feedback: cell count beeps + LED
         if main_state.just_armed {

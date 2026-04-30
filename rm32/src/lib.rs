@@ -32,6 +32,7 @@ pub mod shared_state;
 pub mod signal;
 pub mod sine;
 pub mod sounds;
+pub mod system;
 pub mod telemetry;
 pub mod transfer;
 pub mod units;
