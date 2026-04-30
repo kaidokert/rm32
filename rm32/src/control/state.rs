@@ -44,23 +44,91 @@ pub struct DutyState {
 /// and their output accumulators. `MainState` holds this as `pub pid: PidState`.
 #[derive(Clone)]
 pub struct PidState {
-    pub(crate) current: Pid,
-    pub(crate) speed: Pid,
-    pub(crate) stall: Pid,
-    /// Whether current limiting is active (from EEPROM config).
-    pub use_current_limit: bool,
-    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
-    pub(crate) current_limit_adjust: i16,
-    /// Stall protection PID output accumulator.
-    pub(crate) stall_adjust: i32,
-    /// Stall protection target commutation interval.
-    pub(crate) stall_protect_target_interval: u16,
-    /// Whether closed-loop speed control is active.
-    pub use_speed_control: bool,
-    /// Speed PID output accumulator (throttle override).
-    pub(crate) input_override: i32,
-    /// Speed PID target e_com_time.
-    pub(crate) target_e_com_time: u32,
+    current: Pid,
+    speed: Pid,
+    stall: Pid,
+    use_current_limit: bool,
+    current_limit_adjust: i16,
+    stall_adjust: i32,
+    stall_protect_target_interval: u16,
+    use_speed_control: bool,
+    input_override: i32,
+    target_e_com_time: u32,
+}
+
+impl PidState {
+    /// Create PidState with board-specific stall protection target interval.
+    pub fn with_stall_target(stall_protect_target_interval: u16) -> Self {
+        Self {
+            stall_protect_target_interval,
+            ..Self::default()
+        }
+    }
+
+    /// Update current-limit PID gains from EEPROM-derived motor config.
+    pub fn set_current_gains(&mut self, kp: u32, ki: u32, kd: u32) {
+        self.current.set_gains(kp, ki, kd);
+    }
+
+    /// Set whether current limiting is active (from EEPROM config).
+    pub fn set_use_current_limit(&mut self, v: bool) {
+        self.use_current_limit = v;
+    }
+
+    /// Set whether closed-loop speed control is active.
+    pub fn set_use_speed_control(&mut self, v: bool) {
+        self.use_speed_control = v;
+    }
+
+    /// Stall protection PID tick. Returns stall boost value for ISR (0-150).
+    pub(crate) fn tick_stall(&mut self, commutation_interval: i32) -> u16 {
+        self.stall_adjust += self.stall.calculate(
+            commutation_interval,
+            self.stall_protect_target_interval as i32,
+        );
+        self.stall_adjust = self.stall_adjust.clamp(0, 150 * 10000);
+        (self.stall_adjust / 10000) as u16
+    }
+
+    /// Current limit PID tick. Returns duty ceiling for ISR (clamped to min..2000).
+    /// Returns 2000 (no limit) when current limiting is inactive or motor not running.
+    pub(crate) fn tick_current_limit(
+        &mut self,
+        actual_current: i16,
+        target: i32,
+        min_duty: i16,
+        running: bool,
+    ) -> u16 {
+        if self.use_current_limit && running {
+            let adj = self.current.calculate(actual_current as i32, target) / 10000;
+            self.current_limit_adjust -= adj as i16;
+            self.current_limit_adjust = self.current_limit_adjust.clamp(min_duty, 2000);
+            self.current_limit_adjust as u16
+        } else {
+            self.current_limit_adjust = 2000;
+            2000
+        }
+    }
+
+    /// Speed control PID tick. Returns throttle override if active, None otherwise.
+    pub(crate) fn tick_speed_control(
+        &mut self,
+        e_com_time: i32,
+        zero_crosses: u32,
+        running: bool,
+    ) -> Option<u16> {
+        if !self.use_speed_control || !running {
+            return None;
+        }
+        self.input_override += self
+            .speed
+            .calculate(e_com_time, self.target_e_com_time as i32);
+        self.input_override = self.input_override.clamp(0, 2047 * 10000);
+        if zero_crosses < 100 {
+            self.speed.reset();
+        }
+        Some((self.input_override / 10000) as u16)
+    }
 }
 
 /// Protection system state.

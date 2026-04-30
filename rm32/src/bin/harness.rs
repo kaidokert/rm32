@@ -550,8 +550,8 @@ impl Harness {
             "prop_brake_active" => self.system.input_state.prop_brake_active = v != 0,
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.last = v as u16,
-            "use_current_limit" => self.main.pid.use_current_limit = v != 0,
-            "use_speed_control_loop" => self.main.pid.use_speed_control = v != 0,
+            "use_current_limit" => self.main.pid.set_use_current_limit(v != 0),
+            "use_speed_control_loop" => self.main.pid.set_use_speed_control(v != 0),
             "send_esc_info_flag" => {
                 self.shared.set_send_esc_info_flag(v != 0);
             }
