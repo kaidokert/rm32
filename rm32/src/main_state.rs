@@ -98,35 +98,31 @@ pub struct MainState<LED: OutputPin = NoLed> {
 
     // Timing (main-loop side — ISR timing is in SharedComm)
     pub timing: TimingState,
+    // Board-level hardware constants (set once, never change at runtime)
+    pub board: BoardParams,
     pub cell_count: u8,
     pub motor_kv: u16,
     pub low_cell_volt_cutoff: u16,
-    pub voltage_divider: u16,
-    pub millivolt_per_amp: u16,
-    pub current_offset: i16,
     pub desync_check: bool,
     pub last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
-    /// Use external NTC thermistor instead of internal temp sensor
-    pub use_ntc: bool,
     /// Custom LED pin (NoLed if board has no custom LED)
     pub led: LED,
     pub led_counter: u16,
-    /// TIM1 max auto-reload (from PWM frequency config)
+    /// TIM1 max auto-reload (from PWM frequency config, overwritten by apply_motor_config)
     pub timer1_max_arr: u16,
-    /// CPU MHz for variable PWM mode 2 scaling
-    pub cpu_mhz: u8,
     /// Main-loop tick counter for consumed current accumulation
     pub ten_khz_counter: u32,
 }
 
-/// Board-specific parameters needed for MainState construction.
+/// Board-level hardware constants — set once at init, never change at runtime.
 ///
 /// Extracted so that both firmware (from BOARD config) and harness
 /// (from hardcoded defaults) share the same constructor, eliminating
 /// init divergence.
-pub struct MainStateParams {
+#[derive(Clone)]
+pub struct BoardParams {
     pub voltage_divider: u16,
     pub millivolt_per_amp: u16,
     pub current_offset: i16,
@@ -142,7 +138,7 @@ impl MainState<NoLed> {
     /// Used by both firmware and harness to ensure identical initialization.
     /// PID tuning, motor_kv, and other EEPROM-derived values are applied
     /// later via `apply_motor_config()`.
-    pub fn new(params: &MainStateParams) -> Self {
+    pub fn new(params: BoardParams) -> Self {
         Self {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
@@ -153,20 +149,16 @@ impl MainState<NoLed> {
                 ..PidState::default()
             },
             timing: TimingState::default(),
+            timer1_max_arr: params.timer1_max_arr,
+            board: params,
             cell_count: 0,
             motor_kv: 2000,
             low_cell_volt_cutoff: 330,
-            voltage_divider: params.voltage_divider,
-            millivolt_per_amp: params.millivolt_per_amp,
-            current_offset: params.current_offset,
             desync_check: false,
             last_armed: false,
             just_armed: false,
-            use_ntc: params.use_ntc,
             led: NoLed,
             led_counter: 0,
-            timer1_max_arr: params.timer1_max_arr,
-            cpu_mhz: params.cpu_mhz,
             ten_khz_counter: 0,
         }
     }
@@ -317,10 +309,10 @@ impl<LED: OutputPin> MainState<LED> {
         use crate::units::AdcCount;
         let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
         let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
-        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
+        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.board.voltage_divider);
         self.measurements.actual_current =
-            smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
-        self.measurements.degrees_celsius = if self.use_ntc {
+            smoothed_c.to_milliamps(self.board.current_offset, self.board.millivolt_per_amp);
+        self.measurements.degrees_celsius = if self.board.use_ntc {
             crate::ntc::ntc_degrees(adc.raw_temperature())
         } else {
             adc.calc_temperature(adc.raw_temperature())
@@ -419,7 +411,7 @@ impl<LED: OutputPin> MainState<LED> {
         } else if self.config.variable_pwm == 2 {
             shared.set_tim1_arr(variable_pwm_mode2(
                 self.timing.average_interval,
-                self.cpu_mhz,
+                self.board.cpu_mhz,
             ));
         } else {
             // variable_pwm=0: publish the EEPROM-derived ARR so ISR uses it
@@ -585,7 +577,7 @@ mod tests {
     }
 
     fn make_test_main_state() -> MainState {
-        MainState::new(&MainStateParams {
+        MainState::new(BoardParams {
             voltage_divider: 110,
             millivolt_per_amp: 20,
             current_offset: 0,
