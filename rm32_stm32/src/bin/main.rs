@@ -10,9 +10,8 @@ use cortex_m_rt::entry;
 
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
-use rm32::control::state::{BemfState, DutyState, Measurements, ProtectionState, TelemetryState};
+use rm32::control::state::{BemfState, DutyState};
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
-use rm32::pid::Pid;
 
 use rm32::main_state::MainState;
 use rm32_stm32::init::InitResult;
@@ -95,43 +94,15 @@ fn main() -> ! {
     isr::init_isr_state(isr_state);
 
     // --- Build main loop state ---
-    let mut main_state = MainState {
-        protection: ProtectionState::default(),
-        measurements: Measurements::default(),
-        telemetry: TelemetryState::default(),
-        config: EepromConfig::default(),
-        current_pid: Pid::new(400, 0, 1000, 20000, 100000),
-        speed_pid: Pid::new(10, 0, 100, 10000, 50000),
-        stall_pid: Pid::new(1, 0, 50, 10000, 50000),
-        e_rpm: 0,
-        average_interval: 0,
-        last_average_interval: 0,
-        commutation_intervals: [0; 6],
-        cell_count: 0,
-        motor_kv: 2000,
-        low_cell_volt_cutoff: 330,
+    let mut main_state = MainState::new(&rm32::main_state::MainStateParams {
         voltage_divider: BOARD.voltage_divider,
         millivolt_per_amp: BOARD.millivolt_per_amp,
         current_offset: BOARD.current_offset,
-        stall_protection_adjust: 0,
-        current_limit_adjust: 2000,
-        use_current_limit: false,
-        stall_protect_target_interval: BOARD.stall_protect_interval,
-        use_speed_control_loop: false,
-        speed_input_override: 0,
-        target_e_com_time: 0,
-        desync_check: false,
-        current_filter: rm32::current::CurrentFilter::new(),
-        voltage_filter: rm32::filter::EwmaPow2::new(),
-        last_armed: false,
-        just_armed: false,
+        stall_protect_interval: BOARD.stall_protect_interval,
         use_ntc: BOARD.use_ntc,
-        led: rm32::main_state::NoLed,
-        led_counter: 0,
         timer1_max_arr: Chip::TIM1_AUTORELOAD,
         cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
-        ten_khz_counter: 0,
-    };
+    });
 
     // --- Check bootloader device info for dynamic EEPROM address ---
     let eeprom_address = {
@@ -186,15 +157,7 @@ fn main() -> ! {
     let dead_time_override = motor_cfg.dead_time_override;
 
     // Apply derived motor config to main state and PID controllers
-    main_state.current_pid.kp = motor_cfg.current_kp;
-    main_state.current_pid.ki = motor_cfg.current_ki;
-    main_state.current_pid.kd = motor_cfg.current_kd;
-    main_state.motor_kv = motor_cfg.motor_kv;
-    main_state.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
-    main_state.timer1_max_arr = motor_cfg.timer1_max_arr;
-    if main_state.config.current_limit > 0 && main_state.config.current_limit < 100 {
-        main_state.use_current_limit = true;
-    }
+    main_state.apply_motor_config(&motor_cfg);
 
     // Propagate loaded config to ISR state (before interrupts enabled)
     isr::with_isr_state(|isr| {

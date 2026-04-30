@@ -140,7 +140,84 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub ten_khz_counter: u32,
 }
 
+/// Board-specific parameters needed for MainState construction.
+///
+/// Extracted so that both firmware (from BOARD config) and harness
+/// (from hardcoded defaults) share the same constructor, eliminating
+/// init divergence.
+pub struct MainStateParams {
+    pub voltage_divider: u16,
+    pub millivolt_per_amp: u16,
+    pub current_offset: i16,
+    pub stall_protect_interval: u16,
+    pub use_ntc: bool,
+    pub timer1_max_arr: u16,
+    pub cpu_mhz: u8,
+}
+
+impl MainState<NoLed> {
+    /// Construct MainState with board-specific parameters and no custom LED.
+    ///
+    /// Used by both firmware and harness to ensure identical initialization.
+    /// PID tuning, motor_kv, and other EEPROM-derived values are applied
+    /// later via `apply_motor_config()`.
+    pub fn new(params: &MainStateParams) -> Self {
+        Self {
+            protection: ProtectionState::default(),
+            measurements: Measurements::default(),
+            telemetry: TelemetryState::default(),
+            config: EepromConfig::default(),
+            current_pid: Pid::new(400, 0, 1000, 20000, 100000),
+            speed_pid: Pid::new(10, 0, 100, 10000, 50000),
+            stall_pid: Pid::new(1, 0, 50, 10000, 50000),
+            e_rpm: 0,
+            average_interval: 0,
+            last_average_interval: 0,
+            commutation_intervals: [0; 6],
+            cell_count: 0,
+            motor_kv: 2000,
+            low_cell_volt_cutoff: 330,
+            voltage_divider: params.voltage_divider,
+            millivolt_per_amp: params.millivolt_per_amp,
+            current_offset: params.current_offset,
+            stall_protection_adjust: 0,
+            current_limit_adjust: 2000,
+            use_current_limit: false,
+            stall_protect_target_interval: params.stall_protect_interval,
+            use_speed_control_loop: false,
+            speed_input_override: 0,
+            target_e_com_time: 0,
+            desync_check: false,
+            current_filter: CurrentFilter::new(),
+            voltage_filter: EwmaPow2::new(),
+            last_armed: false,
+            just_armed: false,
+            use_ntc: params.use_ntc,
+            led: NoLed,
+            led_counter: 0,
+            timer1_max_arr: params.timer1_max_arr,
+            cpu_mhz: params.cpu_mhz,
+            ten_khz_counter: 0,
+        }
+    }
+}
+
 impl<LED: OutputPin> MainState<LED> {
+    /// Apply EEPROM-derived motor configuration.
+    ///
+    /// Called after loading config from flash (firmware) or after `load_eeprom`
+    /// command (harness). Updates PID tuning, motor KV, voltage cutoff, and
+    /// current limit flag from the derived `MotorConfig`.
+    pub fn apply_motor_config(&mut self, motor_cfg: &crate::config::MotorConfig) {
+        self.current_pid.kp = motor_cfg.current_kp;
+        self.current_pid.ki = motor_cfg.current_ki;
+        self.current_pid.kd = motor_cfg.current_kd;
+        self.motor_kv = motor_cfg.motor_kv;
+        self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
+        self.timer1_max_arr = motor_cfg.timer1_max_arr;
+        self.use_current_limit = self.config.current_limit > 0 && self.config.current_limit < 100;
+    }
+
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
     pub fn tick(&mut self, shared: &SharedState, adc: &mut dyn Adc, telem: &mut dyn TelemetryUart) {
         // e_com_time calculation
