@@ -13,7 +13,7 @@ mod tests {
 
     use crate::control::isr_logic::{self, TickCounters};
     use crate::control::shared_impl::TestShared;
-    use crate::shared_comm::{IsrTiming as _, MotorState as _, SharedComm as _};
+    use crate::shared_comm::{IsrTiming as _, MainControl as _, MotorState as _, SharedComm as _};
 
     fn make_counters() -> TickCounters {
         TickCounters {

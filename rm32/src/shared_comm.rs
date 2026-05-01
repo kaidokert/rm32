@@ -102,21 +102,11 @@ pub trait IsrTiming {
     fn set_forward(&self, _v: bool) {}
 }
 
-/// Communication interface between ISR and main loop contexts.
-/// Requires `MotorState` and `IsrTiming` for motor mode and timing access.
-pub trait SharedComm: MotorState + IsrTiming {
-    fn input_set(&self) -> bool;
-    fn set_input_set(&self, v: bool);
-    fn dshot_telemetry(&self) -> bool;
-
-    /// Whether detected input is DShot (vs servo). ISR transfer handler sets this.
-    fn is_dshot(&self) -> bool {
-        false
-    }
-    fn set_is_dshot(&self, _v: bool) {}
-
-    fn newinput(&self) -> u16;
-    fn set_newinput(&self, v: u16);
+/// Main-loop-produced control data consumed by the ISR.
+///
+/// Main loop computes throttle mapping, PID outputs, PWM config,
+/// and measurement data; ISR reads them each tick.
+pub trait MainControl {
     fn adjusted_input(&self) -> u16;
     fn set_adjusted_input(&self, v: u16);
     fn duty_cycle_setpoint(&self) -> u16;
@@ -127,23 +117,17 @@ pub trait SharedComm: MotorState + IsrTiming {
     }
     fn set_stall_protection_adjust(&self, _v: u16) {}
 
-    fn battery_voltage(&self) -> u16 {
-        0
+    /// Current limit duty ceiling (main PID publishes, ISR clamps duty).
+    fn current_limit_adjust(&self) -> u16 {
+        2000
     }
+    fn set_current_limit_adjust(&self, _v: u16) {}
 
-    // --- Main→ISR published state (main computes, ISR reads) ---
-
-    fn send_telemetry(&self) -> bool;
-    fn set_send_telemetry(&self, v: bool);
-
-    fn save_settings_flag(&self) -> bool {
+    /// Proportional brake active (main sets, ISR reads for brake-on-stop).
+    fn prop_brake_active(&self) -> bool {
         false
     }
-    fn set_save_settings_flag(&self, _v: bool) {}
-    fn send_esc_info_flag(&self) -> bool {
-        false
-    }
-    fn set_send_esc_info_flag(&self, _v: bool) {}
+    fn set_prop_brake_active(&self, _v: bool) {}
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {
@@ -175,20 +159,42 @@ pub trait SharedComm: MotorState + IsrTiming {
     }
     fn set_auto_advance(&self, _v: u8) {}
 
-    /// Current limit duty ceiling (main PID publishes, ISR clamps duty).
-    /// Default 2000 = no limit.
-    fn current_limit_adjust(&self) -> u16 {
-        2000
-    }
-    fn set_current_limit_adjust(&self, _v: u16) {}
-
-    /// Proportional brake active (main sets, ISR reads for brake-on-stop mode 1).
-    fn prop_brake_active(&self) -> bool {
-        false
-    }
-    fn set_prop_brake_active(&self, _v: bool) {}
-
+    /// Measurement publish for EDT telemetry (main writes, ISR reads).
     fn set_actual_current(&self, _v: i16) {}
     fn set_battery_voltage(&self, _v: u16) {}
     fn set_degrees_celsius(&self, _v: i16) {}
+}
+
+/// Remaining shared state — input detection, flags, protocol.
+///
+/// Requires `MotorState`, `IsrTiming`, and `MainControl`.
+pub trait SharedComm: MotorState + IsrTiming + MainControl {
+    fn input_set(&self) -> bool;
+    fn set_input_set(&self, v: bool);
+    fn dshot_telemetry(&self) -> bool;
+
+    /// Whether detected input is DShot (vs servo). ISR transfer handler sets this.
+    fn is_dshot(&self) -> bool {
+        false
+    }
+    fn set_is_dshot(&self, _v: bool) {}
+
+    fn newinput(&self) -> u16;
+    fn set_newinput(&self, v: u16);
+
+    fn battery_voltage(&self) -> u16 {
+        0
+    }
+
+    fn send_telemetry(&self) -> bool;
+    fn set_send_telemetry(&self, v: bool);
+
+    fn save_settings_flag(&self) -> bool {
+        false
+    }
+    fn set_save_settings_flag(&self, _v: bool) {}
+    fn send_esc_info_flag(&self) -> bool {
+        false
+    }
+    fn set_send_esc_info_flag(&self, _v: bool) {}
 }

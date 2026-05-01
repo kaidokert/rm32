@@ -1,7 +1,7 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
 use crate::motor_mode::MotorMode;
-use crate::shared_comm::{IsrTiming, MotorState, SharedComm};
+use crate::shared_comm::{IsrTiming, MainControl, MotorState, SharedComm};
 use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
@@ -127,29 +127,7 @@ impl IsrTiming for TestShared {
     }
 }
 
-impl SharedComm for TestShared {
-    fn input_set(&self) -> bool {
-        self.input_set.get()
-    }
-    fn set_input_set(&self, v: bool) {
-        self.input_set.set(v);
-    }
-    fn dshot_telemetry(&self) -> bool {
-        self.dshot_telemetry.get()
-    }
-    fn is_dshot(&self) -> bool {
-        self.is_dshot.get()
-    }
-    fn set_is_dshot(&self, v: bool) {
-        self.is_dshot.set(v);
-    }
-
-    fn newinput(&self) -> u16 {
-        self.newinput.get()
-    }
-    fn set_newinput(&self, v: u16) {
-        self.newinput.set(v);
-    }
+impl MainControl for TestShared {
     fn adjusted_input(&self) -> u16 {
         self.adjusted_input.get()
     }
@@ -162,14 +140,6 @@ impl SharedComm for TestShared {
     fn set_duty_cycle_setpoint(&self, v: u16) {
         self.duty_cycle_setpoint.set(v);
     }
-
-    fn send_telemetry(&self) -> bool {
-        self.send_telemetry.get()
-    }
-    fn set_send_telemetry(&self, v: bool) {
-        self.send_telemetry.set(v);
-    }
-
     fn tim1_arr(&self) -> u16 {
         self.tim1_arr.get()
     }
@@ -205,5 +175,35 @@ impl SharedComm for TestShared {
     }
     fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.set(v);
+    }
+}
+
+impl SharedComm for TestShared {
+    fn input_set(&self) -> bool {
+        self.input_set.get()
+    }
+    fn set_input_set(&self, v: bool) {
+        self.input_set.set(v);
+    }
+    fn dshot_telemetry(&self) -> bool {
+        self.dshot_telemetry.get()
+    }
+    fn is_dshot(&self) -> bool {
+        self.is_dshot.get()
+    }
+    fn set_is_dshot(&self, v: bool) {
+        self.is_dshot.set(v);
+    }
+    fn newinput(&self) -> u16 {
+        self.newinput.get()
+    }
+    fn set_newinput(&self, v: u16) {
+        self.newinput.set(v);
+    }
+    fn send_telemetry(&self) -> bool {
+        self.send_telemetry.get()
+    }
+    fn set_send_telemetry(&self, v: bool) {
+        self.send_telemetry.set(v);
     }
 }
