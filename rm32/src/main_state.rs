@@ -142,10 +142,7 @@ impl MainState<NoLed> {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
             config: EepromConfig::default(),
-            pid: PidState {
-                stall_protect_target_interval: params.stall_protect_interval,
-                ..PidState::default()
-            },
+            pid: PidState::with_stall_target(params.stall_protect_interval),
             timing: TimingState::default(),
             timer1_max_arr: params.timer1_max_arr,
             board: params,
@@ -169,15 +166,17 @@ impl<LED: OutputPin> MainState<LED> {
     /// command (harness). Updates PID tuning, motor KV, voltage cutoff, and
     /// current limit flag from the derived `MotorConfig`.
     pub fn apply_motor_config(&mut self, motor_cfg: &crate::config::MotorConfig) {
-        self.pid.current.kp = motor_cfg.current_kp;
-        self.pid.current.ki = motor_cfg.current_ki;
-        self.pid.current.kd = motor_cfg.current_kd;
-        self.pid.current.reset();
+        self.pid.set_current_gains(
+            motor_cfg.current_kp,
+            motor_cfg.current_ki,
+            motor_cfg.current_kd,
+        );
         self.motor_kv = motor_cfg.motor_kv;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
-        self.pid.use_current_limit =
-            self.config.current_limit > 0 && self.config.current_limit < 100;
+        self.pid.set_use_current_limit(
+            self.config.current_limit > 0 && self.config.current_limit < 100,
+        );
     }
 
     /// Main loop iteration. Reads shared atomics, updates main-exclusive state.
@@ -336,45 +335,28 @@ impl<LED: OutputPin> MainState<LED> {
 
         // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
         if self.config.stall_protection != 0 && shared.running() {
-            let ci = shared.commutation_interval() as i32;
-            let target = self.pid.stall_protect_target_interval as i32;
-            self.pid.stall_adjust += self.pid.stall.calculate(ci, target);
-            self.pid.stall_adjust = self.pid.stall_adjust.clamp(0, 150 * 10000);
-            // Publish to ISR via shared state (ISR adds to duty)
-            shared.set_stall_protection_adjust((self.pid.stall_adjust / 10000) as u16);
+            let boost = self.pid.tick_stall(shared.commutation_interval() as i32);
+            shared.set_stall_protection_adjust(boost);
         }
 
         // Current limit PID — reduces duty when current exceeds limit
-        if self.pid.use_current_limit && shared.running() {
+        {
             let target = self.config.current_limit as i32 * 200;
-            let adj = self
-                .pid
-                .current
-                .calculate(self.measurements.actual_current.0 as i32, target)
-                / 10000;
-            self.pid.current_limit_adjust -= adj as i16;
-            let lower = (self.config.minimum_duty_cycle.min(50) as i16) * 10;
-            self.pid.current_limit_adjust = self.pid.current_limit_adjust.clamp(lower, 2000);
-            shared.set_current_limit_adjust(self.pid.current_limit_adjust as u16);
-        } else {
-            // Reset ceiling when inactive to prevent stale cap on next start
-            self.pid.current_limit_adjust = 2000;
-            shared.set_current_limit_adjust(2000);
+            let min_duty = (self.config.minimum_duty_cycle.min(50) as i16) * 10;
+            let ceiling = self.pid.tick_current_limit(
+                self.measurements.actual_current.0,
+                target,
+                min_duty,
+                shared.running(),
+            );
+            shared.set_current_limit_adjust(ceiling);
         }
 
         // Speed control PID — closed-loop RPM control
-        if self.pid.use_speed_control && shared.running() {
-            let e_com = shared.e_com_time();
-            self.pid.input_override += self
-                .pid
-                .speed
-                .calculate(e_com, self.pid.target_e_com_time as i32);
-            self.pid.input_override = self.pid.input_override.clamp(0, 2047 * 10000);
-            if shared.zero_crosses() < 100 {
-                self.pid.speed.integral = 0;
-            }
-            // Override throttle input with PID output
-            let override_input = (self.pid.input_override / 10000) as u16;
+        if let Some(override_input) =
+            self.pid
+                .tick_speed_control(shared.e_com_time(), zc, shared.running())
+        {
             shared.set_newinput(override_input.clamp(48, 2047));
         }
 

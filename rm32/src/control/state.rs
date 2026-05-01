@@ -44,23 +44,96 @@ pub struct DutyState {
 /// and their output accumulators. `MainState` holds this as `pub pid: PidState`.
 #[derive(Clone)]
 pub struct PidState {
-    pub(crate) current: Pid,
-    pub(crate) speed: Pid,
-    pub(crate) stall: Pid,
-    /// Whether current limiting is active (from EEPROM config).
-    pub use_current_limit: bool,
-    /// Current limit duty ceiling (adjusted by PID). 2000 = no limit.
-    pub(crate) current_limit_adjust: i16,
-    /// Stall protection PID output accumulator.
-    pub(crate) stall_adjust: i32,
-    /// Stall protection target commutation interval.
-    pub(crate) stall_protect_target_interval: u16,
-    /// Whether closed-loop speed control is active.
-    pub use_speed_control: bool,
-    /// Speed PID output accumulator (throttle override).
-    pub(crate) input_override: i32,
-    /// Speed PID target e_com_time.
-    pub(crate) target_e_com_time: u32,
+    current: Pid,
+    speed: Pid,
+    stall: Pid,
+    use_current_limit: bool,
+    current_limit_adjust: i16,
+    stall_adjust: i32,
+    stall_protect_target_interval: u16,
+    use_speed_control: bool,
+    input_override: i32,
+    target_e_com_time: u32,
+}
+
+impl PidState {
+    /// Create PidState with board-specific stall protection target interval.
+    pub fn with_stall_target(stall_protect_target_interval: u16) -> Self {
+        Self {
+            stall_protect_target_interval,
+            ..Self::default()
+        }
+    }
+
+    /// Update current-limit PID gains from EEPROM-derived motor config.
+    pub fn set_current_gains(&mut self, kp: u32, ki: u32, kd: u32) {
+        self.current.set_gains(kp, ki, kd);
+    }
+
+    /// Set whether current limiting is active (from EEPROM config).
+    pub fn set_use_current_limit(&mut self, v: bool) {
+        self.use_current_limit = v;
+    }
+
+    /// Set whether closed-loop speed control is active.
+    pub fn set_use_speed_control(&mut self, v: bool) {
+        self.use_speed_control = v;
+    }
+
+    /// Set speed PID target e_com_time.
+    pub fn set_target_e_com_time(&mut self, v: u32) {
+        self.target_e_com_time = v;
+    }
+
+    /// Stall protection PID tick. Returns stall boost value for ISR (0-150).
+    pub(crate) fn tick_stall(&mut self, commutation_interval: i32) -> u16 {
+        self.stall_adjust += self.stall.calculate(
+            commutation_interval,
+            self.stall_protect_target_interval as i32,
+        );
+        self.stall_adjust = self.stall_adjust.clamp(0, 150 * 10000);
+        (self.stall_adjust / 10000) as u16
+    }
+
+    /// Current limit PID tick. Returns duty ceiling for ISR (clamped to min..2000).
+    /// Returns 2000 (no limit) when current limiting is inactive or motor not running.
+    pub(crate) fn tick_current_limit(
+        &mut self,
+        actual_current: i16,
+        target: i32,
+        min_duty: i16,
+        running: bool,
+    ) -> u16 {
+        if self.use_current_limit && running {
+            let adj = self.current.calculate(actual_current as i32, target) / 10000;
+            self.current_limit_adjust -= adj as i16;
+            self.current_limit_adjust = self.current_limit_adjust.clamp(min_duty, 2000);
+            self.current_limit_adjust as u16
+        } else {
+            self.current_limit_adjust = 2000;
+            2000
+        }
+    }
+
+    /// Speed control PID tick. Returns throttle override if active, None otherwise.
+    pub(crate) fn tick_speed_control(
+        &mut self,
+        e_com_time: i32,
+        zero_crosses: u32,
+        running: bool,
+    ) -> Option<u16> {
+        if !self.use_speed_control || !running {
+            return None;
+        }
+        self.input_override += self
+            .speed
+            .calculate(e_com_time, self.target_e_com_time as i32);
+        self.input_override = self.input_override.clamp(0, 2047 * 10000);
+        if zero_crosses < 100 {
+            self.speed.clear_integral();
+        }
+        Some((self.input_override / 10000) as u16)
+    }
 }
 
 /// Protection system state.
@@ -159,5 +232,137 @@ impl Default for ProtectionState {
             low_voltage_count: 0,
             low_voltage_cutoff: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These tests mirror the C Catch2 tests in tests/test_tenkhz.cpp.
+
+    /// Mirrors C: "tenKhzRoutine current limit PID at 1kHz"
+    /// C setup: currentPid.Kp=100, actual_current=5000, target=2000,
+    ///          use_current_limit_adjust=2000
+    /// C assert: use_current_limit_adjust < 2000
+    #[test]
+    fn current_limit_pid_reduces_ceiling_when_over_target() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(100, 0, 0);
+
+        let actual_current = 5000i16; // mA — above target
+        let target = 10 * 200; // config.current_limit=10 → target=2000
+        let min_duty = 50; // minimum_duty_cycle.min(50) * 10
+
+        let ceiling = pid.tick_current_limit(actual_current, target, min_duty, true);
+        assert!(ceiling < 2000, "ceiling={ceiling}, expected < 2000");
+    }
+
+    /// Verify ceiling doesn't go below min_duty floor.
+    #[test]
+    fn current_limit_pid_clamps_to_min_duty() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(10000, 0, 0); // aggressive gain
+
+        let ceiling = pid.tick_current_limit(30000, 1000, 500, true);
+        assert!(
+            ceiling >= 500,
+            "ceiling={ceiling}, expected >= 500 (min_duty)"
+        );
+    }
+
+    /// When not running or not enabled, ceiling resets to 2000.
+    #[test]
+    fn current_limit_pid_resets_when_inactive() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(100, 0, 0);
+
+        // Drive ceiling down
+        pid.tick_current_limit(5000, 2000, 50, true);
+        let reduced = pid.tick_current_limit(5000, 2000, 50, true);
+        assert!(reduced < 2000);
+
+        // Not running → resets
+        let reset = pid.tick_current_limit(5000, 2000, 50, false);
+        assert_eq!(reset, 2000);
+    }
+
+    /// Mirrors C: "tenKhzRoutine stall protection PID"
+    /// C setup: stallPid.Kp=1, commutation_interval=8000, target=6500,
+    ///          stall_protection_adjust=0
+    /// C assert: stall_protection_adjust > 0
+    #[test]
+    fn stall_pid_boosts_when_interval_above_target() {
+        let mut pid = PidState::with_stall_target(6500);
+
+        let boost = pid.tick_stall(8000); // ci=8000 > target=6500
+        assert!(boost > 0, "boost={boost}, expected > 0");
+    }
+
+    /// Stall adjust is clamped to 0-150 range.
+    #[test]
+    fn stall_pid_clamps_to_150() {
+        let mut pid = PidState::with_stall_target(100);
+
+        // Many ticks with huge error to saturate
+        for _ in 0..10000 {
+            pid.tick_stall(50000);
+        }
+        let boost = pid.tick_stall(50000);
+        assert!(boost <= 150, "boost={boost}, expected <= 150");
+    }
+
+    /// Stall adjust doesn't go negative.
+    #[test]
+    fn stall_pid_clamps_to_zero() {
+        let mut pid = PidState::with_stall_target(10000);
+
+        // ci below target → negative error
+        let boost = pid.tick_stall(1000);
+        assert_eq!(boost, 0, "boost should be 0 when ci < target");
+    }
+
+    /// Speed control returns None when not active.
+    #[test]
+    fn speed_control_inactive_returns_none() {
+        let mut pid = PidState::default();
+        assert!(pid.tick_speed_control(5000, 200, true).is_none());
+    }
+
+    /// Speed control returns None when not running.
+    #[test]
+    fn speed_control_not_running_returns_none() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+        assert!(pid.tick_speed_control(5000, 200, false).is_none());
+    }
+
+    /// Speed control returns override when active and running.
+    #[test]
+    fn speed_control_active_returns_override() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+
+        // With default speed PID gains (kp=10), e_com > target → positive output
+        let result = pid.tick_speed_control(5000, 200, true);
+        assert!(result.is_some());
+        assert!(result.unwrap() > 0);
+    }
+
+    /// Speed control with low zero_crosses still produces output
+    /// (it resets integral but proportional term still works).
+    #[test]
+    fn speed_control_works_during_startup() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+
+        // Low zero_crosses triggers integral reset each tick,
+        // but proportional output should still accumulate
+        let v1 = pid.tick_speed_control(5000, 50, true).unwrap();
+        let v2 = pid.tick_speed_control(5000, 50, true).unwrap();
+        assert!(v2 >= v1, "override should accumulate: v1={v1}, v2={v2}");
     }
 }
