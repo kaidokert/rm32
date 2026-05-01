@@ -125,6 +125,11 @@ mod tests {
             _ => panic!("expected init frame"),
         }
         assert!(s.active);
+        // Verify init was consumed — next call should NOT produce another init
+        match s.next_frame(0, 0, 0) {
+            EdtFrame::Extended(v) if v == EDT_INIT_FRAME => panic!("init should be one-shot"),
+            _ => {} // any non-init frame is correct
+        }
     }
 
     #[test]
