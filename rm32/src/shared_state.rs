@@ -504,22 +504,22 @@ impl crate::shared_comm::IsrTiming for SharedState {
 
 impl crate::shared_comm::MainControl for SharedState {
     fn adjusted_input(&self) -> u16 {
-        self.adjusted_input()
+        SharedState::adjusted_input(self)
     }
     fn set_adjusted_input(&self, v: u16) {
-        self.set_adjusted_input(v);
+        SharedState::set_adjusted_input(self, v);
     }
     fn duty_cycle_setpoint(&self) -> u16 {
-        self.duty_cycle_setpoint()
+        SharedState::duty_cycle_setpoint(self)
     }
     fn set_duty_cycle_setpoint(&self, v: u16) {
-        self.set_duty_cycle_setpoint(v);
+        SharedState::set_duty_cycle_setpoint(self, v);
     }
     fn stall_protection_adjust(&self) -> u16 {
-        self.stall_protection_adjust()
+        SharedState::stall_protection_adjust(self)
     }
     fn set_stall_protection_adjust(&self, v: u16) {
-        self.set_stall_protection_adjust(v);
+        SharedState::set_stall_protection_adjust(self, v);
     }
     fn current_limit_adjust(&self) -> u16 {
         SharedState::current_limit_adjust(self)
@@ -572,49 +572,49 @@ impl crate::shared_comm::MainControl for SharedState {
     fn set_degrees_celsius(&self, v: i16) {
         SharedState::set_degrees_celsius(self, v);
     }
+    fn battery_voltage(&self) -> u16 {
+        SharedState::battery_voltage(self)
+    }
 }
 
 impl crate::shared_comm::SharedComm for SharedState {
     fn input_set(&self) -> bool {
-        self.input_set()
+        SharedState::input_set(self)
     }
     fn set_input_set(&self, v: bool) {
-        self.set_input_set(v);
+        SharedState::set_input_set(self, v);
     }
     fn dshot_telemetry(&self) -> bool {
-        self.dshot_telemetry()
+        SharedState::dshot_telemetry(self)
     }
     fn is_dshot(&self) -> bool {
-        self.dshot()
+        SharedState::dshot(self)
     }
     fn set_is_dshot(&self, v: bool) {
-        self.set_dshot(v);
+        SharedState::set_dshot(self, v);
     }
     fn newinput(&self) -> u16 {
-        self.newinput()
+        SharedState::newinput(self)
     }
     fn set_newinput(&self, v: u16) {
-        self.set_newinput(v);
-    }
-    fn battery_voltage(&self) -> u16 {
-        self.battery_voltage()
+        SharedState::set_newinput(self, v);
     }
     fn send_telemetry(&self) -> bool {
-        self.send_telemetry()
+        SharedState::send_telemetry(self)
     }
     fn set_send_telemetry(&self, v: bool) {
-        self.set_send_telemetry(v);
+        SharedState::set_send_telemetry(self, v);
     }
     fn save_settings_flag(&self) -> bool {
-        self.save_settings_flag()
+        SharedState::save_settings_flag(self)
     }
     fn set_save_settings_flag(&self, v: bool) {
-        self.set_save_settings_flag(v);
+        SharedState::set_save_settings_flag(self, v);
     }
     fn send_esc_info_flag(&self) -> bool {
-        self.send_esc_info_flag()
+        SharedState::send_esc_info_flag(self)
     }
     fn set_send_esc_info_flag(&self, v: bool) {
-        self.set_send_esc_info_flag(v);
+        SharedState::set_send_esc_info_flag(self, v);
     }
 }

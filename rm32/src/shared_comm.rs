@@ -160,6 +160,9 @@ pub trait MainControl {
     fn set_auto_advance(&self, _v: u8) {}
 
     /// Measurement publish for EDT telemetry (main writes, ISR reads).
+    fn battery_voltage(&self) -> u16 {
+        0
+    }
     fn set_actual_current(&self, _v: i16) {}
     fn set_battery_voltage(&self, _v: u16) {}
     fn set_degrees_celsius(&self, _v: i16) {}
@@ -181,10 +184,6 @@ pub trait SharedComm: MotorState + IsrTiming + MainControl {
 
     fn newinput(&self) -> u16;
     fn set_newinput(&self, v: u16);
-
-    fn battery_voltage(&self) -> u16 {
-        0
-    }
 
     fn send_telemetry(&self) -> bool;
     fn set_send_telemetry(&self, v: bool);
