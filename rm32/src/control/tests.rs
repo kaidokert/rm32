@@ -303,7 +303,7 @@ mod tests {
 
         assert_ne!(comm.step, step_before);
         assert_eq!(shared.zero_crosses(), 1);
-        assert!(!bemf.zc_found);
+        assert!(!bemf.zc_found());
     }
 
     #[test]
@@ -317,8 +317,8 @@ mod tests {
         let mut interval = MockInterval { count: 500 };
         let mut com_timer = MockComTimer;
 
-        bemf.filter_level = 2;
-        bemf.wait_time = 500;
+        bemf.set_filter_level(2);
+        bemf.set_wait_time(500);
 
         isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
@@ -336,7 +336,7 @@ mod tests {
         let mut interval = MockInterval { count: 0 };
         let mut com_timer = MockComTimer;
 
-        bemf.filter_level = 2;
+        bemf.set_filter_level(2);
 
         isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
