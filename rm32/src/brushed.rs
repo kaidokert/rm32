@@ -14,8 +14,8 @@ pub enum BrushedDirection {
 
 /// Brushed motor control state.
 pub struct BrushedState {
-    pub direction: BrushedDirection,
-    pub direction_set: bool,
+    direction: BrushedDirection,
+    direction_set: bool,
 }
 
 impl Default for BrushedState {
@@ -28,10 +28,11 @@ impl Default for BrushedState {
 }
 
 /// Result of a brushed control tick.
+#[allow(dead_code)]
 pub struct BrushedOutput {
     /// Duty cycle for active channels (0-2000 scale)
-    pub duty: u16,
-    pub direction: BrushedDirection,
+    pub(crate) duty: u16,
+    pub(crate) direction: BrushedDirection,
 }
 
 /// Run one tick of the brushed control loop.

@@ -204,12 +204,21 @@ pub fn gimbal_step(
 /// Phase positions for sinusoidal drive (0-359 degrees).
 #[derive(Clone, Default)]
 pub struct PhasePositions {
-    pub a: i16,
-    pub b: i16,
-    pub c: i16,
+    a: i16,
+    b: i16,
+    c: i16,
 }
 
 impl PhasePositions {
+    /// Create the standard three-phase position set (0°, 120°, 240°).
+    pub fn new() -> Self {
+        Self {
+            a: 0,
+            b: 120,
+            c: 240,
+        }
+    }
+
     /// Advance phase positions by one step.
     /// Forward=true decrements (motor convention), forward=false increments.
     pub fn advance(&mut self, forward: bool) {
