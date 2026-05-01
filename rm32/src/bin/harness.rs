@@ -222,7 +222,7 @@ impl Harness {
             telem: MockTelem,
             main: rm32::main_state::MainState::new(
                 &rm32::board::BoardConfig::DEFAULT,
-                &rm32::main_state::ChipParams {
+                rm32::main_state::ChipParams {
                     timer1_max_arr: 1999,
                     cpu_mhz: 64,
                 },

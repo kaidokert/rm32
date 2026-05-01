@@ -96,7 +96,7 @@ fn main() -> ! {
     // --- Build main loop state ---
     let mut main_state = MainState::new(
         &BOARD,
-        &rm32::main_state::ChipParams {
+        rm32::main_state::ChipParams {
             timer1_max_arr: Chip::TIM1_AUTORELOAD,
             cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
         },

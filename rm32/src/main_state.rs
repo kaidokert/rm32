@@ -121,6 +121,7 @@ pub struct MainState<LED: OutputPin = NoLed> {
 }
 
 /// MCU-specific constants — properties of the silicon, not the board PCB.
+#[derive(Clone, Copy, Debug)]
 pub struct ChipParams {
     /// TIM1 auto-reload at default PWM frequency.
     pub timer1_max_arr: u16,
@@ -134,7 +135,7 @@ impl MainState<NoLed> {
     /// Used by both firmware and harness to ensure identical initialization.
     /// PID tuning, motor_kv, and other EEPROM-derived values are applied
     /// later via `apply_motor_config()`.
-    pub fn new(board: &crate::board::BoardConfig, chip: &ChipParams) -> Self {
+    pub fn new(board: &crate::board::BoardConfig, chip: ChipParams) -> Self {
         Self {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
@@ -631,7 +632,7 @@ mod tests {
     fn make_test_main_state() -> MainState {
         MainState::new(
             &crate::board::BoardConfig::DEFAULT,
-            &ChipParams {
+            ChipParams {
                 timer1_max_arr: 1999,
                 cpu_mhz: 64,
             },
