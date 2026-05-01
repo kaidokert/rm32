@@ -71,9 +71,15 @@ pub enum CrsfResult {
 /// CRSF frame parser with internal byte buffer.
 pub struct CrsfParser {
     buf: heapless::Vec<u8, 64>,
-    /// Which channel index to use as throttle (default: 2)
-    pub throttle_channel: u8,
 }
+
+/// CRSF throttle channel index (AETR standard: channel 3, 0-indexed = 2).
+///
+/// C firmware declares `crsf_input_channel = 1` but never references it
+/// (CRSF support is behind an uncompiled `USE_CRSF_INPUT` flag).
+/// This implementation uses the AETR convention where Throttle is channel 3
+/// (0-indexed = 2).
+pub const THROTTLE_CHANNEL: usize = 2;
 
 impl Default for CrsfParser {
     fn default() -> Self {
@@ -85,7 +91,6 @@ impl CrsfParser {
     pub fn new() -> Self {
         Self {
             buf: heapless::Vec::new(),
-            throttle_channel: 2,
         }
     }
 
@@ -312,5 +317,50 @@ mod tests {
             let _ = parser.feed(b);
         }
         // Parser should have synced and returned a result
+    }
+
+    #[test]
+    fn throttle_channel_extracts_correct_channel() {
+        let mut parser = CrsfParser::new();
+
+        // Pack channel 2 (THROTTLE_CHANNEL) = 1000 via bit-level packing
+        let mut payload = [0u8; 22];
+        // Pack channel 2 = 1000 at bit offset 22
+        let value: u32 = 1000;
+        let bit_offset = 22;
+        for bit in 0..11 {
+            let b = (value >> bit) & 1;
+            let pos = bit_offset + bit;
+            let byte_idx = pos / 8;
+            let bit_idx = pos % 8;
+            payload[byte_idx as usize] |= (b as u8) << bit_idx;
+        }
+        let ch = unpack_channels(&payload);
+        assert_eq!(ch[THROTTLE_CHANNEL], 1000, "channel 2 should be 1000");
+        assert_eq!(ch[0], 0, "channel 0 should be 0");
+        assert_eq!(ch[1], 0, "channel 1 should be 0");
+
+        // Now feed this as a full CRSF frame and verify throttle extraction
+        let mut frame = [0u8; 26];
+        frame[0] = CRSF_SYNC;
+        frame[1] = 24;
+        frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
+        frame[3..25].copy_from_slice(&payload);
+        frame[25] = crc8_dvb_s2(&frame[2..25]);
+
+        for i in 0..25 {
+            assert!(parser.feed(frame[i]).is_none());
+        }
+        match parser.feed(frame[25]) {
+            Some(CrsfResult::Channels(channels)) => {
+                let throttle = CrsfParser::channel_to_throttle(channels[THROTTLE_CHANNEL]);
+                // CRSF 1000 → (1000-172)*2047/(1811-172) = 1034
+                assert_eq!(
+                    throttle, 1034,
+                    "CRSF channel value 1000 should map to ESC throttle 1034"
+                );
+            }
+            other => panic!("expected Channels, got {:?}", other),
+        }
     }
 }

@@ -235,8 +235,8 @@ pub fn handle_crsf_byte(byte: u8) {
     let shared = isr::shared();
 
     if let Some(rm32::crsf::CrsfResult::Channels(channels)) = state.crsf.feed(byte) {
-        let ch = state.crsf.throttle_channel as usize;
-        let throttle = rm32::crsf::CrsfParser::channel_to_throttle(channels[ch]);
+        let throttle =
+            rm32::crsf::CrsfParser::channel_to_throttle(channels[rm32::crsf::THROTTLE_CHANNEL]);
         shared.set_newinput(throttle);
         shared.set_signal_timeout(0);
         if !shared.input_set() {
