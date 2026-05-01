@@ -85,20 +85,27 @@ impl DutyState {
         average_interval: u32,
         voltage_based: bool,
     ) {
+        use crate::constants::*;
         if self.ramp_count > self.ramp_divider as u16 {
             self.ramp_count = 0;
             if voltage_based {
-                let v_change =
-                    crate::functions::map(battery_voltage as i32, 800, 2200, 10, 1) as u8;
-                self.max_change = if commutation_interval > 200 {
+                let v_change = crate::functions::map(
+                    battery_voltage as i32,
+                    RAMP_VOLTAGE_LOW_MV,
+                    RAMP_VOLTAGE_HIGH_MV,
+                    RAMP_VOLTAGE_CHANGE_MAX,
+                    RAMP_VOLTAGE_CHANGE_MIN,
+                ) as u8;
+                self.max_change = if commutation_interval > RAMP_FAST_COMMUTATION_THRESHOLD {
                     v_change
                 } else {
                     v_change.saturating_mul(3)
                 };
-            } else if zero_crosses < 150 || self.last < 150 {
+            } else if zero_crosses < RAMP_STARTUP_THRESHOLD as u32
+                || self.last < RAMP_STARTUP_THRESHOLD
+            {
                 self.max_change = self.max_ramp_startup;
-            } else if average_interval > 500 {
-                // C: average_interval > 500 = low RPM → use low-RPM ramp rate
+            } else if average_interval > RAMP_LOW_RPM_INTERVAL {
                 self.max_change = self.max_ramp_low_rpm;
             } else {
                 self.max_change = self.max_ramp_high_rpm;
@@ -124,12 +131,7 @@ impl DutyState {
     ) {
         self.cycle = self.cycle.saturating_add(stall_boost);
         self.maximum = duty_maximum;
-        if self.cycle > self.maximum {
-            self.cycle = self.maximum;
-        }
-        if self.cycle > current_limit {
-            self.cycle = current_limit;
-        }
+        self.cycle = self.cycle.min(self.maximum).min(current_limit);
     }
 
     /// Set duty to startup value when motor first starts.
@@ -154,7 +156,7 @@ impl DutyState {
 
     /// Compute PWM compare value for proportional brake mode.
     pub(crate) fn brake_compare(drag_brake_strength: u8, tim1_arr: u16) -> u16 {
-        let brake_duty = drag_brake_strength as u32 * 200;
+        let brake_duty = drag_brake_strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
         tim1_arr.saturating_sub(
             (brake_duty * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32) as u16,
         )
