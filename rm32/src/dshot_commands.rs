@@ -6,15 +6,36 @@ use crate::dshot::commands;
 /// DShot command processor state.
 #[derive(Clone, Default)]
 pub struct CommandProcessor {
-    pub command: u16,
-    pub command_count: u8,
-    pub last_command: u8,
-    pub programming_mode: u8,
-    pub position: u16,
-    pub new_byte: u8,
-    pub extended_telemetry: bool,
-    pub send_edt_init: bool,
-    pub send_edt_deinit: bool,
+    command: u16,
+    command_count: u8,
+    last_command: u8,
+    programming_mode: u8,
+    position: u16,
+    new_byte: u8,
+    extended_telemetry: bool,
+    send_edt_init: bool,
+    send_edt_deinit: bool,
+}
+
+impl CommandProcessor {
+    /// Whether extended DShot telemetry is enabled.
+    pub fn extended_telemetry(&self) -> bool {
+        self.extended_telemetry
+    }
+
+    /// Take the EDT init flag (returns current value and clears it).
+    pub fn take_edt_init(&mut self) -> bool {
+        let v = self.send_edt_init;
+        self.send_edt_init = false;
+        v
+    }
+
+    /// Take the EDT deinit flag (returns current value and clears it).
+    pub fn take_edt_deinit(&mut self) -> bool {
+        let v = self.send_edt_deinit;
+        self.send_edt_deinit = false;
+        v
+    }
 }
 
 /// Result of processing a DShot command.

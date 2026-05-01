@@ -201,7 +201,7 @@ pub fn handle_exti_frame() {
             &mut state.config,
             &mut state.forward,
             &mut state.edt_armed,
-            state.cmd.extended_telemetry,
+            state.cmd.extended_telemetry(),
         );
         match result {
             rm32::dshot_commands::CommandResult::SaveSettings => {
@@ -220,12 +220,10 @@ pub fn handle_exti_frame() {
         shared.set_forward(state.forward);
 
         // Propagate EDT init/deinit flags from CommandProcessor to scheduler
-        if state.cmd.send_edt_init {
-            state.cmd.send_edt_init = false;
+        if state.cmd.take_edt_init() {
             state.edt.send_init = true;
         }
-        if state.cmd.send_edt_deinit {
-            state.cmd.send_edt_deinit = false;
+        if state.cmd.take_edt_deinit() {
             state.edt.send_deinit = true;
         }
     }
