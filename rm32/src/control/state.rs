@@ -7,17 +7,17 @@ use crate::pid::Pid;
 /// BEMF zero-cross detection state.
 #[derive(Clone)]
 pub struct BemfState {
-    pub(crate) counter: u8,
-    pub(crate) zc_found: bool,
-    pub(crate) min_counts_up: u8,
-    pub(crate) min_counts_down: u8,
-    pub(crate) bad_count: u8,
-    pub(crate) bad_count_threshold: u8,
-    pub(crate) filter_level: u8,
-    pub(crate) wait_time: u16,
-    pub(crate) last_zc_time: u16,
-    pub(crate) this_zc_time: u16,
-    pub(crate) temp_advance: u8,
+    counter: u8,
+    zc_found: bool,
+    min_counts_up: u8,
+    min_counts_down: u8,
+    bad_count: u8,
+    bad_count_threshold: u8,
+    filter_level: u8,
+    wait_time: u16,
+    last_zc_time: u16,
+    this_zc_time: u16,
+    temp_advance: u8,
 }
 
 /// Duty cycle and ramp control.
@@ -412,6 +412,115 @@ impl Default for BemfState {
             last_zc_time: 0,
             this_zc_time: 0,
             temp_advance: 0,
+        }
+    }
+}
+
+impl BemfState {
+    /// Sync BEMF config from main→ISR published state.
+    pub(crate) fn sync_config(&mut self, filter_level: u8, auto_advance: u8, min_counts: u8) {
+        self.filter_level = filter_level;
+        if auto_advance > 0 {
+            self.temp_advance = auto_advance;
+        }
+        self.min_counts_up = min_counts;
+        self.min_counts_down = min_counts;
+    }
+
+    /// Reset counters after a commutation step.
+    pub(crate) fn reset_for_step(&mut self) {
+        self.counter = 0;
+        self.bad_count = 0;
+    }
+
+    /// Reset all state after commutation timer fires (includes zc_found).
+    pub(crate) fn reset_after_commutation(&mut self) {
+        self.counter = 0;
+        self.bad_count = 0;
+        self.zc_found = false;
+    }
+
+    /// Check if zero-cross has been detected (counter exceeds threshold).
+    pub(crate) fn zero_cross_detected(&self, rising: bool) -> bool {
+        let threshold = if rising {
+            self.min_counts_up
+        } else {
+            self.min_counts_down
+        };
+        !self.zc_found && self.counter > threshold
+    }
+
+    /// Record a zero-cross detection: update timing, compute new CI and wait_time.
+    /// Returns the new commutation interval.
+    pub(crate) fn record_zero_cross(
+        &mut self,
+        interval_count: u16,
+        commutation_interval: u32,
+    ) -> u32 {
+        self.zc_found = true;
+        self.last_zc_time = self.this_zc_time;
+        self.this_zc_time = interval_count;
+        let new_ci = (self.this_zc_time as u32 + 3 * commutation_interval) / 4;
+        let advance = (self.temp_advance as u32 * new_ci) >> crate::constants::ADVANCE_SHIFT;
+        self.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
+        new_ci
+    }
+
+    /// Update CI and wait_time from commutation timer path (non-old-routine).
+    pub(crate) fn update_timing_from_timer(&mut self, commutation_interval: u32) -> u32 {
+        let zc_avg = (self.last_zc_time as u32 + self.this_zc_time as u32) >> 1;
+        let new_ci = (commutation_interval + zc_avg) >> 1;
+        let advance = (new_ci * self.temp_advance as u32) >> crate::constants::ADVANCE_SHIFT;
+        self.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
+        new_ci
+    }
+
+    /// Record timing for comparator ISR zero-cross path.
+    pub(crate) fn record_zc_timing(&mut self, interval_count: u16) {
+        self.last_zc_time = self.this_zc_time;
+        self.this_zc_time = interval_count;
+    }
+
+    /// Get wait_time + 1 for commutation timer setup.
+    pub(crate) fn com_timer_delay(&self) -> u16 {
+        self.wait_time + 1
+    }
+
+    /// Read bad_count (for test assertions).
+    pub fn bad_count(&self) -> u8 {
+        self.bad_count
+    }
+
+    /// Set filter_level (test setup).
+    pub fn set_filter_level(&mut self, v: u8) {
+        self.filter_level = v;
+    }
+
+    /// Set wait_time (test setup).
+    pub fn set_wait_time(&mut self, v: u16) {
+        self.wait_time = v;
+    }
+
+    /// Process one comparator sample. `comp_level` is the raw comparator output
+    /// (true = high). The polarity is inverted internally (matches C: `!getCompOutputLevel()`).
+    pub fn update(&mut self, comp_level: bool, rising: bool) {
+        let current_state = !comp_level;
+        if rising {
+            if current_state {
+                self.counter += 1;
+            } else {
+                self.bad_count += 1;
+                if self.bad_count > self.bad_count_threshold {
+                    self.counter = 0;
+                }
+            }
+        } else if !current_state {
+            self.counter += 1;
+        } else {
+            self.bad_count += 1;
+            if self.bad_count > self.bad_count_threshold {
+                self.counter = 0;
+            }
         }
     }
 }

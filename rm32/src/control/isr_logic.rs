@@ -104,14 +104,11 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
     // Sync main→ISR published state (main computes, ISR applies)
     ctx.counters.tim1_arr = ctx.shared.tim1_arr();
-    ctx.bemf.filter_level = ctx.shared.filter_level();
-    let auto_adv = ctx.shared.auto_advance();
-    if auto_adv > 0 {
-        ctx.bemf.temp_advance = auto_adv;
-    }
-    let min_counts = ctx.shared.min_bemf_counts();
-    ctx.bemf.min_counts_up = min_counts;
-    ctx.bemf.min_counts_down = min_counts;
+    ctx.bemf.sync_config(
+        ctx.shared.filter_level(),
+        ctx.shared.auto_advance(),
+        ctx.shared.min_bemf_counts(),
+    );
 
     // Apply stall boost + duty/current ceilings
     let stall_boost = if ctx.shared.running() {
@@ -151,41 +148,17 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.hal.comp().mask_interrupts();
     let comp_level = ctx.hal.comp().output_level();
-    let current_state = !comp_level;
-    if ctx.commutation.rising {
-        if current_state {
-            ctx.bemf.counter += 1;
-        } else {
-            ctx.bemf.bad_count += 1;
-            if ctx.bemf.bad_count > ctx.bemf.bad_count_threshold {
-                ctx.bemf.counter = 0;
-            }
-        }
-    } else if !current_state {
-        ctx.bemf.counter += 1;
-    } else {
-        ctx.bemf.bad_count += 1;
-        if ctx.bemf.bad_count > ctx.bemf.bad_count_threshold {
-            ctx.bemf.counter = 0;
-        }
-    }
-    let threshold = if ctx.commutation.rising {
-        ctx.bemf.min_counts_up
-    } else {
-        ctx.bemf.min_counts_down
-    };
-    if !ctx.bemf.zc_found && ctx.bemf.counter > threshold {
-        ctx.bemf.zc_found = true;
-        ctx.bemf.last_zc_time = ctx.bemf.this_zc_time;
-        ctx.bemf.this_zc_time = ctx.hal.interval().count() as u16;
+    let rising = ctx.commutation.rising;
+    ctx.bemf.update(comp_level, rising);
+
+    if ctx.bemf.zero_cross_detected(rising) {
+        let interval_count = ctx.hal.interval().count() as u16;
         ctx.hal.interval().set_count(0);
         let ci = ctx.shared.commutation_interval();
-        let new_ci = (ctx.bemf.this_zc_time as u32 + 3 * ci) / 4;
+        let new_ci = ctx.bemf.record_zero_cross(interval_count, ci);
         ctx.shared.set_commutation_interval(new_ci);
-        let advance = (ctx.bemf.temp_advance as u32 * new_ci) >> ADVANCE_SHIFT;
-        ctx.bemf.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
-        let zc = ctx.shared.zero_crosses();
-        if zc < MIN_ZC_FOR_ADVANCE {
+
+        if ctx.shared.zero_crosses() < MIN_ZC_FOR_ADVANCE {
             let step = ctx.commutation.advance();
             let e_com = ctx
                 .commutation
@@ -195,11 +168,12 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.hal.phase().pulse_toggle(step);
             ctx.hal.comp().set_step(step, ctx.commutation.rising);
             ctx.hal.comp().change_input();
-            ctx.bemf.counter = 0;
-            ctx.bemf.bad_count = 0;
+            ctx.bemf.reset_for_step();
             ctx.shared.increment_zero_crosses();
         } else {
-            ctx.hal.com_timer().set_and_enable(ctx.bemf.wait_time + 1);
+            ctx.hal
+                .com_timer()
+                .set_and_enable(ctx.bemf.com_timer_delay());
         }
     }
 }
@@ -228,18 +202,12 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     comp.change_input();
 
     if !shared.old_routine() {
-        let zc_avg = (bemf.last_zc_time as u32 + bemf.this_zc_time as u32) >> 1;
-        let ci = shared.commutation_interval();
-        let new_ci = (ci + zc_avg) >> 1;
+        let new_ci = bemf.update_timing_from_timer(shared.commutation_interval());
         shared.set_commutation_interval(new_ci);
-        let advance = (new_ci * bemf.temp_advance as u32) >> ADVANCE_SHIFT;
-        bemf.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
     }
 
     comp.enable_interrupts();
-    bemf.counter = 0;
-    bemf.bad_count = 0;
-    bemf.zc_found = false;
+    bemf.reset_after_commutation();
     shared.increment_zero_crosses();
 
     let zc = shared.zero_crosses();
@@ -257,14 +225,14 @@ pub fn bemf_zero_cross<C: hal::Comparator, I: hal::IntervalTimer, T: hal::ComTim
     interval: &mut I,
     com_timer: &mut T,
 ) {
-    for _ in 0..bemf.filter_level {
-        if comp.output_level() == commutation.rising {
+    for _ in 0..bemf.filter_level() {
+        if comp.output_level() == commutation.rising() {
             return;
         }
     }
     comp.mask_interrupts();
-    bemf.last_zc_time = bemf.this_zc_time;
-    bemf.this_zc_time = interval.count() as u16;
+    let count = interval.count() as u16;
     interval.set_count(0);
-    com_timer.set_and_enable(bemf.wait_time + 1);
+    bemf.record_zc_timing(count);
+    com_timer.set_and_enable(bemf.com_timer_delay());
 }
