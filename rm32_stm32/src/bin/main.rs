@@ -94,15 +94,13 @@ fn main() -> ! {
     isr::init_isr_state(isr_state);
 
     // --- Build main loop state ---
-    let mut main_state = MainState::new(rm32::main_state::BoardParams {
-        voltage_divider: BOARD.voltage_divider,
-        millivolt_per_amp: BOARD.millivolt_per_amp,
-        current_offset: BOARD.current_offset,
-        stall_protect_interval: BOARD.stall_protect_interval,
-        use_ntc: BOARD.use_ntc,
-        timer1_max_arr: Chip::TIM1_AUTORELOAD,
-        cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
-    });
+    let mut main_state = MainState::new(
+        &BOARD,
+        &rm32::main_state::ChipParams {
+            timer1_max_arr: Chip::TIM1_AUTORELOAD,
+            cpu_mhz: Chip::CPU_FREQUENCY_MHZ as u8,
+        },
+    );
 
     // --- Check bootloader device info for dynamic EEPROM address ---
     let eeprom_address = {
