@@ -71,9 +71,14 @@ pub enum CrsfResult {
 /// CRSF frame parser with internal byte buffer.
 pub struct CrsfParser {
     buf: heapless::Vec<u8, 64>,
-    /// Which channel index to use as throttle (default: 2)
-    pub throttle_channel: u8,
 }
+
+/// CRSF throttle channel index (AETR standard: channel 3, 0-indexed = 2).
+///
+/// C firmware uses `crsf_input_channel = 1` (0-indexed channel 2 in their
+/// convention). The Rust port uses index 2 directly, which is the same
+/// physical channel (Throttle in AETR mapping).
+pub const THROTTLE_CHANNEL: usize = 2;
 
 impl Default for CrsfParser {
     fn default() -> Self {
@@ -85,7 +90,6 @@ impl CrsfParser {
     pub fn new() -> Self {
         Self {
             buf: heapless::Vec::new(),
-            throttle_channel: 2,
         }
     }
 
@@ -312,5 +316,67 @@ mod tests {
             let _ = parser.feed(b);
         }
         // Parser should have synced and returned a result
+    }
+
+    #[test]
+    fn throttle_channel_extracts_correct_channel() {
+        let mut parser = CrsfParser::new();
+
+        // Build a frame where channel 2 (THROTTLE_CHANNEL) has value 992 (center)
+        // and channel 0 has value 0.
+        let mut payload = [0u8; 22];
+        // Channel 2: bits [22..32] in the packed stream
+        // Channel 2 starts at bit 22: byte 2 bit 6, byte 3, byte 4 bit 0-1
+        // Value 992 = 0x3E0 = 0b01111100000
+        // Bit 22 = byte 2 bit 6: lower 2 bits of value in byte 2 bits [6..7]
+        // 0b01111100000 → low 2 bits = 0b00, next 8 bits = 0b11111000, top 1 bit = 0b0
+        payload[2] = 0b00_000000; // bits 6-7 = low 2 bits of ch2 = 0b00
+        payload[3] = 0b11111000; // bits 0-7 = next 8 bits of ch2
+        payload[4] = 0b0000000_0; // bit 0 = top bit of ch2 = 0
+
+        // Actually, let's just use unpack_channels to verify the encoding
+        let ch = unpack_channels(&payload);
+        // Channel 2 should be 992... let me compute properly.
+        // It's easier to set all channels to a known pattern and check.
+
+        // Use all-zeros payload, set channel 2 via brute force bit packing
+        let mut payload = [0u8; 22];
+        // Pack channel 2 = 1000 at bit offset 22
+        let value: u32 = 1000;
+        let bit_offset = 22;
+        for bit in 0..11 {
+            let b = (value >> bit) & 1;
+            let pos = bit_offset + bit;
+            let byte_idx = pos / 8;
+            let bit_idx = pos % 8;
+            payload[byte_idx as usize] |= (b as u8) << bit_idx;
+        }
+        let ch = unpack_channels(&payload);
+        assert_eq!(ch[THROTTLE_CHANNEL], 1000, "channel 2 should be 1000");
+        assert_eq!(ch[0], 0, "channel 0 should be 0");
+        assert_eq!(ch[1], 0, "channel 1 should be 0");
+
+        // Now feed this as a full CRSF frame and verify throttle extraction
+        let mut frame = [0u8; 26];
+        frame[0] = CRSF_SYNC;
+        frame[1] = 24;
+        frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
+        frame[3..25].copy_from_slice(&payload);
+        frame[25] = crc8_dvb_s2(&frame[2..25]);
+
+        for i in 0..25 {
+            assert!(parser.feed(frame[i]).is_none());
+        }
+        match parser.feed(frame[25]) {
+            Some(CrsfResult::Channels(channels)) => {
+                let throttle = CrsfParser::channel_to_throttle(channels[THROTTLE_CHANNEL]);
+                // CRSF 1000 → (1000-172)*2047/(1811-172) = 1034
+                assert_eq!(
+                    throttle, 1034,
+                    "CRSF channel value 1000 should map to ESC throttle 1034"
+                );
+            }
+            other => panic!("expected Channels, got {:?}", other),
+        }
     }
 }
