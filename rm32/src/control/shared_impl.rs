@@ -95,6 +95,15 @@ impl IsrTiming for TestShared {
     fn e_com_time(&self) -> i32 {
         self.e_com_time.get()
     }
+    fn set_e_com_time(&self, v: i32) {
+        self.e_com_time.set(v);
+    }
+    fn interval_timer_count(&self) -> u32 {
+        self.interval_timer_count.get()
+    }
+    fn set_interval_timer_count(&self, v: u32) {
+        self.interval_timer_count.set(v);
+    }
     fn signal_timeout(&self) -> u16 {
         self.signal_timeout.get()
     }
