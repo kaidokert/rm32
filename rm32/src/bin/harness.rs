@@ -312,15 +312,17 @@ impl Harness {
         // Dispatch DShot commands via library CommandProcessor
         if actions.dshot_command > 0 {
             use rm32::dshot_commands::CommandResult;
+            let mut fwd = self.commutation.forward();
             let result = self.cmd_proc.process(
                 actions.dshot_command,
                 self.shared.armed(),
                 self.shared.running(),
                 &mut self.config,
-                &mut self.commutation.forward,
+                &mut fwd,
                 &mut self.edt_armed,
                 false, // edt_arm_enable
             );
+            self.commutation.set_forward(fwd);
             match result {
                 CommandResult::SaveSettings => {
                     self.shared.set_save_settings_flag(true);
@@ -331,7 +333,7 @@ impl Harness {
                 _ => {}
             }
             // Sync direction change to shared state (commands may flip forward)
-            self.shared.set_forward(self.commutation.forward);
+            self.shared.set_forward(self.commutation.forward());
         }
     }
 
@@ -371,9 +373,9 @@ impl Harness {
         isr_logic::ten_khz_tick(&mut ctx);
 
         // Sync desync_check from commutation before main.tick()
-        if self.commutation.desync_check {
-            self.main.desync_check = true;
-            self.commutation.desync_check = false;
+        if self.commutation.desync_check() {
+            self.main.set_desync_check(true);
+            self.commutation.set_desync_check(false);
         }
 
         // --- Main loop (shared library function) ---
@@ -402,31 +404,31 @@ impl Harness {
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
-            self.commutation.step,
-            self.commutation.forward as i32,
-            self.duty.cycle,
+            self.commutation.step(),
+            self.commutation.forward() as i32,
+            self.duty.cycle(),
             self.shared.duty_cycle_setpoint(),
-            self.duty.adjusted,
+            self.duty.adjusted(),
             self.shared.commutation_interval(),
-            self.main.timing.average_interval,
+            self.main.timing().average_interval(),
             self.shared.e_com_time(),
-            self.main.timing.e_rpm,
+            self.main.timing().e_rpm(),
             self.shared.zero_crosses(),
-            self.system.input_state.input,
+            self.system.input_state.input(),
             self.shared.adjusted_input(),
             self.shared.newinput(),
-            self.bemf.counter,
-            self.bemf.zc_found as i32,
-            self.commutation.rising as i32,
+            self.bemf.counter(),
+            self.bemf.zc_found() as i32,
+            self.commutation.rising() as i32,
             self.shared.old_routine() as i32,
             self.shared.stepper_sine() as i32,
             self.shared.signal_timeout(),
             self.counters.armed_timeout_count,
-            self.main.measurements.battery_voltage.0,
-            self.main.measurements.actual_current.0,
-            self.main.measurements.degrees_celsius.0,
-            self.duty.last,
-            self.system.input_state.prop_brake_active as i32,
+            self.main.measurements().battery_voltage().0,
+            self.main.measurements().actual_current().0,
+            self.main.measurements().degrees_celsius().0,
+            self.duty.last(),
+            self.system.input_state.prop_brake_active() as i32,
             self.shared.input_set() as i32,
             self.dshot as i32,
             self.servo_pwm as i32,
@@ -434,7 +436,7 @@ impl Harness {
             self.hal.pwm.arr,
             self.hal.pwm.duty_count,
             self.shared.duty_maximum(),
-            self.bemf.filter_level,
+            self.bemf.filter_level(),
             self.shared.send_telemetry() as i32,
             self.shared.send_esc_info_flag() as i32,
         );
@@ -518,9 +520,9 @@ impl Harness {
             "servoPwm" => self.servo_pwm = v != 0,
             "forward" => {
                 self.shared.set_forward(v != 0);
-                self.commutation.forward = v != 0;
+                self.commutation.set_forward(v != 0);
             }
-            "step" => self.commutation.step = v as u8,
+            "step" => self.commutation.set_step(v as u8),
             "old_routine" => self.shared.set_old_routine(v != 0),
             "zero_crosses" => self.shared.set_zero_crosses(v as u32),
             "commutation_interval" => self.shared.set_commutation_interval(v as u32),
@@ -529,9 +531,10 @@ impl Harness {
             "EDT_ARM_ENABLE" => {}
             "dshot_telemetry" => self.shared.set_dshot_telemetry(v != 0),
             "signaltimeout" => self.shared.set_signal_timeout(v as u16),
-            "cell_count" => self.main.cell_count = v as u8,
+            "cell_count" => self.main.cell_count = v as u8, // pub field
             "battery_voltage" => {
-                self.main.measurements.battery_voltage = rm32::units::MilliVolts(v as u16);
+                self.main
+                    .set_battery_voltage(rm32::units::MilliVolts(v as u16));
                 // Also set ADC raw so main.tick() doesn't overwrite on next cycle
                 // Approximate: raw = mV * 100 / (3300 * divider / 4095)
                 // For divider=110: raw ≈ mV * 4095 / 3630
@@ -541,28 +544,29 @@ impl Harness {
                 self.adc.temperature = v as i16;
             }
             "actual_current" => {
-                self.main.measurements.actual_current = rm32::units::MilliAmps(v as i16);
+                self.main
+                    .set_actual_current(rm32::units::MilliAmps(v as i16));
                 // Route through ADC mock for persistence
                 self.adc.current = ((v as i32 * 20 + 498 * 100) * 41 / 3300).max(0) as u16;
             }
-            "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8,
-            "bemf_timeout" => self.main.protection.bemf_timeout = v as u8,
-            "prop_brake_active" => self.system.input_state.prop_brake_active = v != 0,
+            "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8, // pub field
+            "bemf_timeout" => self.main.protection.bemf_timeout = v as u8, // pub field
+            "prop_brake_active" => self.system.input_state.set_prop_brake_active(v != 0),
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
-            "last_duty_cycle" => self.duty.last = v as u16,
-            "use_current_limit" => self.main.pid.set_use_current_limit(v != 0),
-            "use_speed_control_loop" => self.main.pid.set_use_speed_control(v != 0),
+            "last_duty_cycle" => self.duty.set_last(v as u16),
+            "use_current_limit" => self.main.set_use_current_limit(v != 0),
+            "use_speed_control_loop" => self.main.set_use_speed_control(v != 0),
             "send_esc_info_flag" => {
                 self.shared.set_send_esc_info_flag(v != 0);
             }
             "send_telemetry" => self.shared.set_send_telemetry(v != 0),
-            "low_voltage_count" => self.main.protection.low_voltage_count = v as u16,
+            "low_voltage_count" => self.main.protection.set_low_voltage_count(v as u16),
             "out_put" => {}
-            "duty_cycle" => self.duty.cycle = v as u16,
+            "duty_cycle" => self.duty.set_cycle(v as u16),
             "adjusted_input" => self.shared.set_adjusted_input(v as u16),
-            "desync_check" => self.main.desync_check = v != 0,
-            "average_interval" => self.main.timing.average_interval = v as u32,
-            "last_average_interval" => self.main.timing.last_average_interval = v as u32,
+            "desync_check" => self.main.set_desync_check(v != 0),
+            "average_interval" => self.main.set_average_interval(v as u32),
+            "last_average_interval" => self.main.set_last_average_interval(v as u32),
             "process_adc" => {}
             // Calibration state (not implemented in v2)
             "calibration_required"
@@ -597,7 +601,7 @@ impl Harness {
             "eeprom.beep_volume" => self.config.beep_volume = v as u8,
             "eeprom.motor_kv" => {
                 self.config.motor_kv = v as u8;
-                self.main.motor_kv = (v as u16) * 40 + 20;
+                self.main.set_motor_kv((v as u16) * 40 + 20);
             }
             "eeprom.motor_poles" => self.config.motor_poles = v as u8,
             "eeprom.advance_level" => self.config.advance_level = v as u8,
@@ -650,13 +654,13 @@ fn main() {
             );
             harness.main.config = harness.config;
             harness.main.apply_motor_config(&mc);
-            harness.duty.minimum = mc.minimum_duty;
-            harness.duty.min_startup = mc.min_startup_duty;
-            harness.duty.startup_max = mc.startup_max_duty;
+            harness.duty.minimum = mc.minimum_duty; // pub field
+            harness.duty.min_startup = mc.min_startup_duty; // pub field
+            harness.duty.startup_max = mc.startup_max_duty; // pub field
             // Apply advance level
             let adv = harness.config.advance_level;
             if (10..43).contains(&adv) {
-                harness.bemf.temp_advance = adv - 10;
+                harness.bemf.set_temp_advance(adv - 10);
             }
             println!("ok");
             io::stdout().flush().unwrap();

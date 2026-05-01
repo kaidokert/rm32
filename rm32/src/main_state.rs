@@ -89,20 +89,20 @@ impl embedded_hal::digital::ErrorType for NoLed {
 /// Main-loop exclusive state, generic over optional LED pin.
 pub struct MainState<LED: OutputPin = NoLed> {
     pub protection: ProtectionState,
-    pub measurements: Measurements,
+    pub(crate) measurements: Measurements,
     pub config: EepromConfig,
 
     // PID controllers (main computes adjustments, ISR applies)
-    pub pid: PidState,
+    pub(crate) pid: PidState,
 
     // Timing (main-loop side — ISR timing is in SharedComm)
-    pub timing: TimingState,
+    pub(crate) timing: TimingState,
     // Board-level hardware constants (set once, never change at runtime)
     pub(crate) board: BoardParams,
     pub cell_count: u8,
-    pub motor_kv: u16,
+    pub(crate) motor_kv: u16,
     pub(crate) low_cell_volt_cutoff: u16,
-    pub desync_check: bool,
+    pub(crate) desync_check: bool,
     pub(crate) last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
@@ -160,6 +160,73 @@ impl MainState<NoLed> {
 }
 
 impl<LED: OutputPin> MainState<LED> {
+    /// Read-only access to measurements.
+    pub fn measurements(&self) -> &Measurements {
+        &self.measurements
+    }
+
+    /// Read-only access to timing state.
+    pub fn timing(&self) -> &TimingState {
+        &self.timing
+    }
+
+    /// Read-only access to PID state.
+    pub fn pid(&self) -> &PidState {
+        &self.pid
+    }
+
+    // --- Harness config injection setters ---
+
+    /// Set use_current_limit on the PID controller.
+    pub fn set_use_current_limit(&mut self, v: bool) {
+        self.pid.set_use_current_limit(v);
+    }
+
+    /// Set use_speed_control on the PID controller.
+    pub fn set_use_speed_control(&mut self, v: bool) {
+        self.pid.set_use_speed_control(v);
+    }
+
+    /// Set average_interval on timing state.
+    pub fn set_average_interval(&mut self, v: u32) {
+        self.timing.set_average_interval(v);
+    }
+
+    /// Set last_average_interval on timing state.
+    pub fn set_last_average_interval(&mut self, v: u32) {
+        self.timing.set_last_average_interval(v);
+    }
+
+    /// Set battery_voltage measurement.
+    pub fn set_battery_voltage(&mut self, v: crate::units::MilliVolts) {
+        self.measurements.set_battery_voltage(v);
+    }
+
+    /// Set actual_current measurement.
+    pub fn set_actual_current(&mut self, v: crate::units::MilliAmps) {
+        self.measurements.set_actual_current(v);
+    }
+
+    /// Read motor_kv.
+    pub fn motor_kv(&self) -> u16 {
+        self.motor_kv
+    }
+
+    /// Set motor_kv.
+    pub fn set_motor_kv(&mut self, v: u16) {
+        self.motor_kv = v;
+    }
+
+    /// Read desync_check flag.
+    pub fn desync_check(&self) -> bool {
+        self.desync_check
+    }
+
+    /// Set desync_check flag.
+    pub fn set_desync_check(&mut self, v: bool) {
+        self.desync_check = v;
+    }
+
     /// Apply EEPROM-derived motor configuration.
     ///
     /// Called after loading config from flash (firmware) or after `load_eeprom`

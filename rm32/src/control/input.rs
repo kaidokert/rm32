@@ -18,17 +18,32 @@ use crate::shared_comm::SharedComm;
 /// Persistent state for bidirectional input processing.
 #[derive(Clone, Default)]
 pub struct InputState {
-    pub prop_brake_active: bool,
+    pub(crate) prop_brake_active: bool,
     pub(crate) return_to_center: bool,
     pub(crate) reverse_speed_threshold: u16,
     /// Mapped input value after all processing (0-2047).
     /// This is a local copy — the authoritative value is `shared.adjusted_input()`.
-    pub input: u16,
+    pub(crate) input: u16,
     /// Cached input mode — recomputed every tick in SystemTick::tick_input.
     pub(crate) mode: InputMode,
 }
 
 impl InputState {
+    /// Read prop_brake_active flag.
+    pub fn prop_brake_active(&self) -> bool {
+        self.prop_brake_active
+    }
+
+    /// Set prop_brake_active flag.
+    pub fn set_prop_brake_active(&mut self, v: bool) {
+        self.prop_brake_active = v;
+    }
+
+    /// Read mapped input value.
+    pub fn input(&self) -> u16 {
+        self.input
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             reverse_speed_threshold: 1500,
