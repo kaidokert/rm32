@@ -4,17 +4,18 @@ use crate::functions::get_crc8;
 
 /// KISS telemetry packet (10 bytes)
 #[repr(C, packed)]
-pub struct KissTelemPacket {
-    pub temperature: i8,
-    pub voltage_h: u8,
-    pub voltage_l: u8,
-    pub current_h: u8,
-    pub current_l: u8,
-    pub consumption_h: u8,
-    pub consumption_l: u8,
-    pub erpm_h: u8,
-    pub erpm_l: u8,
-    pub crc: u8,
+#[allow(dead_code)]
+struct KissTelemPacket {
+    temperature: i8,
+    voltage_h: u8,
+    voltage_l: u8,
+    current_h: u8,
+    current_l: u8,
+    consumption_h: u8,
+    consumption_l: u8,
+    erpm_h: u8,
+    erpm_l: u8,
+    crc: u8,
 }
 
 /// Build a KISS telemetry packet into a 10-byte buffer.

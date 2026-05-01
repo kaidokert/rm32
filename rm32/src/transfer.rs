@@ -14,11 +14,11 @@ use crate::signal;
 pub struct TransferState {
     pub servo: ServoState,
     // Unarmed DShot frame averaging
-    pub average_count: u8,
-    pub average_packet_length: u32,
+    average_count: u8,
+    average_packet_length: u32,
     // Calibration entry
-    pub enter_calibration_count: u8,
-    pub last_input: u16,
+    enter_calibration_count: u8,
+    last_input: u16,
 }
 
 /// Actions the caller (ISR) should take after transfer complete.
@@ -30,8 +30,6 @@ pub struct TransferActions {
     pub input_detected: bool,
     pub input_is_dshot: bool,
     pub input_is_servo: bool,
-    pub save_settings: bool,
-    pub play_tone: u8,      // 0=none, 1=default, 2=changed, 3=beacon
     pub dshot_command: u16, // 0=none, 1-47=DShot command to dispatch
     pub frametime_high: Option<u16>,
     pub frametime_low: Option<u16>,
@@ -135,12 +133,9 @@ impl TransferState {
                             actions.signal_timeout_reset = true;
                         }
                         ServoResult::CalibrationHighDone => {
-                            actions.play_tone = 1; // default tone
                             actions.signal_timeout_reset = true;
                         }
                         ServoResult::CalibrationDone { .. } => {
-                            actions.save_settings = true;
-                            actions.play_tone = 2; // changed tone
                             actions.signal_timeout_reset = true;
                         }
                     }
@@ -180,7 +175,6 @@ impl TransferState {
                     if self.enter_calibration_count > crate::constants::CALIBRATION_ENTRY_COUNT
                         && !self.servo.high_calibration_set
                     {
-                        actions.play_tone = 3; // beacon
                         self.servo.calibration_required = true;
                         self.enter_calibration_count = 0;
                     }

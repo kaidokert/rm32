@@ -25,11 +25,11 @@ pub const EDT_DEINIT_FRAME: u16 = 0xEFF;
 #[derive(Clone, Default)]
 pub struct EdtScheduler {
     /// Frame counter (increments each telemetry response)
-    pub counter: u16,
+    counter: u16,
     /// Whether the last frame sent was an extended frame
-    pub last_sent_extended: bool,
+    last_sent_extended: bool,
     /// Whether EDT is active
-    pub active: bool,
+    active: bool,
     /// Pending init frame to send
     pub send_init: bool,
     /// Pending deinit frame to send

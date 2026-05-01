@@ -9,14 +9,14 @@ pub struct ServoState {
     pub high_threshold: u16,
     pub neutral: u16,
     pub dead_band: u8,
-    pub max_deviation: u16,
-    pub raw_input: i32,
+    max_deviation: u16,
+    raw_input: i32,
     // Calibration
-    pub calibration_required: bool,
-    pub high_calibration_set: bool,
-    pub high_calibration_counts: u8,
-    pub low_calibration_counts: u8,
-    pub last_high_threshold: u16,
+    pub(crate) calibration_required: bool,
+    pub(crate) high_calibration_set: bool,
+    high_calibration_counts: u8,
+    low_calibration_counts: u8,
+    last_high_threshold: u16,
 }
 
 impl Default for ServoState {

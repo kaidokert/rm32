@@ -189,11 +189,7 @@ fn main() -> ! {
     // --- ADC + Telemetry (returned from init()) ---
 
     // --- Sine mode state ---
-    let mut sine_positions = rm32::sine::PhasePositions {
-        a: 0,
-        b: 120,
-        c: 240,
-    };
+    let mut sine_positions = rm32::sine::PhasePositions::new();
 
     // --- Enable global interrupts ---
     // SAFETY: All ISR state has been initialized and moved to globals above.
