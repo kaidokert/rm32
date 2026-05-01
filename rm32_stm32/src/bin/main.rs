@@ -168,10 +168,12 @@ fn main() -> ! {
             .set_duty_limits(minimum_duty_cycle, min_startup_duty, startup_max_duty);
         // Apply servo EEPROM calibration to transfer state
         if isr.config.eeprom_version > 0 {
-            isr.transfer.servo.low_threshold = motor_cfg.servo_low;
-            isr.transfer.servo.high_threshold = motor_cfg.servo_high;
-            isr.transfer.servo.neutral = motor_cfg.servo_neutral;
-            isr.transfer.servo.dead_band = isr.config.servo_dead_band;
+            isr.transfer.servo.set_calibration(
+                motor_cfg.servo_low,
+                motor_cfg.servo_high,
+                motor_cfg.servo_neutral,
+                isr.config.servo_dead_band,
+            );
         }
         // Apply dead-time override to duty thresholds
         if dead_time_override > 0 {

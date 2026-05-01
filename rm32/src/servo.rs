@@ -5,18 +5,43 @@ use crate::functions::{get_abs_dif, map};
 /// Servo input processing state.
 #[derive(Clone)]
 pub struct ServoState {
-    pub low_threshold: u16,
-    pub high_threshold: u16,
-    pub neutral: u16,
-    pub dead_band: u8,
+    low_threshold: u16,
+    high_threshold: u16,
+    neutral: u16,
+    dead_band: u8,
     max_deviation: u16,
     raw_input: i32,
     // Calibration
-    pub(crate) calibration_required: bool,
-    pub(crate) high_calibration_set: bool,
+    calibration_required: bool,
+    high_calibration_set: bool,
     high_calibration_counts: u8,
     low_calibration_counts: u8,
     last_high_threshold: u16,
+}
+
+impl ServoState {
+    /// Whether calibration is needed (transfer logic checks this).
+    pub(crate) fn calibration_required(&self) -> bool {
+        self.calibration_required
+    }
+
+    /// Set calibration required flag.
+    pub(crate) fn set_calibration_required(&mut self, v: bool) {
+        self.calibration_required = v;
+    }
+
+    /// Whether high calibration threshold has been set.
+    pub(crate) fn high_calibration_set(&self) -> bool {
+        self.high_calibration_set
+    }
+
+    /// Set servo calibration thresholds from EEPROM-derived motor config.
+    pub fn set_calibration(&mut self, low: u16, high: u16, neutral: u16, dead_band: u8) {
+        self.low_threshold = low;
+        self.high_threshold = high;
+        self.neutral = neutral;
+        self.dead_band = dead_band;
+    }
 }
 
 impl Default for ServoState {

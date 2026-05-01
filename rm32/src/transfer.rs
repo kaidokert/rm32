@@ -160,7 +160,7 @@ impl TransferState {
             }
 
             // Calibration entry detection
-            if adjusted_input == 0 && !self.servo.calibration_required {
+            if adjusted_input == 0 && !self.servo.calibration_required() {
                 *zero_input_count += 1;
             } else if !disable_stick_cal {
                 *zero_input_count = 0;
@@ -173,9 +173,9 @@ impl TransferState {
                         self.enter_calibration_count += 1;
                     }
                     if self.enter_calibration_count > crate::constants::CALIBRATION_ENTRY_COUNT
-                        && !self.servo.high_calibration_set
+                        && !self.servo.high_calibration_set()
                     {
-                        self.servo.calibration_required = true;
+                        self.servo.set_calibration_required(true);
                         self.enter_calibration_count = 0;
                     }
                     self.last_input = adjusted_input;
