@@ -14,8 +14,8 @@ use crate::shared_comm::SharedComm;
 
 /// Counters and config owned exclusively by the ISR tick.
 pub struct TickCounters {
-    pub(crate) armed_timeout_count: u32,
-    pub(crate) tim1_arr: u16,
+    armed_timeout_count: u32,
+    tim1_arr: u16,
 }
 
 impl TickCounters {
