@@ -502,47 +502,24 @@ impl crate::shared_comm::IsrTiming for SharedState {
     }
 }
 
-impl crate::shared_comm::SharedComm for SharedState {
-    fn input_set(&self) -> bool {
-        self.input_set()
-    }
-    fn set_input_set(&self, v: bool) {
-        self.set_input_set(v);
-    }
-    fn dshot_telemetry(&self) -> bool {
-        self.dshot_telemetry()
-    }
-    fn is_dshot(&self) -> bool {
-        self.dshot()
-    }
-    fn set_is_dshot(&self, v: bool) {
-        self.set_dshot(v);
-    }
-
-    fn newinput(&self) -> u16 {
-        self.newinput()
-    }
-    fn set_newinput(&self, v: u16) {
-        self.set_newinput(v);
-    }
+impl crate::shared_comm::MainControl for SharedState {
     fn adjusted_input(&self) -> u16 {
-        self.adjusted_input()
+        SharedState::adjusted_input(self)
     }
     fn set_adjusted_input(&self, v: u16) {
-        self.set_adjusted_input(v);
+        SharedState::set_adjusted_input(self, v);
     }
     fn duty_cycle_setpoint(&self) -> u16 {
-        self.duty_cycle_setpoint()
+        SharedState::duty_cycle_setpoint(self)
     }
     fn set_duty_cycle_setpoint(&self, v: u16) {
-        self.set_duty_cycle_setpoint(v);
+        SharedState::set_duty_cycle_setpoint(self, v);
     }
-
     fn stall_protection_adjust(&self) -> u16 {
-        self.stall_protection_adjust()
+        SharedState::stall_protection_adjust(self)
     }
     fn set_stall_protection_adjust(&self, v: u16) {
-        self.set_stall_protection_adjust(v);
+        SharedState::set_stall_protection_adjust(self, v);
     }
     fn current_limit_adjust(&self) -> u16 {
         SharedState::current_limit_adjust(self)
@@ -550,28 +527,11 @@ impl crate::shared_comm::SharedComm for SharedState {
     fn set_current_limit_adjust(&self, v: u16) {
         SharedState::set_current_limit_adjust(self, v);
     }
-
-    fn battery_voltage(&self) -> u16 {
-        self.battery_voltage()
+    fn prop_brake_active(&self) -> bool {
+        SharedState::prop_brake_active(self)
     }
-
-    fn send_telemetry(&self) -> bool {
-        self.send_telemetry()
-    }
-    fn set_send_telemetry(&self, v: bool) {
-        self.set_send_telemetry(v);
-    }
-    fn save_settings_flag(&self) -> bool {
-        self.save_settings_flag()
-    }
-    fn set_save_settings_flag(&self, v: bool) {
-        self.set_save_settings_flag(v);
-    }
-    fn send_esc_info_flag(&self) -> bool {
-        self.send_esc_info_flag()
-    }
-    fn set_send_esc_info_flag(&self, v: bool) {
-        self.set_send_esc_info_flag(v);
+    fn set_prop_brake_active(&self, v: bool) {
+        SharedState::set_prop_brake_active(self, v);
     }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
@@ -612,10 +572,49 @@ impl crate::shared_comm::SharedComm for SharedState {
     fn set_degrees_celsius(&self, v: i16) {
         SharedState::set_degrees_celsius(self, v);
     }
-    fn prop_brake_active(&self) -> bool {
-        SharedState::prop_brake_active(self)
+    fn battery_voltage(&self) -> u16 {
+        SharedState::battery_voltage(self)
     }
-    fn set_prop_brake_active(&self, v: bool) {
-        SharedState::set_prop_brake_active(self, v);
+}
+
+impl crate::shared_comm::SharedComm for SharedState {
+    fn input_set(&self) -> bool {
+        SharedState::input_set(self)
+    }
+    fn set_input_set(&self, v: bool) {
+        SharedState::set_input_set(self, v);
+    }
+    fn dshot_telemetry(&self) -> bool {
+        SharedState::dshot_telemetry(self)
+    }
+    fn is_dshot(&self) -> bool {
+        SharedState::dshot(self)
+    }
+    fn set_is_dshot(&self, v: bool) {
+        SharedState::set_dshot(self, v);
+    }
+    fn newinput(&self) -> u16 {
+        SharedState::newinput(self)
+    }
+    fn set_newinput(&self, v: u16) {
+        SharedState::set_newinput(self, v);
+    }
+    fn send_telemetry(&self) -> bool {
+        SharedState::send_telemetry(self)
+    }
+    fn set_send_telemetry(&self, v: bool) {
+        SharedState::set_send_telemetry(self, v);
+    }
+    fn save_settings_flag(&self) -> bool {
+        SharedState::save_settings_flag(self)
+    }
+    fn set_save_settings_flag(&self, v: bool) {
+        SharedState::set_save_settings_flag(self, v);
+    }
+    fn send_esc_info_flag(&self) -> bool {
+        SharedState::send_esc_info_flag(self)
+    }
+    fn set_send_esc_info_flag(&self, v: bool) {
+        SharedState::set_send_esc_info_flag(self, v);
     }
 }
