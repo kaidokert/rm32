@@ -75,9 +75,10 @@ pub struct CrsfParser {
 
 /// CRSF throttle channel index (AETR standard: channel 3, 0-indexed = 2).
 ///
-/// C firmware uses `crsf_input_channel = 1` (0-indexed channel 2 in their
-/// convention). The Rust port uses index 2 directly, which is the same
-/// physical channel (Throttle in AETR mapping).
+/// C firmware declares `crsf_input_channel = 1` but never references it
+/// (CRSF support is behind an uncompiled `USE_CRSF_INPUT` flag).
+/// This implementation uses the AETR convention where Throttle is channel 3
+/// (0-indexed = 2).
 pub const THROTTLE_CHANNEL: usize = 2;
 
 impl Default for CrsfParser {
@@ -322,24 +323,7 @@ mod tests {
     fn throttle_channel_extracts_correct_channel() {
         let mut parser = CrsfParser::new();
 
-        // Build a frame where channel 2 (THROTTLE_CHANNEL) has value 992 (center)
-        // and channel 0 has value 0.
-        let mut payload = [0u8; 22];
-        // Channel 2: bits [22..32] in the packed stream
-        // Channel 2 starts at bit 22: byte 2 bit 6, byte 3, byte 4 bit 0-1
-        // Value 992 = 0x3E0 = 0b01111100000
-        // Bit 22 = byte 2 bit 6: lower 2 bits of value in byte 2 bits [6..7]
-        // 0b01111100000 → low 2 bits = 0b00, next 8 bits = 0b11111000, top 1 bit = 0b0
-        payload[2] = 0b00_000000; // bits 6-7 = low 2 bits of ch2 = 0b00
-        payload[3] = 0b11111000; // bits 0-7 = next 8 bits of ch2
-        payload[4] = 0b0000000_0; // bit 0 = top bit of ch2 = 0
-
-        // Actually, let's just use unpack_channels to verify the encoding
-        let ch = unpack_channels(&payload);
-        // Channel 2 should be 992... let me compute properly.
-        // It's easier to set all channels to a known pattern and check.
-
-        // Use all-zeros payload, set channel 2 via brute force bit packing
+        // Pack channel 2 (THROTTLE_CHANNEL) = 1000 via bit-level packing
         let mut payload = [0u8; 22];
         // Pack channel 2 = 1000 at bit offset 22
         let value: u32 = 1000;
