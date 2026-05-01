@@ -830,4 +830,40 @@ mod tests {
         d.ramp_limit(0, 0, 200, 1000, false); // last=100 < 150
         assert_eq!(d.cycle(), 102, "low duty should use max_ramp_startup=2");
     }
+
+    // --- Voltage-based ramp tests ---
+
+    /// Voltage-based ramp at low battery → high max_change (10).
+    #[test]
+    fn ramp_voltage_low_battery_high_change() {
+        let mut d = ramp_test_duty(400, 500);
+        // battery=800mV (low end), commutation_interval=300 (> 200 threshold)
+        d.ramp_limit(800, 300, 200, 1000, true);
+        // map(800, 800, 2200, 10, 1) = 10, ci>200 so no 3x
+        assert_eq!(d.cycle(), 410, "low voltage should give max_change=10");
+    }
+
+    /// Voltage-based ramp at high battery → low max_change (1).
+    #[test]
+    fn ramp_voltage_high_battery_low_change() {
+        let mut d = ramp_test_duty(400, 500);
+        // battery=2200mV (high end), commutation_interval=300
+        d.ramp_limit(2200, 300, 200, 1000, true);
+        // map(2200, 800, 2200, 10, 1) = 1
+        assert_eq!(d.cycle(), 401, "high voltage should give max_change=1");
+    }
+
+    /// Voltage-based ramp at fast commutation applies 3x multiplier.
+    #[test]
+    fn ramp_voltage_fast_commutation_3x() {
+        let mut d = ramp_test_duty(400, 500);
+        // battery=800mV, commutation_interval=100 (<= 200 threshold) → 3x
+        d.ramp_limit(800, 100, 200, 1000, true);
+        // map(800, 800, 2200, 10, 1) = 10, ci<=200 so 10*3=30
+        assert_eq!(
+            d.cycle(),
+            430,
+            "fast commutation should apply 3x multiplier"
+        );
+    }
 }
