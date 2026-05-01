@@ -229,3 +229,135 @@ impl Default for ProtectionState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // These tests mirror the C Catch2 tests in tests/test_tenkhz.cpp.
+
+    /// Mirrors C: "tenKhzRoutine current limit PID at 1kHz"
+    /// C setup: currentPid.Kp=100, actual_current=5000, target=2000,
+    ///          use_current_limit_adjust=2000
+    /// C assert: use_current_limit_adjust < 2000
+    #[test]
+    fn current_limit_pid_reduces_ceiling_when_over_target() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(100, 0, 0);
+
+        let actual_current = 5000i16; // mA — above target
+        let target = 10 * 200; // config.current_limit=10 → target=2000
+        let min_duty = 50; // minimum_duty_cycle.min(50) * 10
+
+        let ceiling = pid.tick_current_limit(actual_current, target, min_duty, true);
+        assert!(ceiling < 2000, "ceiling={ceiling}, expected < 2000");
+    }
+
+    /// Verify ceiling doesn't go below min_duty floor.
+    #[test]
+    fn current_limit_pid_clamps_to_min_duty() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(10000, 0, 0); // aggressive gain
+
+        let ceiling = pid.tick_current_limit(30000, 1000, 500, true);
+        assert!(
+            ceiling >= 500,
+            "ceiling={ceiling}, expected >= 500 (min_duty)"
+        );
+    }
+
+    /// When not running or not enabled, ceiling resets to 2000.
+    #[test]
+    fn current_limit_pid_resets_when_inactive() {
+        let mut pid = PidState::default();
+        pid.set_use_current_limit(true);
+        pid.set_current_gains(100, 0, 0);
+
+        // Drive ceiling down
+        pid.tick_current_limit(5000, 2000, 50, true);
+        let reduced = pid.tick_current_limit(5000, 2000, 50, true);
+        assert!(reduced < 2000);
+
+        // Not running → resets
+        let reset = pid.tick_current_limit(5000, 2000, 50, false);
+        assert_eq!(reset, 2000);
+    }
+
+    /// Mirrors C: "tenKhzRoutine stall protection PID"
+    /// C setup: stallPid.Kp=1, commutation_interval=8000, target=6500,
+    ///          stall_protection_adjust=0
+    /// C assert: stall_protection_adjust > 0
+    #[test]
+    fn stall_pid_boosts_when_interval_above_target() {
+        let mut pid = PidState::with_stall_target(6500);
+
+        let boost = pid.tick_stall(8000); // ci=8000 > target=6500
+        assert!(boost > 0, "boost={boost}, expected > 0");
+    }
+
+    /// Stall adjust is clamped to 0-150 range.
+    #[test]
+    fn stall_pid_clamps_to_150() {
+        let mut pid = PidState::with_stall_target(100);
+
+        // Many ticks with huge error to saturate
+        for _ in 0..10000 {
+            pid.tick_stall(50000);
+        }
+        let boost = pid.tick_stall(50000);
+        assert!(boost <= 150, "boost={boost}, expected <= 150");
+    }
+
+    /// Stall adjust doesn't go negative.
+    #[test]
+    fn stall_pid_clamps_to_zero() {
+        let mut pid = PidState::with_stall_target(10000);
+
+        // ci below target → negative error
+        let boost = pid.tick_stall(1000);
+        assert_eq!(boost, 0, "boost should be 0 when ci < target");
+    }
+
+    /// Speed control returns None when not active.
+    #[test]
+    fn speed_control_inactive_returns_none() {
+        let mut pid = PidState::default();
+        assert!(pid.tick_speed_control(5000, 200, true).is_none());
+    }
+
+    /// Speed control returns None when not running.
+    #[test]
+    fn speed_control_not_running_returns_none() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+        assert!(pid.tick_speed_control(5000, 200, false).is_none());
+    }
+
+    /// Speed control returns override when active and running.
+    #[test]
+    fn speed_control_active_returns_override() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+
+        // With default speed PID gains (kp=10), e_com > target → positive output
+        let result = pid.tick_speed_control(5000, 200, true);
+        assert!(result.is_some());
+        assert!(result.unwrap() > 0);
+    }
+
+    /// Speed control with low zero_crosses still produces output
+    /// (it resets integral but proportional term still works).
+    #[test]
+    fn speed_control_works_during_startup() {
+        let mut pid = PidState::default();
+        pid.set_use_speed_control(true);
+
+        // Low zero_crosses triggers integral reset each tick,
+        // but proportional output should still accumulate
+        let v1 = pid.tick_speed_control(5000, 50, true).unwrap();
+        let v2 = pid.tick_speed_control(5000, 50, true).unwrap();
+        assert!(v2 >= v1, "override should accumulate: v1={v1}, v2={v2}");
+    }
+}
