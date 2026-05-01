@@ -157,65 +157,63 @@ pub fn handle_exti_frame() {
     );
     shared.set_zero_input_count(zic);
 
-    if let Some(v) = actions.newinput {
-        shared.set_newinput(v);
-    }
-    if actions.send_telemetry {
-        shared.set_send_telemetry(true);
-    }
-    if actions.signal_timeout_reset {
-        shared.set_signal_timeout(0);
-    }
-    if actions.input_detected {
-        shared.set_input_set(true);
-        if actions.input_is_dshot {
-            shared.set_dshot(true);
-        }
-        if actions.input_is_servo {
-            shared.set_servo_pwm(true);
-        }
-    }
-    if let Some(fth) = actions.frametime_high {
-        state.frametime_high = fth;
-    }
-    if let Some(ftl) = actions.frametime_low {
-        state.frametime_low = ftl;
-    }
-
-    // DShot command dispatch
-    if actions.dshot_command > 0 {
-        let result = state.cmd.process(
-            actions.dshot_command,
-            shared.armed(),
-            shared.running(),
-            &mut state.config,
-            &mut state.forward,
-            &mut state.edt_armed,
-            state.cmd.extended_telemetry(),
-        );
-        match result {
-            rm32::dshot_commands::CommandResult::SaveSettings => {
-                shared.set_save_settings_flag(true);
+    use rm32::transfer::{DetectedProtocol, TransferAction};
+    match actions.action {
+        TransferAction::InputDetected(proto) => {
+            shared.set_input_set(true);
+            match proto {
+                DetectedProtocol::Dshot => shared.set_dshot(true),
+                DetectedProtocol::Servo => shared.set_servo_pwm(true),
             }
-            rm32::dshot_commands::CommandResult::PlayTone(_tone) => {
-                // Beacons: handled in main loop
+        }
+        TransferAction::DshotThrottle { value, telemetry } => {
+            shared.set_newinput(value);
+            shared.set_send_telemetry(telemetry);
+            shared.set_signal_timeout(0);
+        }
+        TransferAction::DshotCommand { cmd, telemetry } => {
+            shared.set_newinput(0);
+            shared.set_send_telemetry(telemetry);
+            shared.set_signal_timeout(0);
+            let result = state.cmd.process(
+                cmd,
+                shared.armed(),
+                shared.running(),
+                &mut state.config,
+                &mut state.forward,
+                &mut state.edt_armed,
+                state.cmd.extended_telemetry(),
+            );
+            match result {
+                rm32::dshot_commands::CommandResult::SaveSettings => {
+                    shared.set_save_settings_flag(true);
+                }
+                rm32::dshot_commands::CommandResult::PlayTone(_tone) => {}
+                rm32::dshot_commands::CommandResult::SendEscInfo => {
+                    shared.set_send_esc_info_flag(true);
+                }
+                _ => {}
             }
-            rm32::dshot_commands::CommandResult::SendEscInfo => {
-                shared.set_send_esc_info_flag(true);
+            shared.set_forward(state.forward);
+            if state.cmd.take_edt_init() {
+                state.edt.request_init();
             }
-            _ => {}
+            if state.cmd.take_edt_deinit() {
+                state.edt.request_deinit();
+            }
         }
-
-        // Sync direction to shared (commands may flip forward)
-        shared.set_forward(state.forward);
-
-        // Propagate EDT init/deinit flags from CommandProcessor to scheduler
-        if state.cmd.take_edt_init() {
-            state.edt.request_init();
+        TransferAction::ServoThrottle(value) => {
+            shared.set_newinput(value);
+            shared.set_signal_timeout(0);
         }
-        if state.cmd.take_edt_deinit() {
-            state.edt.request_deinit();
+        TransferAction::ServoCalibrating => {
+            shared.set_signal_timeout(0);
         }
+        TransferAction::None => {}
+    }
+    if let Some((low, high)) = actions.frametime {
+        state.frametime_low = low;
+        state.frametime_high = high;
     }
 }
 

@@ -272,60 +272,68 @@ impl Harness {
         );
 
         // Apply transfer actions
-        if actions.input_detected {
-            if actions.input_is_dshot {
-                self.dshot = true;
-                self.shared.set_dshot(true);
-            }
-            if actions.input_is_servo {
-                self.servo_pwm = true;
-            }
-            self.shared.set_input_set(true);
-        }
-
-        if let Some(v) = actions.newinput
-            && (self.edt_armed || v == 0)
-        {
-            self.shared.set_newinput(v);
-        }
-        if actions.send_telemetry {
-            self.shared.set_send_telemetry(true);
-        }
-        if actions.signal_timeout_reset {
-            self.shared.set_signal_timeout(0);
-        }
-        if let Some(fl) = actions.frametime_low {
-            self.frametime_low = fl;
-        }
-        if let Some(fh) = actions.frametime_high {
-            self.frametime_high = fh;
-        }
-
-        // Dispatch DShot commands via library CommandProcessor
-        if actions.dshot_command > 0 {
-            use rm32::dshot_commands::CommandResult;
-            let mut fwd = self.commutation.forward();
-            let result = self.cmd_proc.process(
-                actions.dshot_command,
-                self.shared.armed(),
-                self.shared.running(),
-                &mut self.config,
-                &mut fwd,
-                &mut self.edt_armed,
-                false, // edt_arm_enable
-            );
-            self.commutation.set_forward(fwd);
-            match result {
-                CommandResult::SaveSettings => {
-                    self.shared.set_save_settings_flag(true);
+        use rm32::transfer::{DetectedProtocol, TransferAction};
+        match actions.action {
+            TransferAction::InputDetected(proto) => {
+                self.shared.set_input_set(true);
+                match proto {
+                    DetectedProtocol::Dshot => {
+                        self.dshot = true;
+                        self.shared.set_dshot(true);
+                    }
+                    DetectedProtocol::Servo => {
+                        self.servo_pwm = true;
+                    }
                 }
-                CommandResult::SendEscInfo => {
-                    self.shared.set_send_esc_info_flag(true);
-                }
-                _ => {}
             }
-            // Sync direction change to shared state (commands may flip forward)
-            self.shared.set_forward(self.commutation.forward());
+            TransferAction::DshotThrottle { value, telemetry } => {
+                if self.edt_armed || value == 0 {
+                    self.shared.set_newinput(value);
+                }
+                self.shared.set_send_telemetry(telemetry);
+                self.shared.set_signal_timeout(0);
+            }
+            TransferAction::DshotCommand { cmd, telemetry } => {
+                if self.edt_armed {
+                    self.shared.set_newinput(0);
+                }
+                self.shared.set_send_telemetry(telemetry);
+                self.shared.set_signal_timeout(0);
+                use rm32::dshot_commands::CommandResult;
+                let mut fwd = self.commutation.forward();
+                let result = self.cmd_proc.process(
+                    cmd,
+                    self.shared.armed(),
+                    self.shared.running(),
+                    &mut self.config,
+                    &mut fwd,
+                    &mut self.edt_armed,
+                    false,
+                );
+                self.commutation.set_forward(fwd);
+                match result {
+                    CommandResult::SaveSettings => {
+                        self.shared.set_save_settings_flag(true);
+                    }
+                    CommandResult::SendEscInfo => {
+                        self.shared.set_send_esc_info_flag(true);
+                    }
+                    _ => {}
+                }
+                self.shared.set_forward(self.commutation.forward());
+            }
+            TransferAction::ServoThrottle(value) => {
+                self.shared.set_newinput(value);
+                self.shared.set_signal_timeout(0);
+            }
+            TransferAction::ServoCalibrating => {
+                self.shared.set_signal_timeout(0);
+            }
+            TransferAction::None => {}
+        }
+        if let Some((low, high)) = actions.frametime {
+            self.frametime_low = low;
+            self.frametime_high = high;
         }
     }
 
