@@ -80,12 +80,9 @@ pub struct IsrState<H> {
     pub config: EepromConfig,
     pub forward: bool,
     pub edt_armed: bool,
-    pub tim1_arr: u16,
+    pub counters: rm32::control::isr_logic::TickCounters,
     pub frametime_low: u16,
     pub frametime_high: u16,
-    pub ten_khz_counter: u32,
-    pub one_khz_loop_counter: u16,
-    pub armed_timeout_count: u32,
     pub voltage_based_ramp: bool,
 }
 

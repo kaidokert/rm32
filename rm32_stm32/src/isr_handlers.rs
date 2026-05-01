@@ -61,27 +61,17 @@ static ISR_LOCAL: IsrCell = IsrCell::new();
 pub fn handle_tim6() {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
-    let mut counters = rm32::control::isr_logic::TickCounters {
-        ten_khz_counter: state.ten_khz_counter,
-        one_khz_loop_counter: state.one_khz_loop_counter,
-        armed_timeout_count: state.armed_timeout_count,
-        tim1_arr: state.tim1_arr,
-    };
     let mut ctx = rm32::control::context::MotorContext {
         commutation: &mut state.commutation,
         bemf: &mut state.bemf,
         duty: &mut state.duty,
         config: &state.config,
-        counters: &mut counters,
+        counters: &mut state.counters,
         voltage_based_ramp: state.voltage_based_ramp,
         shared,
         hal: &mut state.hal,
     };
     rm32::control::isr_logic::ten_khz_tick(&mut ctx);
-    state.ten_khz_counter = counters.ten_khz_counter;
-    state.one_khz_loop_counter = counters.one_khz_loop_counter;
-    state.armed_timeout_count = counters.armed_timeout_count;
-    state.tim1_arr = counters.tim1_arr;
 }
 
 /// Commutation timer expired (TIM14 ISR body).

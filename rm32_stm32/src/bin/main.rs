@@ -83,12 +83,14 @@ fn main() -> ! {
         config: EepromConfig::default(),
         forward: true,
         edt_armed: false,
-        tim1_arr: Chip::TIM1_AUTORELOAD,
+        counters: rm32::control::isr_logic::TickCounters {
+            ten_khz_counter: 0,
+            one_khz_loop_counter: 0,
+            armed_timeout_count: 0,
+            tim1_arr: Chip::TIM1_AUTORELOAD,
+        },
         frametime_low: 400,
         frametime_high: 600,
-        ten_khz_counter: 0,
-        one_khz_loop_counter: 0,
-        armed_timeout_count: 0,
         voltage_based_ramp: BOARD.voltage_based_ramp,
     };
     isr::init_isr_state(isr_state);
@@ -162,7 +164,7 @@ fn main() -> ! {
         isr.config = main_state.config;
         isr.forward = main_state.config.dir_reversed == 0;
         // Apply timer1_max_arr from pwm_frequency config
-        isr.tim1_arr = timer1_max_arr;
+        isr.counters.tim1_arr = timer1_max_arr;
         // Apply startup duty from EEPROM
         isr.duty
             .set_duty_limits(minimum_duty_cycle, min_startup_duty, startup_max_duty);
