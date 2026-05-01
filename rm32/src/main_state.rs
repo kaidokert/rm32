@@ -353,11 +353,10 @@ impl<LED: OutputPin> MainState<LED> {
         }
 
         // Speed control PID — closed-loop RPM control
-        if let Some(override_input) = self.pid.tick_speed_control(
-            shared.e_com_time(),
-            shared.zero_crosses(),
-            shared.running(),
-        ) {
+        if let Some(override_input) =
+            self.pid
+                .tick_speed_control(shared.e_com_time(), zc, shared.running())
+        {
             shared.set_newinput(override_input.clamp(48, 2047));
         }
 

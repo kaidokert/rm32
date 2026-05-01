@@ -80,6 +80,11 @@ impl PidState {
         self.use_speed_control = v;
     }
 
+    /// Set speed PID target e_com_time.
+    pub fn set_target_e_com_time(&mut self, v: u32) {
+        self.target_e_com_time = v;
+    }
+
     /// Stall protection PID tick. Returns stall boost value for ISR (0-150).
     pub(crate) fn tick_stall(&mut self, commutation_interval: i32) -> u16 {
         self.stall_adjust += self.stall.calculate(
@@ -125,7 +130,7 @@ impl PidState {
             .calculate(e_com_time, self.target_e_com_time as i32);
         self.input_override = self.input_override.clamp(0, 2047 * 10000);
         if zero_crosses < 100 {
-            self.speed.reset();
+            self.speed.clear_integral();
         }
         Some((self.input_override / 10000) as u16)
     }

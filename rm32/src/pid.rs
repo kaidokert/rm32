@@ -64,6 +64,12 @@ impl Pid {
         self.reset();
     }
 
+    /// Clear only the integral accumulator (matches C `pid.integral = 0`).
+    /// Preserves error history for derivative continuity.
+    pub(crate) fn clear_integral(&mut self) {
+        self.integral = 0;
+    }
+
     pub(crate) fn reset(&mut self) {
         self.error = 0;
         self.integral = 0;
