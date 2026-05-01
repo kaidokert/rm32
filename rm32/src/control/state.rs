@@ -427,10 +427,11 @@ impl BemfState {
         self.min_counts_down = min_counts;
     }
 
-    /// Reset counters after a commutation step.
+    /// Reset counters after a commutation step (matches C: bemfcounter=0, zcfound=0).
     pub(crate) fn reset_for_step(&mut self) {
         self.counter = 0;
         self.bad_count = 0;
+        self.zc_found = false;
     }
 
     /// Reset all state after commutation timer fires (includes zc_found).
@@ -462,7 +463,7 @@ impl BemfState {
         self.this_zc_time = interval_count;
         let new_ci = (self.this_zc_time as u32 + 3 * commutation_interval) / 4;
         let advance = (self.temp_advance as u32 * new_ci) >> crate::constants::ADVANCE_SHIFT;
-        self.wait_time = (new_ci as u16 / 2).wrapping_sub(advance as u16);
+        self.wait_time = ((new_ci / 2) as u16).wrapping_sub(advance as u16);
         new_ci
     }
 
@@ -471,7 +472,7 @@ impl BemfState {
         let zc_avg = (self.last_zc_time as u32 + self.this_zc_time as u32) >> 1;
         let new_ci = (commutation_interval + zc_avg) >> 1;
         let advance = (new_ci * self.temp_advance as u32) >> crate::constants::ADVANCE_SHIFT;
-        self.wait_time = (new_ci as u16 >> 1).wrapping_sub(advance as u16);
+        self.wait_time = ((new_ci >> 1) as u16).wrapping_sub(advance as u16);
         new_ci
     }
 
