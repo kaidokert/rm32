@@ -14,8 +14,6 @@ use crate::shared_comm::SharedComm;
 
 /// Counters and config owned exclusively by the ISR tick.
 pub struct TickCounters {
-    pub(crate) ten_khz_counter: u32,
-    pub(crate) one_khz_loop_counter: u16,
     pub(crate) armed_timeout_count: u32,
     pub(crate) tim1_arr: u16,
 }
@@ -34,8 +32,6 @@ impl TickCounters {
     /// Create with the given TIM1 auto-reload value. All counters start at zero.
     pub fn new(tim1_arr: u16) -> Self {
         Self {
-            ten_khz_counter: 0,
-            one_khz_loop_counter: 0,
             armed_timeout_count: 0,
             tim1_arr,
         }
@@ -90,10 +86,8 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Core tick
     let setpoint = ctx.shared.duty_cycle_setpoint();
     ctx.duty.set_cycle(setpoint);
-    ctx.counters.ten_khz_counter += 1;
     ctx.shared.increment_signal_timeout();
     ctx.duty.increment_ramp_count();
-    ctx.counters.one_khz_loop_counter += 1;
 
     // Arming
     if !ctx.shared.armed() {
