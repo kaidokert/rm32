@@ -549,8 +549,8 @@ impl Harness {
                 // Route through ADC mock for persistence
                 self.adc.current = ((v as i32 * 20 + 498 * 100) * 41 / 3300).max(0) as u16;
             }
-            "bemf_timeout_happened" => self.main.protection.bemf_timeout_happened = v as u8, // pub field
-            "bemf_timeout" => self.main.protection.bemf_timeout = v as u8, // pub field
+            "bemf_timeout_happened" => self.main.protection.set_bemf_timeout_happened(v as u8),
+            "bemf_timeout" => self.main.protection.set_bemf_timeout(v as u8),
             "prop_brake_active" => self.system.input_state.set_prop_brake_active(v != 0),
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.set_last(v as u16),
@@ -654,9 +654,9 @@ fn main() {
             );
             harness.main.config = harness.config;
             harness.main.apply_motor_config(&mc);
-            harness.duty.minimum = mc.minimum_duty; // pub field
-            harness.duty.min_startup = mc.min_startup_duty; // pub field
-            harness.duty.startup_max = mc.startup_max_duty; // pub field
+            harness
+                .duty
+                .set_duty_limits(mc.minimum_duty, mc.min_startup_duty, mc.startup_max_duty);
             // Apply advance level
             let adv = harness.config.advance_level;
             if (10..43).contains(&adv) {
