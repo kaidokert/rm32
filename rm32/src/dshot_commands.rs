@@ -6,15 +6,14 @@ use crate::dshot::commands;
 /// DShot command processor state.
 #[derive(Clone, Default)]
 pub struct CommandProcessor {
-    pub command: u16,
-    pub command_count: u8,
-    pub last_command: u8,
-    pub programming_mode: u8,
-    pub position: u16,
-    pub new_byte: u8,
-    pub extended_telemetry: bool,
-    pub send_edt_init: bool,
-    pub send_edt_deinit: bool,
+    command_count: u8,
+    last_command: u8,
+    programming_mode: u8,
+    position: u16,
+    new_byte: u8,
+    extended_telemetry: bool,
+    send_edt_init: bool,
+    send_edt_deinit: bool,
 }
 
 /// Result of processing a DShot command.
@@ -28,6 +27,21 @@ pub enum CommandResult {
 }
 
 impl CommandProcessor {
+    /// Whether extended DShot telemetry is enabled.
+    pub fn extended_telemetry(&self) -> bool {
+        self.extended_telemetry
+    }
+
+    /// Take the EDT init flag (returns current value and clears it).
+    pub fn take_edt_init(&mut self) -> bool {
+        core::mem::take(&mut self.send_edt_init)
+    }
+
+    /// Take the EDT deinit flag (returns current value and clears it).
+    pub fn take_edt_deinit(&mut self) -> bool {
+        core::mem::take(&mut self.send_edt_deinit)
+    }
+
     /// Process a DShot command (value 1-47). Called when frame decode yields a command.
     /// `running` and `armed` indicate motor state.
     /// Returns action to take, if any.
@@ -115,7 +129,6 @@ impl CommandProcessor {
         };
 
         self.last_command = cmd as u8;
-        self.command = 0;
         result
     }
 
