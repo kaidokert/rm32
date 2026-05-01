@@ -69,9 +69,42 @@ pub trait MotorState {
     }
 }
 
+/// ISR-produced timing and state data consumed by the main loop.
+///
+/// ISR writes these values each commutation step or tick;
+/// main loop reads them for RPM calculation, stall detection,
+/// speed gating, and desync detection.
+pub trait IsrTiming {
+    fn zero_crosses(&self) -> u32;
+    fn set_zero_crosses(&self, v: u32);
+    fn increment_zero_crosses(&self);
+    fn commutation_interval(&self) -> u32;
+    fn set_commutation_interval(&self, v: u32);
+    fn e_com_time(&self) -> i32;
+    fn set_e_com_time(&self, _v: i32) {}
+    fn interval_timer_count(&self) -> u32 {
+        0
+    }
+    fn set_interval_timer_count(&self, _v: u32) {}
+    fn signal_timeout(&self) -> u16;
+    fn increment_signal_timeout(&self);
+
+    /// Current duty cycle (ISR writes each tick, main reads for bidir speed gate).
+    fn duty_cycle(&self) -> u16 {
+        0
+    }
+    fn set_duty_cycle(&self, _v: u16) {}
+
+    /// Motor direction (ISR syncs from commutation, input flips on bidir).
+    fn forward(&self) -> bool {
+        true
+    }
+    fn set_forward(&self, _v: bool) {}
+}
+
 /// Communication interface between ISR and main loop contexts.
-/// Requires `MotorState` for motor mode access.
-pub trait SharedComm: MotorState {
+/// Requires `MotorState` and `IsrTiming` for motor mode and timing access.
+pub trait SharedComm: MotorState + IsrTiming {
     fn input_set(&self) -> bool;
     fn set_input_set(&self, v: bool);
     fn dshot_telemetry(&self) -> bool;
@@ -88,28 +121,6 @@ pub trait SharedComm: MotorState {
     fn set_adjusted_input(&self, v: u16);
     fn duty_cycle_setpoint(&self) -> u16;
     fn set_duty_cycle_setpoint(&self, v: u16);
-
-    /// Current duty cycle (ISR writes each tick, main reads for bidir speed gate).
-    fn duty_cycle(&self) -> u16 {
-        0
-    }
-    fn set_duty_cycle(&self, _v: u16) {}
-
-    /// Motor direction (ISR reads, main writes on bidir direction change).
-    fn forward(&self) -> bool {
-        true
-    }
-    fn set_forward(&self, _v: bool) {}
-
-    fn zero_crosses(&self) -> u32;
-    fn set_zero_crosses(&self, v: u32);
-    fn increment_zero_crosses(&self);
-    fn commutation_interval(&self) -> u32;
-    fn set_commutation_interval(&self, v: u32);
-    fn e_com_time(&self) -> i32;
-
-    fn signal_timeout(&self) -> u16;
-    fn increment_signal_timeout(&self);
 
     fn stall_protection_adjust(&self) -> u16 {
         0
@@ -177,17 +188,7 @@ pub trait SharedComm: MotorState {
     }
     fn set_prop_brake_active(&self, _v: bool) {}
 
-    // --- ISR→Main published state ---
-
-    /// Interval timer count (ISR publishes, main reads for stall detection).
-    /// When this exceeds ~45000 (22.5ms at 2MHz), no BEMF zero-cross has occurred.
-    fn interval_timer_count(&self) -> u32 {
-        0
-    }
-    fn set_interval_timer_count(&self, _v: u32) {}
-
     fn set_actual_current(&self, _v: i16) {}
     fn set_battery_voltage(&self, _v: u16) {}
     fn set_degrees_celsius(&self, _v: i16) {}
-    fn set_e_com_time(&self, _v: i32) {}
 }

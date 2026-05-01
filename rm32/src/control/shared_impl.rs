@@ -1,7 +1,7 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
 use crate::motor_mode::MotorMode;
-use crate::shared_comm::{MotorState, SharedComm};
+use crate::shared_comm::{IsrTiming, MotorState, SharedComm};
 use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
@@ -73,6 +73,51 @@ impl MotorState for TestShared {
     }
 }
 
+impl IsrTiming for TestShared {
+    fn zero_crosses(&self) -> u32 {
+        self.zero_crosses.get()
+    }
+    fn set_zero_crosses(&self, v: u32) {
+        self.zero_crosses.set(v);
+    }
+    fn increment_zero_crosses(&self) {
+        let v = self.zero_crosses.get();
+        if v < 10000 {
+            self.zero_crosses.set(v + 1);
+        }
+    }
+    fn commutation_interval(&self) -> u32 {
+        self.commutation_interval.get()
+    }
+    fn set_commutation_interval(&self, v: u32) {
+        self.commutation_interval.set(v);
+    }
+    fn e_com_time(&self) -> i32 {
+        self.e_com_time.get()
+    }
+    fn signal_timeout(&self) -> u16 {
+        self.signal_timeout.get()
+    }
+    fn increment_signal_timeout(&self) {
+        let v = self.signal_timeout.get();
+        if v < u16::MAX {
+            self.signal_timeout.set(v + 1);
+        }
+    }
+    fn duty_cycle(&self) -> u16 {
+        self.duty_cycle.get()
+    }
+    fn set_duty_cycle(&self, v: u16) {
+        self.duty_cycle.set(v);
+    }
+    fn forward(&self) -> bool {
+        self.forward.get()
+    }
+    fn set_forward(&self, v: bool) {
+        self.forward.set(v);
+    }
+}
+
 impl SharedComm for TestShared {
     fn input_set(&self) -> bool {
         self.input_set.get()
@@ -107,50 +152,6 @@ impl SharedComm for TestShared {
     }
     fn set_duty_cycle_setpoint(&self, v: u16) {
         self.duty_cycle_setpoint.set(v);
-    }
-    fn duty_cycle(&self) -> u16 {
-        self.duty_cycle.get()
-    }
-    fn set_duty_cycle(&self, v: u16) {
-        self.duty_cycle.set(v);
-    }
-    fn forward(&self) -> bool {
-        self.forward.get()
-    }
-    fn set_forward(&self, v: bool) {
-        self.forward.set(v);
-    }
-
-    fn zero_crosses(&self) -> u32 {
-        self.zero_crosses.get()
-    }
-    fn set_zero_crosses(&self, v: u32) {
-        self.zero_crosses.set(v);
-    }
-    fn increment_zero_crosses(&self) {
-        let v = self.zero_crosses.get();
-        if v < 10000 {
-            self.zero_crosses.set(v + 1);
-        }
-    }
-    fn commutation_interval(&self) -> u32 {
-        self.commutation_interval.get()
-    }
-    fn set_commutation_interval(&self, v: u32) {
-        self.commutation_interval.set(v);
-    }
-    fn e_com_time(&self) -> i32 {
-        self.e_com_time.get()
-    }
-
-    fn signal_timeout(&self) -> u16 {
-        self.signal_timeout.get()
-    }
-    fn increment_signal_timeout(&self) {
-        let v = self.signal_timeout.get();
-        if v < u16::MAX {
-            self.signal_timeout.set(v + 1);
-        }
     }
 
     fn send_telemetry(&self) -> bool {
@@ -189,12 +190,6 @@ impl SharedComm for TestShared {
     }
     fn set_auto_advance(&self, v: u8) {
         self.auto_advance.set(v);
-    }
-    fn interval_timer_count(&self) -> u32 {
-        self.interval_timer_count.get()
-    }
-    fn set_interval_timer_count(&self, v: u32) {
-        self.interval_timer_count.set(v);
     }
     fn prop_brake_active(&self) -> bool {
         self.prop_brake_active.get()

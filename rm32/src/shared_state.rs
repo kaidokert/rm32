@@ -454,6 +454,54 @@ impl crate::shared_comm::MotorState for SharedState {
     }
 }
 
+impl crate::shared_comm::IsrTiming for SharedState {
+    fn zero_crosses(&self) -> u32 {
+        self.zero_crosses()
+    }
+    fn set_zero_crosses(&self, v: u32) {
+        self.set_zero_crosses(v);
+    }
+    fn increment_zero_crosses(&self) {
+        self.increment_zero_crosses();
+    }
+    fn commutation_interval(&self) -> u32 {
+        self.commutation_interval()
+    }
+    fn set_commutation_interval(&self, v: u32) {
+        self.set_commutation_interval(v);
+    }
+    fn e_com_time(&self) -> i32 {
+        self.e_com_time()
+    }
+    fn set_e_com_time(&self, v: i32) {
+        SharedState::set_e_com_time(self, v);
+    }
+    fn interval_timer_count(&self) -> u32 {
+        SharedState::interval_timer_count(self)
+    }
+    fn set_interval_timer_count(&self, v: u32) {
+        SharedState::set_interval_timer_count(self, v);
+    }
+    fn signal_timeout(&self) -> u16 {
+        self.signal_timeout()
+    }
+    fn increment_signal_timeout(&self) {
+        self.increment_signal_timeout();
+    }
+    fn duty_cycle(&self) -> u16 {
+        SharedState::duty_cycle(self)
+    }
+    fn set_duty_cycle(&self, v: u16) {
+        SharedState::set_duty_cycle(self, v);
+    }
+    fn forward(&self) -> bool {
+        SharedState::forward(self)
+    }
+    fn set_forward(&self, v: bool) {
+        SharedState::set_forward(self, v);
+    }
+}
+
 impl crate::shared_comm::SharedComm for SharedState {
     fn input_set(&self) -> bool {
         self.input_set()
@@ -488,44 +536,6 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_duty_cycle_setpoint(&self, v: u16) {
         self.set_duty_cycle_setpoint(v);
-    }
-    fn duty_cycle(&self) -> u16 {
-        SharedState::duty_cycle(self)
-    }
-    fn set_duty_cycle(&self, v: u16) {
-        SharedState::set_duty_cycle(self, v);
-    }
-    fn forward(&self) -> bool {
-        SharedState::forward(self)
-    }
-    fn set_forward(&self, v: bool) {
-        SharedState::set_forward(self, v);
-    }
-
-    fn zero_crosses(&self) -> u32 {
-        self.zero_crosses()
-    }
-    fn set_zero_crosses(&self, v: u32) {
-        self.set_zero_crosses(v);
-    }
-    fn increment_zero_crosses(&self) {
-        self.increment_zero_crosses();
-    }
-    fn commutation_interval(&self) -> u32 {
-        self.commutation_interval()
-    }
-    fn set_commutation_interval(&self, v: u32) {
-        self.set_commutation_interval(v);
-    }
-    fn e_com_time(&self) -> i32 {
-        self.e_com_time()
-    }
-
-    fn signal_timeout(&self) -> u16 {
-        self.signal_timeout()
-    }
-    fn increment_signal_timeout(&self) {
-        self.increment_signal_timeout();
     }
 
     fn stall_protection_adjust(&self) -> u16 {
@@ -601,15 +611,6 @@ impl crate::shared_comm::SharedComm for SharedState {
     }
     fn set_degrees_celsius(&self, v: i16) {
         SharedState::set_degrees_celsius(self, v);
-    }
-    fn interval_timer_count(&self) -> u32 {
-        SharedState::interval_timer_count(self)
-    }
-    fn set_interval_timer_count(&self, v: u32) {
-        SharedState::set_interval_timer_count(self, v);
-    }
-    fn set_e_com_time(&self, v: i32) {
-        SharedState::set_e_com_time(self, v);
     }
     fn prop_brake_active(&self) -> bool {
         SharedState::prop_brake_active(self)
