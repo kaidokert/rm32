@@ -14,10 +14,32 @@ use crate::shared_comm::SharedComm;
 
 /// Counters and config owned exclusively by the ISR tick.
 pub struct TickCounters {
-    pub ten_khz_counter: u32,
-    pub one_khz_loop_counter: u16,
-    pub armed_timeout_count: u32,
-    pub tim1_arr: u16,
+    pub(crate) ten_khz_counter: u32,
+    pub(crate) one_khz_loop_counter: u16,
+    pub(crate) armed_timeout_count: u32,
+    pub(crate) tim1_arr: u16,
+}
+
+impl TickCounters {
+    /// Set TIM1 auto-reload (from EEPROM-derived motor config).
+    pub fn set_tim1_arr(&mut self, v: u16) {
+        self.tim1_arr = v;
+    }
+
+    /// Read armed timeout count (for harness reporting).
+    pub fn armed_timeout_count(&self) -> u32 {
+        self.armed_timeout_count
+    }
+
+    /// Create with the given TIM1 auto-reload value. All counters start at zero.
+    pub fn new(tim1_arr: u16) -> Self {
+        Self {
+            ten_khz_counter: 0,
+            one_khz_loop_counter: 0,
+            armed_timeout_count: 0,
+            tim1_arr,
+        }
+    }
 }
 
 /// 20kHz control loop tick.

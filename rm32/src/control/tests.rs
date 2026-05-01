@@ -16,12 +16,7 @@ mod tests {
     use crate::shared_comm::{IsrTiming as _, MainControl as _, MotorState as _, SharedComm as _};
 
     fn make_counters() -> TickCounters {
-        TickCounters {
-            ten_khz_counter: 0,
-            one_khz_loop_counter: 0,
-            armed_timeout_count: 0,
-            tim1_arr: 1999,
-        }
+        TickCounters::new(1999)
     }
 
     struct MockPwm {

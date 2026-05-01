@@ -183,12 +183,7 @@ impl Harness {
             bemf: BemfState::default(),
             duty: DutyState::default(),
             config: EepromConfig::default(),
-            counters: TickCounters {
-                ten_khz_counter: 0,
-                one_khz_loop_counter: 0,
-                armed_timeout_count: 0,
-                tim1_arr: 1999,
-            },
+            counters: TickCounters::new(1999),
             hal: MockMotorHal {
                 pwm: MockPwm {
                     duty: 0,
@@ -421,7 +416,7 @@ impl Harness {
             self.shared.old_routine() as i32,
             self.shared.stepper_sine() as i32,
             self.shared.signal_timeout(),
-            self.counters.armed_timeout_count,
+            self.counters.armed_timeout_count(),
             self.main.measurements().battery_voltage().0,
             self.main.measurements().actual_current().0,
             self.main.measurements().degrees_celsius().0,
