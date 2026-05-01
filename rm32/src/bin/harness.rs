@@ -283,6 +283,7 @@ impl Harness {
                     }
                     DetectedProtocol::Servo => {
                         self.servo_pwm = true;
+                        self.shared.set_servo_pwm(true);
                     }
                 }
             }
@@ -290,14 +291,16 @@ impl Harness {
                 if self.edt_armed || value == 0 {
                     self.shared.set_newinput(value);
                 }
-                self.shared.set_send_telemetry(telemetry);
+                if telemetry {
+                    self.shared.set_send_telemetry(true);
+                }
                 self.shared.set_signal_timeout(0);
             }
             TransferAction::DshotCommand { cmd, telemetry } => {
-                if self.edt_armed {
-                    self.shared.set_newinput(0);
+                self.shared.set_newinput(0);
+                if telemetry {
+                    self.shared.set_send_telemetry(true);
                 }
-                self.shared.set_send_telemetry(telemetry);
                 self.shared.set_signal_timeout(0);
                 use rm32::dshot_commands::CommandResult;
                 let mut fwd = self.commutation.forward();

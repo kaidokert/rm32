@@ -168,12 +168,16 @@ pub fn handle_exti_frame() {
         }
         TransferAction::DshotThrottle { value, telemetry } => {
             shared.set_newinput(value);
-            shared.set_send_telemetry(telemetry);
+            if telemetry {
+                shared.set_send_telemetry(true);
+            }
             shared.set_signal_timeout(0);
         }
         TransferAction::DshotCommand { cmd, telemetry } => {
             shared.set_newinput(0);
-            shared.set_send_telemetry(telemetry);
+            if telemetry {
+                shared.set_send_telemetry(true);
+            }
             shared.set_signal_timeout(0);
             let result = state.cmd.process(
                 cmd,

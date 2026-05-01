@@ -123,9 +123,8 @@ impl TransferState {
                 _ => TransferAction::None,
             };
         }
-
-        // --- Servo processing ---
-        if servo_mode {
+        // --- Servo processing (mutually exclusive with DShot) ---
+        else if servo_mode {
             if input_pin_high {
                 // Rising edge — wait for falling to get pulse width
             } else if dma_buffer.len() >= 2 {
