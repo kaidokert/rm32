@@ -21,18 +21,36 @@ pub struct TransferState {
     last_input: u16,
 }
 
+/// Detected input protocol during auto-detection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DetectedProtocol {
+    Dshot,
+    Servo,
+}
+
+/// Primary action from transfer complete processing.
+#[derive(Debug)]
+pub enum TransferAction {
+    /// No valid frame decoded (bad CRC, timing, or rising edge)
+    None,
+    /// Input protocol detected (first frame after boot)
+    InputDetected(DetectedProtocol),
+    /// Valid DShot throttle frame
+    DshotThrottle { value: u16, telemetry: bool },
+    /// Valid DShot command frame
+    DshotCommand { cmd: u16, telemetry: bool },
+    /// Valid servo throttle
+    ServoThrottle(u16),
+    /// Servo calibration in progress (signal alive, no throttle value)
+    ServoCalibrating,
+}
+
 /// Actions the caller (ISR) should take after transfer complete.
-#[derive(Default)]
 pub struct TransferActions {
-    pub newinput: Option<u16>,
-    pub send_telemetry: bool,
-    pub signal_timeout_reset: bool,
-    pub input_detected: bool,
-    pub input_is_dshot: bool,
-    pub input_is_servo: bool,
-    pub dshot_command: u16, // 0=none, 1-47=DShot command to dispatch
-    pub frametime_high: Option<u16>,
-    pub frametime_low: Option<u16>,
+    /// Primary action
+    pub action: TransferAction,
+    /// DShot frame timing update (from unarmed averaging)
+    pub frametime: Option<(u16, u16)>,
 }
 
 impl TransferState {
@@ -69,23 +87,22 @@ impl TransferState {
         frametime_low: u16,
         frametime_high: u16,
     ) -> TransferActions {
-        let mut actions = TransferActions::default();
+        let mut action = TransferAction::None;
+        let mut frametime = None;
 
         // --- Input detection ---
         if !input_set {
             let sig = signal::detect_input(dma_buffer, 48);
-            match sig {
+            action = match sig {
                 signal::SignalType::Dshot600 | signal::SignalType::Dshot300 => {
-                    actions.input_detected = true;
-                    actions.input_is_dshot = true;
+                    TransferAction::InputDetected(DetectedProtocol::Dshot)
                 }
                 signal::SignalType::ServoPwm => {
-                    actions.input_detected = true;
-                    actions.input_is_servo = true;
+                    TransferAction::InputDetected(DetectedProtocol::Servo)
                 }
-                _ => {}
-            }
-            return actions;
+                _ => TransferAction::None,
+            };
+            return TransferActions { action, frametime };
         }
 
         // --- DShot processing ---
@@ -96,50 +113,32 @@ impl TransferState {
                 b
             };
             let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
-            match frame {
+            action = match frame {
                 dshot::DshotFrame::Throttle { value, telemetry } => {
-                    actions.newinput = Some(value);
-                    actions.send_telemetry = telemetry;
-                    actions.signal_timeout_reset = true;
+                    TransferAction::DshotThrottle { value, telemetry }
                 }
                 dshot::DshotFrame::Command { cmd, telemetry } => {
-                    actions.newinput = Some(0);
-                    actions.send_telemetry = telemetry;
-                    actions.signal_timeout_reset = true;
-                    actions.dshot_command = cmd;
+                    TransferAction::DshotCommand { cmd, telemetry }
                 }
-                _ => {} // bad CRC or timing
-            }
+                _ => TransferAction::None,
+            };
         }
-
-        // --- Servo processing ---
-        if servo_mode {
+        // --- Servo processing (mutually exclusive with DShot) ---
+        else if servo_mode {
             if input_pin_high {
                 // Rising edge — wait for falling to get pulse width
-                // buffersize = 3 (capture next edge)
-            } else {
-                // Falling edge — pulse complete
-                if dma_buffer.len() >= 2 {
-                    let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]) as u16;
-                    match self.servo.compute(pulse, current_newinput, bidirectional) {
-                        ServoResult::Throttle(v) => {
-                            actions.newinput = Some(v);
-                            actions.signal_timeout_reset = true;
-                        }
-                        ServoResult::OutOfRange => {
-                            *zero_input_count = 0;
-                        }
-                        ServoResult::Calibrating => {
-                            actions.signal_timeout_reset = true;
-                        }
-                        ServoResult::CalibrationHighDone => {
-                            actions.signal_timeout_reset = true;
-                        }
-                        ServoResult::CalibrationDone { .. } => {
-                            actions.signal_timeout_reset = true;
-                        }
+            } else if dma_buffer.len() >= 2 {
+                let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]) as u16;
+                action = match self.servo.compute(pulse, current_newinput, bidirectional) {
+                    ServoResult::Throttle(v) => TransferAction::ServoThrottle(v),
+                    ServoResult::OutOfRange => {
+                        *zero_input_count = 0;
+                        TransferAction::None
                     }
-                }
+                    ServoResult::Calibrating
+                    | ServoResult::CalibrationHighDone
+                    | ServoResult::CalibrationDone { .. } => TransferAction::ServoCalibrating,
+                };
             }
         }
 
@@ -154,8 +153,9 @@ impl TransferState {
                 }
                 if self.average_count == 8 {
                     let avg = self.average_packet_length >> 3;
-                    actions.frametime_high = Some((avg + (self.average_packet_length >> 7)) as u16);
-                    actions.frametime_low = Some((avg - (self.average_packet_length >> 7)) as u16);
+                    let high = (avg + (self.average_packet_length >> 7)) as u16;
+                    let low = (avg - (self.average_packet_length >> 7)) as u16;
+                    frametime = Some((low, high));
                 }
             }
 
@@ -183,6 +183,6 @@ impl TransferState {
             }
         }
 
-        actions
+        TransferActions { action, frametime }
     }
 }
