@@ -23,6 +23,10 @@ pub struct MotorContext<'a, S: SharedComm, H: MotorHal> {
     pub config: &'a EepromConfig,
     pub counters: &'a mut TickCounters,
 
+    /// Board constant: use voltage-based ramp rate instead of RPM-based.
+    /// Set from `BOARD.voltage_based_ramp` at construction, never changes.
+    pub voltage_based_ramp: bool,
+
     // Shared ISR↔main state
     pub shared: &'a S,
 

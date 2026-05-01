@@ -66,7 +66,6 @@ pub fn handle_tim6() {
         one_khz_loop_counter: state.one_khz_loop_counter,
         armed_timeout_count: state.armed_timeout_count,
         tim1_arr: state.tim1_arr,
-        voltage_based_ramp: state.voltage_based_ramp,
     };
     let mut ctx = rm32::control::context::MotorContext {
         commutation: &mut state.commutation,
@@ -74,6 +73,7 @@ pub fn handle_tim6() {
         duty: &mut state.duty,
         config: &state.config,
         counters: &mut counters,
+        voltage_based_ramp: state.voltage_based_ramp,
         shared,
         hal: &mut state.hal,
     };

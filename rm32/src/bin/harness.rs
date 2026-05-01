@@ -188,7 +188,6 @@ impl Harness {
                 one_khz_loop_counter: 0,
                 armed_timeout_count: 0,
                 tim1_arr: 1999,
-                voltage_based_ramp: false,
             },
             hal: MockMotorHal {
                 pwm: MockPwm {
@@ -367,6 +366,7 @@ impl Harness {
             duty: &mut self.duty,
             config: &self.config,
             counters: &mut self.counters,
+            voltage_based_ramp: false,
             shared: &self.shared,
             hal: &mut self.hal,
         };

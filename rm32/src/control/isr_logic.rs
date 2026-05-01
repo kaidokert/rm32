@@ -18,7 +18,6 @@ pub struct TickCounters {
     pub one_khz_loop_counter: u16,
     pub armed_timeout_count: u32,
     pub tim1_arr: u16,
-    pub voltage_based_ramp: bool,
 }
 
 /// 20kHz control loop tick.
@@ -99,7 +98,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.shared.commutation_interval(),
         ctx.shared.zero_crosses(),
         average_interval,
-        ctx.counters.voltage_based_ramp,
+        ctx.voltage_based_ramp,
     );
 
     // Sync main→ISR published state (main computes, ISR applies)
