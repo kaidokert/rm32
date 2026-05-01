@@ -83,7 +83,7 @@ fn main() -> ! {
         config: EepromConfig::default(),
         forward: true,
         edt_armed: false,
-        counters: rm32::control::isr_logic::TickCounters::new(Chip::TIM1_AUTORELOAD),
+        counters: rm32::control::isr_logic::TickCounters::new(),
         frametime_low: 400,
         frametime_high: 600,
         voltage_based_ramp: BOARD.voltage_based_ramp,
@@ -158,8 +158,7 @@ fn main() -> ! {
     isr::with_isr_state(|isr| {
         isr.config = main_state.config;
         isr.forward = main_state.config.dir_reversed == 0;
-        // Apply timer1_max_arr from pwm_frequency config
-        isr.counters.set_tim1_arr(timer1_max_arr);
+        // Apply timer1_max_arr from pwm_frequency config (ISR reads from SharedComm)
         // Apply startup duty from EEPROM
         isr.duty
             .set_duty_limits(minimum_duty_cycle, min_startup_duty, startup_max_duty);
@@ -189,6 +188,9 @@ fn main() -> ! {
 
     // --- Sine mode state ---
     let mut sine_positions = rm32::sine::PhasePositions::new();
+
+    // Publish initial tim1_arr to SharedComm before ISR starts
+    isr::shared().set_tim1_arr(timer1_max_arr);
 
     // --- Enable global interrupts ---
     // SAFETY: All ISR state has been initialized and moved to globals above.

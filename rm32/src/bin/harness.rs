@@ -183,7 +183,7 @@ impl Harness {
             bemf: BemfState::default(),
             duty: DutyState::default(),
             config: EepromConfig::default(),
-            counters: TickCounters::new(1999),
+            counters: TickCounters::new(),
             hal: MockMotorHal {
                 pwm: MockPwm {
                     duty: 0,

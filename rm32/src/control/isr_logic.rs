@@ -15,26 +15,24 @@ use crate::shared_comm::SharedComm;
 /// Counters and config owned exclusively by the ISR tick.
 pub struct TickCounters {
     armed_timeout_count: u32,
-    tim1_arr: u16,
 }
 
 impl TickCounters {
-    /// Set TIM1 auto-reload (from EEPROM-derived motor config).
-    pub fn set_tim1_arr(&mut self, v: u16) {
-        self.tim1_arr = v;
-    }
-
     /// Read armed timeout count (for harness reporting).
     pub fn armed_timeout_count(&self) -> u32 {
         self.armed_timeout_count
     }
 
-    /// Create with the given TIM1 auto-reload value. All counters start at zero.
-    pub fn new(tim1_arr: u16) -> Self {
+    pub fn new() -> Self {
         Self {
             armed_timeout_count: 0,
-            tim1_arr,
         }
+    }
+}
+
+impl Default for TickCounters {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -45,6 +43,7 @@ impl TickCounters {
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Sync direction from shared (main loop may flip for bidirectional)
     ctx.commutation.forward = ctx.shared.forward();
+    let tim1_arr = ctx.shared.tim1_arr();
 
     // Throttle → setpoint
     // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
@@ -74,8 +73,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.shared.set_duty_cycle_setpoint(0);
             if ctx.config.brake_on_stop == 2 {
                 ctx.hal.phase().com_step(2);
-                let brake_duty = (ctx.config.active_brake_power as u32
-                    * ctx.counters.tim1_arr as u32
+                let brake_duty = (ctx.config.active_brake_power as u32 * tim1_arr as u32
                     / DUTY_SCALE_MAX as u32)
                     * 10;
                 ctx.hal.pwm().set_duty_all(brake_duty as u16);
@@ -118,7 +116,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     );
 
     // Sync main→ISR published state (main computes, ISR applies)
-    ctx.counters.tim1_arr = ctx.shared.tim1_arr();
     ctx.bemf.sync_config(
         ctx.shared.filter_level(),
         ctx.shared.auto_advance(),
@@ -138,7 +135,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     );
 
     // PWM output
-    let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
         ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {

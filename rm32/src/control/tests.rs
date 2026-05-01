@@ -16,7 +16,7 @@ mod tests {
     use crate::shared_comm::{IsrTiming as _, MainControl as _, MotorState as _, SharedComm as _};
 
     fn make_counters() -> TickCounters {
-        TickCounters::new(1999)
+        TickCounters::new()
     }
 
     struct MockPwm {
