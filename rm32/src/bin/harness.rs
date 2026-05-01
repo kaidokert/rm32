@@ -220,15 +220,13 @@ impl Harness {
                 temperature: 25,
             },
             telem: MockTelem,
-            main: rm32::main_state::MainState::new(rm32::main_state::BoardParams {
-                voltage_divider: 110,
-                millivolt_per_amp: 20,
-                current_offset: 0,
-                stall_protect_interval: 6500,
-                use_ntc: false,
-                timer1_max_arr: 1999,
-                cpu_mhz: 64,
-            }),
+            main: rm32::main_state::MainState::new(
+                &rm32::board::BoardConfig::DEFAULT,
+                rm32::main_state::ChipParams {
+                    timer1_max_arr: 1999,
+                    cpu_mhz: 64,
+                },
+            ),
         }
     }
 
