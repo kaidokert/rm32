@@ -513,4 +513,47 @@ mod tests {
         let v2 = pid.tick_speed_control(5000, 50, true).unwrap();
         assert!(v2 >= v1, "override should accumulate: v1={v1}, v2={v2}");
     }
+
+    // --- DutyState tests ---
+
+    #[test]
+    fn set_duty_limits_applies_values() {
+        let mut d = DutyState::default();
+        d.set_duty_limits(100, 200, 300);
+        assert_eq!(d.minimum, 100);
+        assert_eq!(d.min_startup, 200);
+        assert_eq!(d.startup_max, 300);
+    }
+
+    #[test]
+    fn apply_dead_time_override_shifts_all_thresholds() {
+        let mut d = DutyState::default();
+        d.set_duty_limits(5, 120, 200);
+        d.apply_dead_time_override(160);
+        assert_eq!(d.minimum, 165);
+        assert_eq!(d.min_startup, 280);
+        assert_eq!(d.startup_max, 360);
+    }
+
+    #[test]
+    fn apply_dead_time_override_zero_is_noop() {
+        let mut d = DutyState::default();
+        d.set_duty_limits(5, 120, 200);
+        d.apply_dead_time_override(0);
+        assert_eq!(d.minimum, 5);
+        assert_eq!(d.min_startup, 120);
+        assert_eq!(d.startup_max, 200);
+    }
+
+    // --- ProtectionState tests ---
+
+    #[test]
+    fn protection_getters_match_setters() {
+        let mut p = ProtectionState::default();
+        assert_eq!(p.bemf_timeout(), 10); // default
+        p.set_bemf_timeout(20);
+        assert_eq!(p.bemf_timeout(), 20);
+        p.set_bemf_timeout_happened(5);
+        assert_eq!(p.bemf_timeout_happened(), 5);
+    }
 }
