@@ -2,11 +2,3 @@ target/
 Cargo.lock
 .DS_Store
 ref/
-CRITIQUE.md
-FEEDBACK_PR2.md
-PR4_REVIEW.md
-SHAREDCOMM_AUDIT.md
-TEST_MATRIX_PLAN.md
-VISIBILITY_AUDIT.md
-default.profraw
-rm32/TODO.md
