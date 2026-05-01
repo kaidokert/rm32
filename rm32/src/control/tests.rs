@@ -254,8 +254,8 @@ mod tests {
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
         shared.newinput.set(2047);
         shared.adjusted_input.set(2047);
-        duty.last = 100;
-        duty.ramp_divider = 0;
+        duty.set_last(100);
+        duty.set_ramp_divider(0);
 
         isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
             commutation: &mut comm,
@@ -268,14 +268,14 @@ mod tests {
         });
 
         assert!(
-            duty.cycle < 2000,
+            duty.cycle() < 2000,
             "duty should be ramp-limited, got {}",
-            duty.cycle
+            duty.cycle()
         );
         assert!(
-            duty.cycle > 100,
+            duty.cycle() > 100,
             "duty should increase from 100, got {}",
-            duty.cycle
+            duty.cycle()
         );
     }
 

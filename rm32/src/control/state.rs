@@ -23,19 +23,19 @@ pub struct BemfState {
 /// Duty cycle and ramp control.
 #[derive(Clone)]
 pub struct DutyState {
-    pub(crate) cycle: u16,
-    pub(crate) maximum: u16,
-    pub(crate) last: u16,
-    pub(crate) adjusted: u16,
-    pub(crate) min_startup: u16,
-    pub(crate) startup_max: u16,
-    pub(crate) minimum: u16,
-    pub(crate) max_change: u8,
-    pub(crate) ramp_count: u16,
-    pub(crate) ramp_divider: u8,
-    pub(crate) max_ramp_startup: u8,
-    pub(crate) max_ramp_low_rpm: u8,
-    pub(crate) max_ramp_high_rpm: u8,
+    cycle: u16,
+    maximum: u16,
+    last: u16,
+    adjusted: u16,
+    min_startup: u16,
+    startup_max: u16,
+    minimum: u16,
+    max_change: u8,
+    ramp_count: u16,
+    ramp_divider: u8,
+    max_ramp_startup: u8,
+    max_ramp_low_rpm: u8,
+    max_ramp_high_rpm: u8,
 }
 
 impl DutyState {
@@ -51,6 +51,105 @@ impl DutyState {
         self.min_startup += dead_time;
         self.minimum += dead_time;
         self.startup_max += dead_time;
+    }
+
+    /// Map throttle input to duty setpoint, with startup clamping.
+    /// Returns the setpoint and whether this is a startup condition.
+    pub(crate) fn compute_setpoint(
+        &self,
+        input: u16,
+        zero_crosses: u32,
+        stall_protection: u8,
+    ) -> u16 {
+        let setpoint = crate::functions::map(
+            input as i32,
+            crate::constants::THROTTLE_MIN_SIGNAL as i32,
+            crate::constants::DSHOT_MAX_THROTTLE as i32,
+            self.minimum as i32,
+            crate::constants::DUTY_SCALE_MAX as i32,
+        ) as u16;
+        let safe_shift = stall_protection.min(5);
+        if zero_crosses < (crate::constants::STARTUP_ZC_BASE >> safe_shift) {
+            setpoint.clamp(self.min_startup, self.startup_max)
+        } else {
+            setpoint
+        }
+    }
+
+    /// Apply ramp rate limiting to duty cycle.
+    /// `battery_voltage`: mV for voltage-based ramp, `commutation_interval`: for speed check.
+    pub(crate) fn ramp_limit(
+        &mut self,
+        battery_voltage: u16,
+        commutation_interval: u32,
+        zero_crosses: u32,
+        voltage_based: bool,
+    ) {
+        if self.ramp_count > self.ramp_divider as u16 {
+            self.ramp_count = 0;
+            if voltage_based {
+                let v_change =
+                    crate::functions::map(battery_voltage as i32, 800, 2200, 10, 1) as u8;
+                self.max_change = if commutation_interval > 200 {
+                    v_change
+                } else {
+                    v_change.saturating_mul(3)
+                };
+            } else if zero_crosses < 150 || self.last < 150 {
+                self.max_change = self.max_ramp_startup;
+            } else if self.last > 500 {
+                self.max_change = self.max_ramp_low_rpm;
+            } else {
+                self.max_change = self.max_ramp_high_rpm;
+            }
+            let change = self.max_change as u16;
+            if self.cycle > self.last + change {
+                self.cycle = self.last + change;
+            }
+            if self.last > self.cycle + change {
+                self.cycle = self.last - change;
+            }
+        } else {
+            self.cycle = self.last;
+        }
+    }
+
+    /// Apply stall boost, duty maximum, and current limit ceilings.
+    pub(crate) fn clamp_ceilings(
+        &mut self,
+        stall_boost: u16,
+        duty_maximum: u16,
+        current_limit: u16,
+    ) {
+        self.cycle = self.cycle.saturating_add(stall_boost);
+        self.maximum = duty_maximum;
+        if self.cycle > self.maximum {
+            self.cycle = self.maximum;
+        }
+        if self.cycle > current_limit {
+            self.cycle = current_limit;
+        }
+    }
+
+    /// Set duty to startup value when motor first starts.
+    pub(crate) fn start_motor(&mut self) {
+        self.last = self.min_startup;
+    }
+
+    /// Increment ramp counter (called each ISR tick).
+    pub(crate) fn increment_ramp_count(&mut self) {
+        self.ramp_count += 1;
+    }
+
+    /// Set ramp divider (test setup).
+    pub fn set_ramp_divider(&mut self, v: u8) {
+        self.ramp_divider = v;
+    }
+
+    /// Finalize tick: store last duty, return current cycle for PWM output.
+    pub(crate) fn finalize(&mut self) -> u16 {
+        self.last = self.cycle;
+        self.cycle
     }
 }
 
