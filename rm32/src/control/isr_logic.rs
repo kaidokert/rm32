@@ -7,7 +7,7 @@
 use crate::commutation::Commutation;
 use crate::constants::*;
 use crate::control::context::MotorContext;
-use crate::control::state::BemfState;
+use crate::control::state::{BemfState, DutyState};
 use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutput, PwmOutput};
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
@@ -126,14 +126,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // PWM output
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
-        let adj = ((ctx.duty.cycle() as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
-        ctx.hal.pwm().set_duty_all(adj);
+        ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
-        // Proportional brake: apply drag brake duty (complement of brake strength)
-        let brake_duty = ctx.config.drag_brake_strength as u32 * 200;
-        let adj =
-            tim1_arr.saturating_sub((brake_duty * tim1_arr as u32 / DUTY_SCALE_MAX as u32) as u16);
-        ctx.hal.pwm().set_duty_all(adj);
+        ctx.hal.pwm().set_duty_all(DutyState::brake_compare(
+            ctx.config.drag_brake_strength,
+            tim1_arr,
+        ));
     } else {
         ctx.hal.pwm().set_duty_all(0);
     }

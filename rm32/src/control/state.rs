@@ -146,6 +146,19 @@ impl DutyState {
         self.ramp_divider = v;
     }
 
+    /// Compute PWM compare value from duty cycle and timer auto-reload.
+    pub(crate) fn pwm_compare(&self, tim1_arr: u16) -> u16 {
+        ((self.cycle as u32 * tim1_arr as u32) / crate::constants::DUTY_SCALE_MAX as u32 + 1) as u16
+    }
+
+    /// Compute PWM compare value for proportional brake mode.
+    pub(crate) fn brake_compare(drag_brake_strength: u8, tim1_arr: u16) -> u16 {
+        let brake_duty = drag_brake_strength as u32 * 200;
+        tim1_arr.saturating_sub(
+            (brake_duty * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32) as u16,
+        )
+    }
+
     /// Finalize tick: store last duty, return current cycle for PWM output.
     pub(crate) fn finalize(&mut self) -> u16 {
         self.last = self.cycle;
