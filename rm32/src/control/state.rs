@@ -54,7 +54,6 @@ impl DutyState {
     }
 
     /// Map throttle input to duty setpoint, with startup clamping.
-    /// Returns the setpoint and whether this is a startup condition.
     pub(crate) fn compute_setpoint(
         &self,
         input: u16,
@@ -77,12 +76,13 @@ impl DutyState {
     }
 
     /// Apply ramp rate limiting to duty cycle.
-    /// `battery_voltage`: mV for voltage-based ramp, `commutation_interval`: for speed check.
+    /// `average_interval`: from e_com_time/3, used for RPM-based ramp profile selection.
     pub(crate) fn ramp_limit(
         &mut self,
         battery_voltage: u16,
         commutation_interval: u32,
         zero_crosses: u32,
+        average_interval: u32,
         voltage_based: bool,
     ) {
         if self.ramp_count > self.ramp_divider as u16 {
@@ -97,7 +97,8 @@ impl DutyState {
                 };
             } else if zero_crosses < 150 || self.last < 150 {
                 self.max_change = self.max_ramp_startup;
-            } else if self.last > 500 {
+            } else if average_interval > 500 {
+                // C: average_interval > 500 = low RPM → use low-RPM ramp rate
                 self.max_change = self.max_ramp_low_rpm;
             } else {
                 self.max_change = self.max_ramp_high_rpm;
@@ -667,5 +668,54 @@ mod tests {
         assert_eq!(p.bemf_timeout(), 20);
         p.set_bemf_timeout_happened(5);
         assert_eq!(p.bemf_timeout_happened(), 5);
+    }
+
+    // --- DutyState ramp profile selection tests ---
+
+    /// Helper: create DutyState ready for ramp_limit testing.
+    /// Sets ramp_count > ramp_divider so the profile branch executes.
+    fn ramp_test_duty(last: u16, cycle: u16) -> DutyState {
+        let mut d = DutyState::default();
+        d.set_last(last);
+        d.set_cycle(cycle);
+        d.set_ramp_divider(0); // ramp_count=0 > divider=0 → triggers profile
+        d.increment_ramp_count(); // ramp_count=1 > 0
+        d
+    }
+
+    /// Low RPM (average_interval > 500) selects max_ramp_low_rpm.
+    #[test]
+    fn ramp_profile_low_rpm() {
+        let mut d = ramp_test_duty(400, 500);
+        // Default: max_ramp_low_rpm=6, max_ramp_high_rpm=16
+        d.ramp_limit(0, 0, 200, 1000, false); // average_interval=1000 > 500
+        // cycle should be clamped to last + max_ramp_low_rpm = 400 + 6 = 406
+        assert_eq!(d.cycle(), 406, "low RPM should use max_ramp_low_rpm=6");
+    }
+
+    /// High RPM (average_interval <= 500) selects max_ramp_high_rpm.
+    #[test]
+    fn ramp_profile_high_rpm() {
+        let mut d = ramp_test_duty(400, 500);
+        d.ramp_limit(0, 0, 200, 100, false); // average_interval=100 <= 500
+        // cycle should be clamped to last + max_ramp_high_rpm = 400 + 16 = 416
+        assert_eq!(d.cycle(), 416, "high RPM should use max_ramp_high_rpm=16");
+    }
+
+    /// Startup (zero_crosses < 150) selects max_ramp_startup regardless of interval.
+    #[test]
+    fn ramp_profile_startup() {
+        let mut d = ramp_test_duty(400, 500);
+        d.ramp_limit(0, 0, 50, 1000, false); // zero_crosses=50 < 150
+        // cycle should be clamped to last + max_ramp_startup = 400 + 2 = 402
+        assert_eq!(d.cycle(), 402, "startup should use max_ramp_startup=2");
+    }
+
+    /// Low duty (last < 150) also selects startup ramp.
+    #[test]
+    fn ramp_profile_low_duty_uses_startup() {
+        let mut d = ramp_test_duty(100, 200);
+        d.ramp_limit(0, 0, 200, 1000, false); // last=100 < 150
+        assert_eq!(d.cycle(), 102, "low duty should use max_ramp_startup=2");
     }
 }

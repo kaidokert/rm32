@@ -93,10 +93,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 
     // Ramp rate limiting
+    let average_interval = (ctx.shared.e_com_time() / 3) as u32;
     ctx.duty.ramp_limit(
         ctx.shared.battery_voltage(),
         ctx.shared.commutation_interval(),
         ctx.shared.zero_crosses(),
+        average_interval,
         ctx.counters.voltage_based_ramp,
     );
 
