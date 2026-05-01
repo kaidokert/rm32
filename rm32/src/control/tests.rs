@@ -21,7 +21,6 @@ mod tests {
             one_khz_loop_counter: 0,
             armed_timeout_count: 0,
             tim1_arr: 1999,
-            voltage_based_ramp: false,
         }
     }
 
@@ -146,6 +145,7 @@ mod tests {
             duty: &mut duty,
             config: &config,
             counters: &mut counters,
+            voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
         });
@@ -173,6 +173,7 @@ mod tests {
             duty: &mut duty,
             config: &config,
             counters: &mut counters,
+            voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
         });
@@ -200,6 +201,7 @@ mod tests {
                 duty: &mut duty,
                 config: &config,
                 counters: &mut counters,
+                voltage_based_ramp: false,
                 shared: &shared,
                 hal: &mut hal,
             });
@@ -212,6 +214,7 @@ mod tests {
             duty: &mut duty,
             config: &config,
             counters: &mut counters,
+            voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
         });
@@ -234,6 +237,7 @@ mod tests {
             duty: &mut duty,
             config: &config,
             counters: &mut counters,
+            voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
         });
@@ -263,6 +267,7 @@ mod tests {
             duty: &mut duty,
             config: &config,
             counters: &mut counters,
+            voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
         });
