@@ -428,18 +428,33 @@ impl SharedState {
     }
 }
 
-impl crate::shared_comm::SharedComm for SharedState {
+impl crate::shared_comm::MotorState for SharedState {
     fn motor_mode(&self) -> MotorMode {
         self.motor_mode()
     }
     fn set_motor_mode(&self, mode: MotorMode) {
         self.set_motor_mode(mode);
     }
-
     fn transition(&self, event: crate::motor_mode::MotorEvent) {
         SharedState::transition(self, event);
     }
+    // Override convenience setters to use atomic CAS inherent methods
+    // instead of the non-atomic trait defaults (load + store).
+    fn set_armed(&self, v: bool) {
+        SharedState::set_armed(self, v);
+    }
+    fn set_running(&self, v: bool) {
+        SharedState::set_running(self, v);
+    }
+    fn set_old_routine(&self, v: bool) {
+        SharedState::set_old_routine(self, v);
+    }
+    fn set_stepper_sine(&self, v: bool) {
+        SharedState::set_stepper_sine(self, v);
+    }
+}
 
+impl crate::shared_comm::SharedComm for SharedState {
     fn input_set(&self) -> bool {
         self.input_set()
     }
