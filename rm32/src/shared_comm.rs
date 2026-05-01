@@ -2,13 +2,19 @@
 //!
 //! On real hardware, this is implemented via atomics (SharedState).
 //! For testing, TestShared implements it with Cell fields.
+//!
+//! Decomposed into sub-traits by data-flow direction:
+//! - `MotorState`: motor mode state machine (bidirectional)
+//! - (future) `IsrTiming`: ISR→main timing data
+//! - (future) `MainControl`: main→ISR control data
 
 use crate::motor_mode::{MotorEvent, MotorMode};
 
-/// Communication interface between ISR and main loop contexts.
-/// Provides access to shared motor state that both contexts need.
-pub trait SharedComm {
-    // Motor mode (replaces armed/running/old_routine/stepper_sine bools)
+/// Motor mode state machine — bidirectional ISR↔main.
+///
+/// Only two methods require implementation: `motor_mode()` and `set_motor_mode()`.
+/// All convenience getters/setters and the `transition()` method are derived.
+pub trait MotorState {
     fn motor_mode(&self) -> MotorMode;
     fn set_motor_mode(&self, mode: MotorMode);
 
@@ -20,7 +26,6 @@ pub trait SharedComm {
         }
     }
 
-    // Convenience accessors derived from motor_mode
     fn armed(&self) -> bool {
         self.motor_mode().is_armed()
     }
@@ -34,7 +39,6 @@ pub trait SharedComm {
         self.motor_mode().is_stepper_sine()
     }
 
-    // Convenience setters that translate to mode transitions
     fn set_armed(&self, v: bool) {
         if v && !self.armed() {
             self.set_motor_mode(MotorMode::Armed);
@@ -63,7 +67,11 @@ pub trait SharedComm {
             self.set_motor_mode(MotorMode::Armed);
         }
     }
+}
 
+/// Communication interface between ISR and main loop contexts.
+/// Requires `MotorState` for motor mode access.
+pub trait SharedComm: MotorState {
     fn input_set(&self) -> bool;
     fn set_input_set(&self, v: bool);
     fn dshot_telemetry(&self) -> bool;

@@ -1,7 +1,7 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
 use crate::motor_mode::MotorMode;
-use crate::shared_comm::SharedComm;
+use crate::shared_comm::{MotorState, SharedComm};
 use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
@@ -64,14 +64,16 @@ impl TestShared {
     }
 }
 
-impl SharedComm for TestShared {
+impl MotorState for TestShared {
     fn motor_mode(&self) -> MotorMode {
         self.mode.get()
     }
     fn set_motor_mode(&self, mode: MotorMode) {
         self.mode.set(mode);
     }
+}
 
+impl SharedComm for TestShared {
     fn input_set(&self) -> bool {
         self.input_set.get()
     }

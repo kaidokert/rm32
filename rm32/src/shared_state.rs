@@ -428,18 +428,19 @@ impl SharedState {
     }
 }
 
-impl crate::shared_comm::SharedComm for SharedState {
+impl crate::shared_comm::MotorState for SharedState {
     fn motor_mode(&self) -> MotorMode {
         self.motor_mode()
     }
     fn set_motor_mode(&self, mode: MotorMode) {
         self.set_motor_mode(mode);
     }
-
     fn transition(&self, event: crate::motor_mode::MotorEvent) {
         SharedState::transition(self, event);
     }
+}
 
+impl crate::shared_comm::SharedComm for SharedState {
     fn input_set(&self) -> bool {
         self.input_set()
     }
