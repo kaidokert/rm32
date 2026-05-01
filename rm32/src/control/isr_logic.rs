@@ -12,14 +12,6 @@ use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutpu
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
 
-/// Counters and config owned exclusively by the ISR tick.
-pub struct TickCounters {
-    pub ten_khz_counter: u32,
-    pub one_khz_loop_counter: u16,
-    pub armed_timeout_count: u32,
-    pub tim1_arr: u16,
-}
-
 /// 20kHz control loop tick.
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
@@ -27,6 +19,7 @@ pub struct TickCounters {
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Sync direction from shared (main loop may flip for bidirectional)
     ctx.commutation.forward = ctx.shared.forward();
+    let tim1_arr = ctx.shared.tim1_arr();
 
     // Throttle → setpoint
     // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
@@ -56,8 +49,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.shared.set_duty_cycle_setpoint(0);
             if ctx.config.brake_on_stop == 2 {
                 ctx.hal.phase().com_step(2);
-                let brake_duty = (ctx.config.active_brake_power as u32
-                    * ctx.counters.tim1_arr as u32
+                let brake_duty = (ctx.config.active_brake_power as u32 * tim1_arr as u32
                     / DUTY_SCALE_MAX as u32)
                     * 10;
                 ctx.hal.pwm().set_duty_all(brake_duty as u16);
@@ -68,21 +60,19 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Core tick
     let setpoint = ctx.shared.duty_cycle_setpoint();
     ctx.duty.set_cycle(setpoint);
-    ctx.counters.ten_khz_counter += 1;
     ctx.shared.increment_signal_timeout();
     ctx.duty.increment_ramp_count();
-    ctx.counters.one_khz_loop_counter += 1;
 
     // Arming
     if !ctx.shared.armed() {
         if ctx.shared.input_set() && ctx.shared.adjusted_input() == 0 {
-            ctx.counters.armed_timeout_count += 1;
-            if ctx.counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
+            *ctx.armed_timeout_count += 1;
+            if *ctx.armed_timeout_count > ARMING_TIMEOUT_TICKS {
                 ctx.shared.transition(MotorEvent::Arm);
-                ctx.counters.armed_timeout_count = 0;
+                *ctx.armed_timeout_count = 0;
             }
         } else {
-            ctx.counters.armed_timeout_count = 0;
+            *ctx.armed_timeout_count = 0;
         }
     }
 
@@ -102,7 +92,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     );
 
     // Sync main→ISR published state (main computes, ISR applies)
-    ctx.counters.tim1_arr = ctx.shared.tim1_arr();
     ctx.bemf.sync_config(
         ctx.shared.filter_level(),
         ctx.shared.auto_advance(),
@@ -122,7 +111,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     );
 
     // PWM output
-    let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
         ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
