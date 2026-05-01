@@ -12,30 +12,6 @@ use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutpu
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
 
-/// Counters and config owned exclusively by the ISR tick.
-pub struct TickCounters {
-    armed_timeout_count: u32,
-}
-
-impl TickCounters {
-    /// Read armed timeout count (for harness reporting).
-    pub fn armed_timeout_count(&self) -> u32 {
-        self.armed_timeout_count
-    }
-
-    pub fn new() -> Self {
-        Self {
-            armed_timeout_count: 0,
-        }
-    }
-}
-
-impl Default for TickCounters {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// 20kHz control loop tick.
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
@@ -90,13 +66,13 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // Arming
     if !ctx.shared.armed() {
         if ctx.shared.input_set() && ctx.shared.adjusted_input() == 0 {
-            ctx.counters.armed_timeout_count += 1;
-            if ctx.counters.armed_timeout_count > ARMING_TIMEOUT_TICKS {
+            *ctx.armed_timeout_count += 1;
+            if *ctx.armed_timeout_count > ARMING_TIMEOUT_TICKS {
                 ctx.shared.transition(MotorEvent::Arm);
-                ctx.counters.armed_timeout_count = 0;
+                *ctx.armed_timeout_count = 0;
             }
         } else {
-            ctx.counters.armed_timeout_count = 0;
+            *ctx.armed_timeout_count = 0;
         }
     }
 

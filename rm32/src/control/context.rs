@@ -5,7 +5,6 @@
 
 use crate::commutation::Commutation;
 use crate::config::EepromConfig;
-use crate::control::isr_logic::TickCounters;
 use crate::control::state::{BemfState, DutyState};
 use crate::hal::MotorHal;
 use crate::shared_comm::SharedComm;
@@ -21,7 +20,8 @@ pub struct MotorContext<'a, S: SharedComm, H: MotorHal> {
     pub bemf: &'a mut BemfState,
     pub duty: &'a mut DutyState,
     pub config: &'a EepromConfig,
-    pub counters: &'a mut TickCounters,
+    /// Arming timeout counter (persists across ISR calls).
+    pub armed_timeout_count: &'a mut u32,
 
     /// Board constant: use voltage-based ramp rate instead of RPM-based.
     /// Set from `BOARD.voltage_based_ramp` at construction, never changes.

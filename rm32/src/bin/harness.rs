@@ -7,7 +7,7 @@
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::context::MotorContext;
-use rm32::control::isr_logic::{self, TickCounters};
+use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
@@ -148,7 +148,7 @@ struct Harness {
     bemf: BemfState,
     duty: DutyState,
     config: EepromConfig,
-    counters: TickCounters,
+    armed_timeout_count: u32,
     hal: MockMotorHal,
     adc: MockAdc,
     telem: MockTelem,
@@ -183,7 +183,7 @@ impl Harness {
             bemf: BemfState::default(),
             duty: DutyState::default(),
             config: EepromConfig::default(),
-            counters: TickCounters::new(),
+            armed_timeout_count: 0,
             hal: MockMotorHal {
                 pwm: MockPwm {
                     duty: 0,
@@ -358,7 +358,7 @@ impl Harness {
             bemf: &mut self.bemf,
             duty: &mut self.duty,
             config: &self.config,
-            counters: &mut self.counters,
+            armed_timeout_count: &mut self.armed_timeout_count,
             voltage_based_ramp: false,
             shared: &self.shared,
             hal: &mut self.hal,
@@ -416,7 +416,7 @@ impl Harness {
             self.shared.old_routine() as i32,
             self.shared.stepper_sine() as i32,
             self.shared.signal_timeout(),
-            self.counters.armed_timeout_count(),
+            self.armed_timeout_count,
             self.main.measurements().battery_voltage().0,
             self.main.measurements().actual_current().0,
             self.main.measurements().degrees_celsius().0,

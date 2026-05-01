@@ -66,7 +66,7 @@ pub fn handle_tim6() {
         bemf: &mut state.bemf,
         duty: &mut state.duty,
         config: &state.config,
-        counters: &mut state.counters,
+        armed_timeout_count: &mut state.armed_timeout_count,
         voltage_based_ramp: state.voltage_based_ramp,
         shared,
         hal: &mut state.hal,

@@ -83,7 +83,7 @@ fn main() -> ! {
         config: EepromConfig::default(),
         forward: true,
         edt_armed: false,
-        counters: rm32::control::isr_logic::TickCounters::new(),
+        armed_timeout_count: 0,
         frametime_low: 400,
         frametime_high: 600,
         voltage_based_ramp: BOARD.voltage_based_ramp,

@@ -11,12 +11,12 @@ mod tests {
     // ISR logic tests (platform-independent, using TestShared + MockHal)
     // =================================================================
 
-    use crate::control::isr_logic::{self, TickCounters};
+    use crate::control::isr_logic;
     use crate::control::shared_impl::TestShared;
     use crate::shared_comm::{IsrTiming as _, MainControl as _, MotorState as _, SharedComm as _};
 
-    fn make_counters() -> TickCounters {
-        TickCounters::new()
+    fn make_armed_timeout() -> u32 {
+        0
     }
 
     struct MockPwm {
@@ -126,7 +126,7 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
         let config = crate::config::EepromConfig::default();
-        let mut counters = make_counters();
+        let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
@@ -139,7 +139,7 @@ mod tests {
             bemf: &mut bemf,
             duty: &mut duty,
             config: &config,
-            counters: &mut counters,
+            armed_timeout_count: &mut armed_timeout,
             voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
@@ -155,7 +155,7 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
         let config = crate::config::EepromConfig::default();
-        let mut counters = make_counters();
+        let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
@@ -167,7 +167,7 @@ mod tests {
             bemf: &mut bemf,
             duty: &mut duty,
             config: &config,
-            counters: &mut counters,
+            armed_timeout_count: &mut armed_timeout,
             voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
@@ -182,7 +182,7 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
         let config = crate::config::EepromConfig::default();
-        let mut counters = make_counters();
+        let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
@@ -195,7 +195,7 @@ mod tests {
                 bemf: &mut bemf,
                 duty: &mut duty,
                 config: &config,
-                counters: &mut counters,
+                armed_timeout_count: &mut armed_timeout,
                 voltage_based_ramp: false,
                 shared: &shared,
                 hal: &mut hal,
@@ -208,7 +208,7 @@ mod tests {
             bemf: &mut bemf,
             duty: &mut duty,
             config: &config,
-            counters: &mut counters,
+            armed_timeout_count: &mut armed_timeout,
             voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
@@ -222,7 +222,7 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
         let config = crate::config::EepromConfig::default();
-        let mut counters = make_counters();
+        let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
@@ -231,7 +231,7 @@ mod tests {
             bemf: &mut bemf,
             duty: &mut duty,
             config: &config,
-            counters: &mut counters,
+            armed_timeout_count: &mut armed_timeout,
             voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
@@ -246,7 +246,7 @@ mod tests {
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
         let config = crate::config::EepromConfig::default();
-        let mut counters = make_counters();
+        let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
@@ -261,7 +261,7 @@ mod tests {
             bemf: &mut bemf,
             duty: &mut duty,
             config: &config,
-            counters: &mut counters,
+            armed_timeout_count: &mut armed_timeout,
             voltage_based_ramp: false,
             shared: &shared,
             hal: &mut hal,
