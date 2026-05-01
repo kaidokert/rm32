@@ -657,6 +657,9 @@ fn main() {
             harness
                 .duty
                 .set_duty_limits(mc.minimum_duty, mc.min_startup_duty, mc.startup_max_duty);
+            if mc.dead_time_override > 0 {
+                harness.duty.apply_dead_time_override(mc.dead_time_override);
+            }
             // Apply advance level
             let adv = harness.config.advance_level;
             if (10..43).contains(&adv) {
