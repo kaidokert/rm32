@@ -7,26 +7,26 @@ use crate::pid::Pid;
 /// BEMF zero-cross detection state.
 #[derive(Clone)]
 pub struct BemfState {
-    pub counter: u8,
-    pub zc_found: bool,
+    pub(crate) counter: u8,
+    pub(crate) zc_found: bool,
     pub(crate) min_counts_up: u8,
     pub(crate) min_counts_down: u8,
     pub(crate) bad_count: u8,
     pub(crate) bad_count_threshold: u8,
-    pub filter_level: u8,
+    pub(crate) filter_level: u8,
     pub(crate) wait_time: u16,
     pub(crate) last_zc_time: u16,
     pub(crate) this_zc_time: u16,
-    pub temp_advance: u8,
+    pub(crate) temp_advance: u8,
 }
 
 /// Duty cycle and ramp control.
 #[derive(Clone)]
 pub struct DutyState {
-    pub cycle: u16,
+    pub(crate) cycle: u16,
     pub(crate) maximum: u16,
-    pub last: u16,
-    pub adjusted: u16,
+    pub(crate) last: u16,
+    pub(crate) adjusted: u16,
     pub min_startup: u16,
     pub startup_max: u16,
     pub minimum: u16,
@@ -141,21 +141,48 @@ impl PidState {
 pub struct ProtectionState {
     pub bemf_timeout_happened: u8,
     pub bemf_timeout: u8,
-    pub low_voltage_count: u16,
+    pub(crate) low_voltage_count: u16,
     pub(crate) low_voltage_cutoff: bool,
 }
 
 /// Sensor measurements.
 #[derive(Clone, Default)]
 pub struct Measurements {
-    pub battery_voltage: crate::units::MilliVolts,
-    pub actual_current: crate::units::MilliAmps,
-    pub degrees_celsius: crate::units::DegreesCelsius,
+    pub(crate) battery_voltage: crate::units::MilliVolts,
+    pub(crate) actual_current: crate::units::MilliAmps,
+    pub(crate) degrees_celsius: crate::units::DegreesCelsius,
     pub(crate) consumed_current: i32,
     /// EWMA filter for ADC voltage readings.
     pub(crate) voltage_filter: crate::filter::EwmaPow2<3>,
     /// Multi-stage filter for ADC current readings.
     pub(crate) current_filter: crate::current::CurrentFilter,
+}
+
+impl Measurements {
+    /// Read battery voltage.
+    pub fn battery_voltage(&self) -> crate::units::MilliVolts {
+        self.battery_voltage
+    }
+
+    /// Set battery voltage.
+    pub fn set_battery_voltage(&mut self, v: crate::units::MilliVolts) {
+        self.battery_voltage = v;
+    }
+
+    /// Read actual current.
+    pub fn actual_current(&self) -> crate::units::MilliAmps {
+        self.actual_current
+    }
+
+    /// Set actual current.
+    pub fn set_actual_current(&mut self, v: crate::units::MilliAmps) {
+        self.actual_current = v;
+    }
+
+    /// Read temperature in degrees Celsius.
+    pub fn degrees_celsius(&self) -> crate::units::DegreesCelsius {
+        self.degrees_celsius
+    }
 }
 
 /// Main-loop timing state — eRPM and commutation interval tracking.
@@ -164,9 +191,58 @@ pub struct Measurements {
 /// (commutation_interval, zero_crosses, e_com_time) lives in SharedComm.
 #[derive(Clone, Default)]
 pub struct TimingState {
-    pub average_interval: u32,
-    pub last_average_interval: u32,
-    pub e_rpm: u16,
+    pub(crate) average_interval: u32,
+    pub(crate) last_average_interval: u32,
+    pub(crate) e_rpm: u16,
+}
+
+impl BemfState {
+    /// Read BEMF counter value.
+    pub fn counter(&self) -> u8 {
+        self.counter
+    }
+
+    /// Read zero-cross found flag.
+    pub fn zc_found(&self) -> bool {
+        self.zc_found
+    }
+
+    /// Read filter level.
+    pub fn filter_level(&self) -> u8 {
+        self.filter_level
+    }
+
+    /// Read temp advance.
+    pub fn temp_advance(&self) -> u8 {
+        self.temp_advance
+    }
+
+    /// Set temp advance (e.g. from EEPROM advance_level).
+    pub fn set_temp_advance(&mut self, v: u8) {
+        self.temp_advance = v;
+    }
+}
+
+impl TimingState {
+    /// Read average interval.
+    pub fn average_interval(&self) -> u32 {
+        self.average_interval
+    }
+
+    /// Set average interval.
+    pub fn set_average_interval(&mut self, v: u32) {
+        self.average_interval = v;
+    }
+
+    /// Read last average interval.
+    pub fn set_last_average_interval(&mut self, v: u32) {
+        self.last_average_interval = v;
+    }
+
+    /// Read eRPM.
+    pub fn e_rpm(&self) -> u16 {
+        self.e_rpm
+    }
 }
 
 impl Default for BemfState {
@@ -184,6 +260,33 @@ impl Default for BemfState {
             this_zc_time: 0,
             temp_advance: 0,
         }
+    }
+}
+
+impl DutyState {
+    /// Read duty cycle.
+    pub fn cycle(&self) -> u16 {
+        self.cycle
+    }
+
+    /// Set duty cycle.
+    pub fn set_cycle(&mut self, v: u16) {
+        self.cycle = v;
+    }
+
+    /// Read last duty cycle.
+    pub fn last(&self) -> u16 {
+        self.last
+    }
+
+    /// Set last duty cycle.
+    pub fn set_last(&mut self, v: u16) {
+        self.last = v;
+    }
+
+    /// Read adjusted duty cycle.
+    pub fn adjusted(&self) -> u16 {
+        self.adjusted
     }
 }
 
@@ -221,6 +324,13 @@ impl Default for PidState {
             input_override: 0,
             target_e_com_time: 0,
         }
+    }
+}
+
+impl ProtectionState {
+    /// Set low voltage count (for testing/harness).
+    pub fn set_low_voltage_count(&mut self, v: u16) {
+        self.low_voltage_count = v;
     }
 }
 

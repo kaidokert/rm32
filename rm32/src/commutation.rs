@@ -2,10 +2,10 @@
 
 /// Commutation state
 pub struct Commutation {
-    pub step: u8, // 1-6
-    pub forward: bool,
-    pub rising: bool,
-    pub desync_check: bool,
+    pub(crate) step: u8, // 1-6
+    pub(crate) forward: bool,
+    pub(crate) rising: bool,
+    pub(crate) desync_check: bool,
     /// Per-step commutation intervals for e_com_time averaging.
     /// Written by ISR on each step advance via record_interval().
     intervals: [u16; 6],
@@ -52,6 +52,48 @@ impl Commutation {
             self.rising = self.step.is_multiple_of(2);
         }
         self.step
+    }
+}
+
+impl Commutation {
+    /// Read current step (1-6).
+    pub fn step(&self) -> u8 {
+        self.step
+    }
+
+    /// Set current step.
+    pub fn set_step(&mut self, v: u8) {
+        self.step = v;
+    }
+
+    /// Read forward direction flag.
+    pub fn forward(&self) -> bool {
+        self.forward
+    }
+
+    /// Set forward direction flag.
+    pub fn set_forward(&mut self, v: bool) {
+        self.forward = v;
+    }
+
+    /// Mutable reference to forward flag (for CommandProcessor).
+    pub fn forward_mut(&mut self) -> &mut bool {
+        &mut self.forward
+    }
+
+    /// Read rising edge flag.
+    pub fn rising(&self) -> bool {
+        self.rising
+    }
+
+    /// Read desync_check flag.
+    pub fn desync_check(&self) -> bool {
+        self.desync_check
+    }
+
+    /// Set desync_check flag.
+    pub fn set_desync_check(&mut self, v: bool) {
+        self.desync_check = v;
     }
 }
 
