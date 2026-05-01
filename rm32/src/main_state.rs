@@ -165,19 +165,9 @@ impl<LED: OutputPin> MainState<LED> {
         &self.measurements
     }
 
-    /// Mutable access to measurements.
-    pub fn measurements_mut(&mut self) -> &mut Measurements {
-        &mut self.measurements
-    }
-
     /// Read-only access to timing state.
     pub fn timing(&self) -> &TimingState {
         &self.timing
-    }
-
-    /// Mutable access to timing state.
-    pub fn timing_mut(&mut self) -> &mut TimingState {
-        &mut self.timing
     }
 
     /// Read-only access to PID state.
@@ -185,9 +175,36 @@ impl<LED: OutputPin> MainState<LED> {
         &self.pid
     }
 
-    /// Mutable access to PID state.
-    pub fn pid_mut(&mut self) -> &mut PidState {
-        &mut self.pid
+    // --- Harness config injection setters ---
+
+    /// Set use_current_limit on the PID controller.
+    pub fn set_use_current_limit(&mut self, v: bool) {
+        self.pid.set_use_current_limit(v);
+    }
+
+    /// Set use_speed_control on the PID controller.
+    pub fn set_use_speed_control(&mut self, v: bool) {
+        self.pid.set_use_speed_control(v);
+    }
+
+    /// Set average_interval on timing state.
+    pub fn set_average_interval(&mut self, v: u32) {
+        self.timing.set_average_interval(v);
+    }
+
+    /// Set last_average_interval on timing state.
+    pub fn set_last_average_interval(&mut self, v: u32) {
+        self.timing.set_last_average_interval(v);
+    }
+
+    /// Set battery_voltage measurement.
+    pub fn set_battery_voltage(&mut self, v: crate::units::MilliVolts) {
+        self.measurements.set_battery_voltage(v);
+    }
+
+    /// Set actual_current measurement.
+    pub fn set_actual_current(&mut self, v: crate::units::MilliAmps) {
+        self.measurements.set_actual_current(v);
     }
 
     /// Read motor_kv.

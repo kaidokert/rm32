@@ -312,15 +312,17 @@ impl Harness {
         // Dispatch DShot commands via library CommandProcessor
         if actions.dshot_command > 0 {
             use rm32::dshot_commands::CommandResult;
+            let mut fwd = self.commutation.forward();
             let result = self.cmd_proc.process(
                 actions.dshot_command,
                 self.shared.armed(),
                 self.shared.running(),
                 &mut self.config,
-                self.commutation.forward_mut(),
+                &mut fwd,
                 &mut self.edt_armed,
                 false, // edt_arm_enable
             );
+            self.commutation.set_forward(fwd);
             match result {
                 CommandResult::SaveSettings => {
                     self.shared.set_save_settings_flag(true);
@@ -532,7 +534,6 @@ impl Harness {
             "cell_count" => self.main.cell_count = v as u8, // pub field
             "battery_voltage" => {
                 self.main
-                    .measurements_mut()
                     .set_battery_voltage(rm32::units::MilliVolts(v as u16));
                 // Also set ADC raw so main.tick() doesn't overwrite on next cycle
                 // Approximate: raw = mV * 100 / (3300 * divider / 4095)
@@ -544,7 +545,6 @@ impl Harness {
             }
             "actual_current" => {
                 self.main
-                    .measurements_mut()
                     .set_actual_current(rm32::units::MilliAmps(v as i16));
                 // Route through ADC mock for persistence
                 self.adc.current = ((v as i32 * 20 + 498 * 100) * 41 / 3300).max(0) as u16;
@@ -554,8 +554,8 @@ impl Harness {
             "prop_brake_active" => self.system.input_state.set_prop_brake_active(v != 0),
             "stepper_sine" => self.shared.set_stepper_sine(v != 0),
             "last_duty_cycle" => self.duty.set_last(v as u16),
-            "use_current_limit" => self.main.pid_mut().set_use_current_limit(v != 0),
-            "use_speed_control_loop" => self.main.pid_mut().set_use_speed_control(v != 0),
+            "use_current_limit" => self.main.set_use_current_limit(v != 0),
+            "use_speed_control_loop" => self.main.set_use_speed_control(v != 0),
             "send_esc_info_flag" => {
                 self.shared.set_send_esc_info_flag(v != 0);
             }
@@ -565,8 +565,8 @@ impl Harness {
             "duty_cycle" => self.duty.set_cycle(v as u16),
             "adjusted_input" => self.shared.set_adjusted_input(v as u16),
             "desync_check" => self.main.set_desync_check(v != 0),
-            "average_interval" => self.main.timing_mut().set_average_interval(v as u32),
-            "last_average_interval" => self.main.timing_mut().set_last_average_interval(v as u32),
+            "average_interval" => self.main.set_average_interval(v as u32),
+            "last_average_interval" => self.main.set_last_average_interval(v as u32),
             "process_adc" => {}
             // Calibration state (not implemented in v2)
             "calibration_required"

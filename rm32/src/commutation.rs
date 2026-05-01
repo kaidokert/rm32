@@ -76,11 +76,6 @@ impl Commutation {
         self.forward = v;
     }
 
-    /// Mutable reference to forward flag (for CommandProcessor).
-    pub fn forward_mut(&mut self) -> &mut bool {
-        &mut self.forward
-    }
-
     /// Read rising edge flag.
     pub fn rising(&self) -> bool {
         self.rising
