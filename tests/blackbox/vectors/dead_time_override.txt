@@ -1,0 +1,22 @@
+# Dead-time override raises duty floor via driving_brake_strength
+# Verifies that derive_motor_config dead_time_override is applied
+# to duty limits during load_eeprom.
+#
+# With driving_brake_strength=5, dead_time=60:
+#   dead_time_override = 60 + (150 - 5*10) = 160
+#   minimum_duty = 5 + 160 = 165
+# Throttle=200 maps to setpoint ~300 (raised floor vs ~153 without override)
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=0
+eeprom.driving_brake_strength=5
+
+@sequence
+load_eeprom
+
+# Low throttle with override: setpoint reflects raised minimum duty
+tick 1  | throttle=200 | duty_cycle_setpoint>250

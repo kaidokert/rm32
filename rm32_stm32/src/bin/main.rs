@@ -166,9 +166,8 @@ fn main() -> ! {
         // Apply timer1_max_arr from pwm_frequency config
         isr.tim1_arr = timer1_max_arr;
         // Apply startup duty from EEPROM
-        isr.duty.minimum = minimum_duty_cycle;
-        isr.duty.min_startup = min_startup_duty;
-        isr.duty.startup_max = startup_max_duty;
+        isr.duty
+            .set_duty_limits(minimum_duty_cycle, min_startup_duty, startup_max_duty);
         // Apply servo EEPROM calibration to transfer state
         if isr.config.eeprom_version > 0 {
             isr.transfer.servo.low_threshold = motor_cfg.servo_low;
@@ -178,9 +177,7 @@ fn main() -> ! {
         }
         // Apply dead-time override to duty thresholds
         if dead_time_override > 0 {
-            isr.duty.min_startup += dead_time_override;
-            isr.duty.minimum += dead_time_override;
-            isr.duty.startup_max += dead_time_override;
+            isr.duty.apply_dead_time_override(dead_time_override);
         }
     });
 
@@ -275,7 +272,7 @@ fn main() -> ! {
         // WS2812 LED error indicator
         if BOARD.has_led {
             // Error LED on BEMF timeout (stuck rotor)
-            if main_state.protection.bemf_timeout_happened > main_state.protection.bemf_timeout
+            if main_state.protection.bemf_timeout_happened() > main_state.protection.bemf_timeout()
                 && main_state.config.stuck_rotor_protection != 0
             {
                 use rm32::ws2812::{LedStatus, send_status};
