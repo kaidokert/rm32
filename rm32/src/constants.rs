@@ -133,3 +133,25 @@ pub const CALIBRATION_MIN_THROTTLE: u16 = 1500;
 
 /// Calibration entry: maximum jitter between readings.
 pub const CALIBRATION_MAX_JITTER: u32 = 50;
+
+// --- Ramp rate limiting ---
+
+/// Voltage ramp: minimum battery voltage for mapping (8.0V).
+pub const RAMP_VOLTAGE_LOW_MV: i32 = 800;
+/// Voltage ramp: maximum battery voltage for mapping (22.0V).
+pub const RAMP_VOLTAGE_HIGH_MV: i32 = 2200;
+/// Voltage ramp: max duty change at low voltage.
+pub const RAMP_VOLTAGE_CHANGE_MAX: i32 = 10;
+/// Voltage ramp: min duty change at high voltage.
+pub const RAMP_VOLTAGE_CHANGE_MIN: i32 = 1;
+/// Commutation interval threshold: below this, apply 3x voltage ramp multiplier.
+pub const RAMP_FAST_COMMUTATION_THRESHOLD: u32 = 200;
+/// Zero-crosses / duty threshold for startup ramp profile.
+pub const RAMP_STARTUP_THRESHOLD: u16 = 150;
+/// Average interval threshold: above = low RPM, below = high RPM.
+pub const RAMP_LOW_RPM_INTERVAL: u32 = 500;
+
+// --- Brake ---
+
+/// Brake strength per-unit scale factor (DUTY_SCALE_MAX / 10).
+pub const BRAKE_STRENGTH_SCALE: u32 = 200;

@@ -8,7 +8,6 @@ use crate::commutation::Commutation;
 use crate::constants::*;
 use crate::control::context::MotorContext;
 use crate::control::state::{BemfState, DutyState};
-use crate::functions::map;
 use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutput, PwmOutput};
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::SharedComm;
@@ -35,27 +34,15 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     let input = ctx.shared.adjusted_input();
     if ctx.shared.armed() && !ctx.shared.stepper_sine() {
         if input >= THROTTLE_MIN_SIGNAL {
-            let min_duty = ctx.duty.minimum;
-            let setpoint = map(
-                input as i32,
-                THROTTLE_MIN_SIGNAL as i32,
-                DSHOT_MAX_THROTTLE as i32,
-                min_duty as i32,
-                DUTY_SCALE_MAX as i32,
-            ) as u16;
-            // Startup duty clamping: during early commutations, enforce
-            // min_startup/startup_max to prevent stall or overcurrent.
-            let setpoint = if ctx.shared.zero_crosses()
-                < (crate::constants::STARTUP_ZC_BASE >> ctx.config.stall_protection.min(5))
-            {
-                setpoint.clamp(ctx.duty.min_startup, ctx.duty.startup_max)
-            } else {
-                setpoint
-            };
+            let setpoint = ctx.duty.compute_setpoint(
+                input,
+                ctx.shared.zero_crosses(),
+                ctx.config.stall_protection,
+            );
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
                 ctx.shared.transition(MotorEvent::StartMotor);
-                ctx.duty.last = ctx.duty.min_startup;
+                ctx.duty.start_motor();
                 let step = ctx.commutation.advance();
                 let e_com = ctx
                     .commutation
@@ -81,10 +68,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
     // Core tick
     let setpoint = ctx.shared.duty_cycle_setpoint();
-    ctx.duty.cycle = setpoint;
+    ctx.duty.set_cycle(setpoint);
     ctx.counters.ten_khz_counter += 1;
     ctx.shared.increment_signal_timeout();
-    ctx.duty.ramp_count += 1;
+    ctx.duty.increment_ramp_count();
     ctx.counters.one_khz_loop_counter += 1;
 
     // Arming
@@ -106,17 +93,17 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 
     // Ramp rate limiting
-    ramp_limit(ctx.duty, ctx.shared, ctx.counters.voltage_based_ramp);
-
-    // Apply stall protection boost
-    let stall_boost = ctx.shared.stall_protection_adjust();
-    if stall_boost > 0 && ctx.shared.running() {
-        ctx.duty.cycle = ctx.duty.cycle.saturating_add(stall_boost);
-    }
+    let average_interval = (ctx.shared.e_com_time() / 3) as u32;
+    ctx.duty.ramp_limit(
+        ctx.shared.battery_voltage(),
+        ctx.shared.commutation_interval(),
+        ctx.shared.zero_crosses(),
+        average_interval,
+        ctx.counters.voltage_based_ramp,
+    );
 
     // Sync main→ISR published state (main computes, ISR applies)
     ctx.counters.tim1_arr = ctx.shared.tim1_arr();
-    ctx.duty.maximum = ctx.shared.duty_maximum();
     ctx.bemf.filter_level = ctx.shared.filter_level();
     let auto_adv = ctx.shared.auto_advance();
     if auto_adv > 0 {
@@ -126,32 +113,32 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.bemf.min_counts_up = min_counts;
     ctx.bemf.min_counts_down = min_counts;
 
-    // Enforce duty ceiling (eRPM/temperature protection)
-    if ctx.duty.cycle > ctx.duty.maximum {
-        ctx.duty.cycle = ctx.duty.maximum;
-    }
-    // Current limit PID ceiling
-    let current_limit = ctx.shared.current_limit_adjust();
-    if ctx.duty.cycle > current_limit {
-        ctx.duty.cycle = current_limit;
-    }
+    // Apply stall boost + duty/current ceilings
+    let stall_boost = if ctx.shared.running() {
+        ctx.shared.stall_protection_adjust()
+    } else {
+        0
+    };
+    ctx.duty.clamp_ceilings(
+        stall_boost,
+        ctx.shared.duty_maximum(),
+        ctx.shared.current_limit_adjust(),
+    );
 
     // PWM output
     let tim1_arr = ctx.counters.tim1_arr;
     if ctx.shared.armed() && ctx.shared.running() {
-        let adj = ((ctx.duty.cycle as u32 * tim1_arr as u32) / DUTY_SCALE_MAX as u32 + 1) as u16;
-        ctx.hal.pwm().set_duty_all(adj);
+        ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
-        // Proportional brake: apply drag brake duty (complement of brake strength)
-        let brake_duty = ctx.config.drag_brake_strength as u32 * 200;
-        let adj =
-            tim1_arr.saturating_sub((brake_duty * tim1_arr as u32 / DUTY_SCALE_MAX as u32) as u16);
-        ctx.hal.pwm().set_duty_all(adj);
+        ctx.hal.pwm().set_duty_all(DutyState::brake_compare(
+            ctx.config.drag_brake_strength,
+            tim1_arr,
+        ));
     } else {
         ctx.hal.pwm().set_duty_all(0);
     }
-    ctx.duty.last = ctx.duty.cycle;
-    ctx.shared.set_duty_cycle(ctx.duty.cycle);
+    let final_duty = ctx.duty.finalize();
+    ctx.shared.set_duty_cycle(final_duty);
     ctx.hal.pwm().set_auto_reload(tim1_arr);
 
     // Sync ISR→shared (Commutation owns truth, shared publishes for main loop)
@@ -214,40 +201,6 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         } else {
             ctx.hal.com_timer().set_and_enable(ctx.bemf.wait_time + 1);
         }
-    }
-}
-
-/// Ramp rate limiting.
-fn ramp_limit<S: SharedComm>(duty: &mut DutyState, shared: &S, voltage_based: bool) {
-    if duty.ramp_count > duty.ramp_divider as u16 {
-        duty.ramp_count = 0;
-        if voltage_based {
-            let v_change = map(shared.battery_voltage() as i32, 800, 2200, 10, 1) as u8;
-            let ci = shared.commutation_interval();
-            duty.max_change = if ci > 200 {
-                v_change
-            } else {
-                v_change.saturating_mul(3)
-            };
-        } else {
-            let zc = shared.zero_crosses();
-            if zc < 150 || duty.last < 150 {
-                duty.max_change = duty.max_ramp_startup;
-            } else if duty.last > 500 {
-                duty.max_change = duty.max_ramp_low_rpm;
-            } else {
-                duty.max_change = duty.max_ramp_high_rpm;
-            }
-        }
-        let change = duty.max_change as u16;
-        if duty.cycle > duty.last + change {
-            duty.cycle = duty.last + change;
-        }
-        if duty.last > duty.cycle + change {
-            duty.cycle = duty.last - change;
-        }
-    } else {
-        duty.cycle = duty.last;
     }
 }
 

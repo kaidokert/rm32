@@ -23,19 +23,19 @@ pub struct BemfState {
 /// Duty cycle and ramp control.
 #[derive(Clone)]
 pub struct DutyState {
-    pub(crate) cycle: u16,
-    pub(crate) maximum: u16,
-    pub(crate) last: u16,
-    pub(crate) adjusted: u16,
-    pub(crate) min_startup: u16,
-    pub(crate) startup_max: u16,
-    pub(crate) minimum: u16,
-    pub(crate) max_change: u8,
-    pub(crate) ramp_count: u16,
-    pub(crate) ramp_divider: u8,
-    pub(crate) max_ramp_startup: u8,
-    pub(crate) max_ramp_low_rpm: u8,
-    pub(crate) max_ramp_high_rpm: u8,
+    cycle: u16,
+    maximum: u16,
+    last: u16,
+    adjusted: u16,
+    min_startup: u16,
+    startup_max: u16,
+    minimum: u16,
+    max_change: u8,
+    ramp_count: u16,
+    ramp_divider: u8,
+    max_ramp_startup: u8,
+    max_ramp_low_rpm: u8,
+    max_ramp_high_rpm: u8,
 }
 
 impl DutyState {
@@ -51,6 +51,121 @@ impl DutyState {
         self.min_startup += dead_time;
         self.minimum += dead_time;
         self.startup_max += dead_time;
+    }
+
+    /// Map throttle input to duty setpoint, with startup clamping.
+    pub(crate) fn compute_setpoint(
+        &self,
+        input: u16,
+        zero_crosses: u32,
+        stall_protection: u8,
+    ) -> u16 {
+        let setpoint = crate::functions::map(
+            input as i32,
+            crate::constants::THROTTLE_MIN_SIGNAL as i32,
+            crate::constants::DSHOT_MAX_THROTTLE as i32,
+            self.minimum as i32,
+            crate::constants::DUTY_SCALE_MAX as i32,
+        ) as u16;
+        let safe_shift = stall_protection.min(5);
+        if zero_crosses < (crate::constants::STARTUP_ZC_BASE >> safe_shift) {
+            setpoint.clamp(self.min_startup, self.startup_max)
+        } else {
+            setpoint
+        }
+    }
+
+    /// Apply ramp rate limiting to duty cycle.
+    /// `average_interval`: from e_com_time/3, used for RPM-based ramp profile selection.
+    pub(crate) fn ramp_limit(
+        &mut self,
+        battery_voltage: u16,
+        commutation_interval: u32,
+        zero_crosses: u32,
+        average_interval: u32,
+        voltage_based: bool,
+    ) {
+        use crate::constants::*;
+        if self.ramp_count > self.ramp_divider as u16 {
+            self.ramp_count = 0;
+            if voltage_based {
+                let v_change = crate::functions::map(
+                    battery_voltage as i32,
+                    RAMP_VOLTAGE_LOW_MV,
+                    RAMP_VOLTAGE_HIGH_MV,
+                    RAMP_VOLTAGE_CHANGE_MAX,
+                    RAMP_VOLTAGE_CHANGE_MIN,
+                ) as u8;
+                self.max_change = if commutation_interval > RAMP_FAST_COMMUTATION_THRESHOLD {
+                    v_change
+                } else {
+                    v_change.saturating_mul(3)
+                };
+            } else if zero_crosses < RAMP_STARTUP_THRESHOLD as u32
+                || self.last < RAMP_STARTUP_THRESHOLD
+            {
+                self.max_change = self.max_ramp_startup;
+            } else if average_interval > RAMP_LOW_RPM_INTERVAL {
+                self.max_change = self.max_ramp_low_rpm;
+            } else {
+                self.max_change = self.max_ramp_high_rpm;
+            }
+            let change = self.max_change as u16;
+            if self.cycle > self.last + change {
+                self.cycle = self.last + change;
+            }
+            if self.last > self.cycle + change {
+                self.cycle = self.last - change;
+            }
+        } else {
+            self.cycle = self.last;
+        }
+    }
+
+    /// Apply stall boost, duty maximum, and current limit ceilings.
+    pub(crate) fn clamp_ceilings(
+        &mut self,
+        stall_boost: u16,
+        duty_maximum: u16,
+        current_limit: u16,
+    ) {
+        self.cycle = self.cycle.saturating_add(stall_boost);
+        self.maximum = duty_maximum;
+        self.cycle = self.cycle.min(self.maximum).min(current_limit);
+    }
+
+    /// Set duty to startup value when motor first starts.
+    pub(crate) fn start_motor(&mut self) {
+        self.last = self.min_startup;
+    }
+
+    /// Increment ramp counter (called each ISR tick).
+    pub(crate) fn increment_ramp_count(&mut self) {
+        self.ramp_count += 1;
+    }
+
+    /// Set ramp divider (test setup).
+    pub fn set_ramp_divider(&mut self, v: u8) {
+        self.ramp_divider = v;
+    }
+
+    /// Compute PWM compare value from duty cycle and timer auto-reload.
+    pub(crate) fn pwm_compare(&self, tim1_arr: u16) -> u16 {
+        ((self.cycle as u32 * tim1_arr as u32) / crate::constants::DUTY_SCALE_MAX as u32 + 1) as u16
+    }
+
+    /// Compute PWM compare value for proportional brake mode.
+    pub(crate) fn brake_compare(drag_brake_strength: u8, tim1_arr: u16) -> u16 {
+        let brake_duty = drag_brake_strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
+        tim1_arr.saturating_sub(
+            (brake_duty * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32) as u16,
+        )
+    }
+
+    /// Finalize tick: store last duty, return current cycle for PWM output.
+    pub(crate) fn finalize(&mut self) -> u16 {
+        self.last = self.cycle;
+        self.cycle
     }
 }
 
@@ -555,5 +670,54 @@ mod tests {
         assert_eq!(p.bemf_timeout(), 20);
         p.set_bemf_timeout_happened(5);
         assert_eq!(p.bemf_timeout_happened(), 5);
+    }
+
+    // --- DutyState ramp profile selection tests ---
+
+    /// Helper: create DutyState ready for ramp_limit testing.
+    /// Sets ramp_count > ramp_divider so the profile branch executes.
+    fn ramp_test_duty(last: u16, cycle: u16) -> DutyState {
+        let mut d = DutyState::default();
+        d.set_last(last);
+        d.set_cycle(cycle);
+        d.set_ramp_divider(0); // ramp_count=0 > divider=0 → triggers profile
+        d.increment_ramp_count(); // ramp_count=1 > 0
+        d
+    }
+
+    /// Low RPM (average_interval > 500) selects max_ramp_low_rpm.
+    #[test]
+    fn ramp_profile_low_rpm() {
+        let mut d = ramp_test_duty(400, 500);
+        // Default: max_ramp_low_rpm=6, max_ramp_high_rpm=16
+        d.ramp_limit(0, 0, 200, 1000, false); // average_interval=1000 > 500
+        // cycle should be clamped to last + max_ramp_low_rpm = 400 + 6 = 406
+        assert_eq!(d.cycle(), 406, "low RPM should use max_ramp_low_rpm=6");
+    }
+
+    /// High RPM (average_interval <= 500) selects max_ramp_high_rpm.
+    #[test]
+    fn ramp_profile_high_rpm() {
+        let mut d = ramp_test_duty(400, 500);
+        d.ramp_limit(0, 0, 200, 100, false); // average_interval=100 <= 500
+        // cycle should be clamped to last + max_ramp_high_rpm = 400 + 16 = 416
+        assert_eq!(d.cycle(), 416, "high RPM should use max_ramp_high_rpm=16");
+    }
+
+    /// Startup (zero_crosses < 150) selects max_ramp_startup regardless of interval.
+    #[test]
+    fn ramp_profile_startup() {
+        let mut d = ramp_test_duty(400, 500);
+        d.ramp_limit(0, 0, 50, 1000, false); // zero_crosses=50 < 150
+        // cycle should be clamped to last + max_ramp_startup = 400 + 2 = 402
+        assert_eq!(d.cycle(), 402, "startup should use max_ramp_startup=2");
+    }
+
+    /// Low duty (last < 150) also selects startup ramp.
+    #[test]
+    fn ramp_profile_low_duty_uses_startup() {
+        let mut d = ramp_test_duty(100, 200);
+        d.ramp_limit(0, 0, 200, 1000, false); // last=100 < 150
+        assert_eq!(d.cycle(), 102, "low duty should use max_ramp_startup=2");
     }
 }
