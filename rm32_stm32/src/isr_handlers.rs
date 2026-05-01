@@ -221,10 +221,10 @@ pub fn handle_exti_frame() {
 
         // Propagate EDT init/deinit flags from CommandProcessor to scheduler
         if state.cmd.take_edt_init() {
-            state.edt.send_init = true;
+            state.edt.request_init();
         }
         if state.cmd.take_edt_deinit() {
-            state.edt.send_deinit = true;
+            state.edt.request_deinit();
         }
     }
 }

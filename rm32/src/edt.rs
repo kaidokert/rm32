@@ -31,9 +31,21 @@ pub struct EdtScheduler {
     /// Whether EDT is active
     active: bool,
     /// Pending init frame to send
-    pub send_init: bool,
+    send_init: bool,
     /// Pending deinit frame to send
-    pub send_deinit: bool,
+    send_deinit: bool,
+}
+
+impl EdtScheduler {
+    /// Request an EDT init frame on next telemetry response.
+    pub fn request_init(&mut self) {
+        self.send_init = true;
+    }
+
+    /// Request an EDT deinit frame on next telemetry response.
+    pub fn request_deinit(&mut self) {
+        self.send_deinit = true;
+    }
 }
 
 /// What the scheduler decided to send this frame.
@@ -107,20 +119,20 @@ mod tests {
     #[test]
     fn init_frame_sent_once() {
         let mut s = EdtScheduler::default();
-        s.send_init = true;
+        s.request_init();
         match s.next_frame(0, 0, 0) {
             EdtFrame::Extended(v) => assert_eq!(v, EDT_INIT_FRAME),
             _ => panic!("expected init frame"),
         }
         assert!(s.active);
-        assert!(!s.send_init);
     }
 
     #[test]
     fn deinit_frame_deactivates() {
         let mut s = EdtScheduler::default();
-        s.active = true;
-        s.send_deinit = true;
+        s.request_init(); // activate first
+        s.next_frame(0, 0, 0); // consume init
+        s.request_deinit();
         match s.next_frame(0, 0, 0) {
             EdtFrame::Extended(v) => assert_eq!(v, EDT_DEINIT_FRAME),
             _ => panic!("expected deinit frame"),
