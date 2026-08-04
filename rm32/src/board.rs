@@ -4,6 +4,23 @@
 //! voltage divider ratio, current sensor scaling, ADC channel assignments.
 //! These are compile-time constants in the C firmware (from targets.h).
 
+/// BEMF comparator pin mapping — MCU-specific packed register values.
+///
+/// Each field is a pre-computed value that the per-MCU `set_inmsel()` writes
+/// to the comparator register(s). The encoding is MCU-specific:
+/// - L431: `(inmesel << 8) | inmsel_3bit` — set_inmsel unpacks both fields
+/// - G071: 4-bit INMSEL value (set_inmsel shifts left by 4)
+/// - F051: full lower-16-bit CSR value including COMP1_EN
+/// - G431: `(config << 16) | comp_selector` for dual-comp routing
+///
+/// Values are computed by build.rs from symbolic pin names in the board YAML.
+#[derive(Clone, Copy)]
+pub struct BemfPins {
+    pub phase_a: u32,
+    pub phase_b: u32,
+    pub phase_c: u32,
+}
+
 /// Board-specific hardware configuration.
 #[derive(Clone, Copy)]
 pub struct BoardConfig {
@@ -47,6 +64,8 @@ pub struct BoardConfig {
     pub bridge_enable: bool,
     /// Custom LED on PB3: blinks with throttle position, solid when armed
     pub custom_led: bool,
+    /// BEMF comparator pin mapping (from board YAML)
+    pub bemf_pins: BemfPins,
 }
 
 impl BoardConfig {
@@ -72,5 +91,10 @@ impl BoardConfig {
         dual_adc: false,
         bridge_enable: false,
         custom_led: false,
+        bemf_pins: BemfPins {
+            phase_a: 0,
+            phase_b: 0,
+            phase_c: 0,
+        },
     };
 }

@@ -4,3 +4,7 @@ dead_time: 80
 current_adc_channel: 5
 voltage_adc_channel: 13
 dual_adc: true
+bemf_pins:
+  phase_a: { comp: 1, inm: PA5, inp: PA1 }
+  phase_b: { comp: 2, inm: PA4, inp: PA3 }
+  phase_c: { comp: 1, inm: PA0, inp: PA1 }

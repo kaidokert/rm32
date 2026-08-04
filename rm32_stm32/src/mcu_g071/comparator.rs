@@ -1,6 +1,7 @@
-use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
+use crate::comp_hal::{CompOps, ExtiOps};
 use crate::comparator::BemfComparator;
 use crate::pac::{COMP, EXTI};
+use rm32::board::BemfPins;
 
 pub struct G071Comp;
 impl CompOps for G071Comp {
@@ -48,14 +49,8 @@ impl ExtiOps for G071Exti {
     }
 }
 
-pub const INMSEL: InmselMap = InmselMap {
-    phase_a: 0b0110,
-    phase_b: 0b0111,
-    phase_c: 0b1000,
-};
-
 pub type G071BemfComparator = BemfComparator<G071Comp, G071Exti>;
 
-pub fn new_comparator() -> G071BemfComparator {
-    BemfComparator::new(G071Comp, G071Exti, INMSEL)
+pub fn new_comparator(bemf_pins: BemfPins) -> G071BemfComparator {
+    BemfComparator::new(G071Comp, G071Exti, bemf_pins)
 }

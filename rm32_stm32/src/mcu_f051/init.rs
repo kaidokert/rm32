@@ -6,6 +6,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
+    bemf_pins: rm32::board::BemfPins,
 ) -> InitResult<super::system::System, super::adc::F051Adc, super::telemetry_uart::F051TelemUart> {
     use stm32f0xx_hal::pac;
     use stm32f0xx_hal::prelude::*;
@@ -54,7 +55,7 @@ pub fn init(
 
     // COMP1 init
     super::comp_init::init_comp1();
-    let comp = super::comparator::new_comparator();
+    let comp = super::comparator::new_comparator(bemf_pins);
 
     // Timers
     let interval = Tim2Interval::new();

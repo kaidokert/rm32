@@ -10,3 +10,7 @@ stall_protect_interval: 6500
 min_bemf_counts: 2
 has_led: true
 led_pin: 8
+bemf_pins:
+  phase_a: PB3
+  phase_b: PB7
+  phase_c: PA2

@@ -1,6 +1,7 @@
-use crate::comp_hal::{CompOps, ExtiOps, InmselMap};
+use crate::comp_hal::{CompOps, ExtiOps};
 use crate::comparator::BemfComparator;
 use crate::pac::{COMP, EXTI};
+use rm32::board::BemfPins;
 
 const LINE_21: u32 = 1 << 21;
 const LINE_22: u32 = 1 << 22;
@@ -112,22 +113,8 @@ impl ExtiOps for G431Exti {
     }
 }
 
-// Phase mapping for G4_B (PROTONDRIVE):
-// Each value encodes [31:16]=INMSEL+INPSEL bits, [0]=comp selector (0=COMP1, 1=COMP2).
-// Steps 1,4 (phase C): COMP1, INM=PA0(IO2=0b001), INP=PA1(IO1=0b00)
-// Steps 2,5 (phase A): COMP2, INM=PA4(IO1=0b000), INP=PA3(IO2=0b01)
-// Steps 3,6 (phase B): COMP1, INM=PA5(IO1=0b000), INP=PA1(IO1=0b00)
-pub const INMSEL: InmselMap = InmselMap {
-    // phase_a: COMP1, INM=PA4(000), INP=PA1(00) -> config = 0b000_00 << 2 = 0
-    phase_a: ((0b000 << 4 | 0b00 << 2) << 16) as u32 | 0, // COMP1
-    // phase_b: COMP2, INM=PA4(000), INP=PA3(01) -> config = 0b000_01 << 2
-    phase_b: ((0b000 << 4 | 0b01 << 2) << 16) as u32 | 1, // COMP2
-    // phase_c: COMP1, INM=PA0(001), INP=PA1(00) -> config = 0b001_00 << 2
-    phase_c: ((0b001 << 4 | 0b00 << 2) << 16) as u32 | 0, // COMP1
-};
-
 pub type G431BemfComparator = BemfComparator<G431Comp, G431Exti>;
 
-pub fn new_comparator() -> G431BemfComparator {
-    BemfComparator::new(G431Comp::new(), G431Exti::new(), INMSEL)
+pub fn new_comparator(bemf_pins: BemfPins) -> G431BemfComparator {
+    BemfComparator::new(G431Comp::new(), G431Exti::new(), bemf_pins)
 }
