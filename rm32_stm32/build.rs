@@ -190,8 +190,8 @@ fn f051_comp1_inm(pin: &str) -> u32 {
 /// config = (inmsel << 4) | (inpsel << 2), comp_selector = 0(COMP1) or 1(COMP2).
 fn g431_dual_comp(comp: u8, inm: &str, inp: &str) -> u32 {
     let inmsel: u32 = match (comp, inm) {
-        (1, "PA4") | (2, "PA5") => 0b000, // IO1 on respective COMP
-        (1, "PA0") | (2, "PA7") => 0b001, // IO2 on respective COMP
+        (1, "PA4") | (2, "PA5") => 0b110, // PA4/PA5
+        (1, "PA0") | (2, "PA2") => 0b111, // PA0/PA2
         _ => panic!("Unknown G431 COMP{comp} INM pin: {inm}"),
     };
     let inpsel: u32 = match (comp, inp) {
