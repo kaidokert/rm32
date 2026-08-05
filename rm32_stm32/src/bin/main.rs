@@ -28,6 +28,22 @@ include!(concat!(env!("OUT_DIR"), "/board_config.rs"));
 
 #[entry]
 fn main() -> ! {
+    rtt_target::rtt_init_print!();
+
+    // Snapshot reset-cause flags before anything clears them. Sticky in
+    // RCC_CSR (or its analog) across resets; AM32 bootloader doesn't clear,
+    // so we see exactly why this boot happened. Implementation lives in
+    // `mcu::read_and_clear_reset_cause()` per-MCU — main.rs stays portable.
+    let reset_cause = rm32_stm32::mcu::read_and_clear_reset_cause();
+    rm32_stm32::dprintln!("[rm32] last reset:");
+    for label in reset_cause.iter_labels() {
+        rm32_stm32::dprintln!("[rm32]   - {}", label);
+    }
+    if reset_cause.is_empty() {
+        rm32_stm32::dprintln!("[rm32]   - (no flags — already cleared)");
+    }
+    rm32_stm32::dprintln!("[rm32] boot");
+
     // --- MCU-specific init (clocks, GPIO, peripherals, NVIC) ---
     let InitResult {
         mut hal,

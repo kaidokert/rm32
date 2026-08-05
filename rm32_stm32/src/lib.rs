@@ -5,6 +5,14 @@
 
 #![no_std]
 
+/// Firmware debug print.
+#[macro_export]
+macro_rules! dprintln {
+    ($($arg:tt)*) => {{
+        rtt_target::rprintln!($($arg)*);
+    }};
+}
+
 pub mod mcu;
 pub use mcu::pac;
 

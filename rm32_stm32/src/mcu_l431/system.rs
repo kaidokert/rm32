@@ -1,5 +1,43 @@
 //! System control (IRQ, watchdog, reset) for STM32L431.
 
+/// Snapshot reset-cause flags and clear them. Sticky RCC_CSR flags survive
+/// resets until RMVF is written, so call this once early during boot.
+pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
+    use rm32::reset_cause::ResetCause;
+
+    let rcc = unsafe { &*crate::pac::RCC::PTR };
+    let csr = rcc.csr.read();
+    let mut r = ResetCause::empty();
+
+    if csr.lpwrstf().bit_is_set() {
+        r |= ResetCause::LOW_POWER;
+    }
+    if csr.wwdgrstf().bit_is_set() {
+        r |= ResetCause::WINDOW_WATCHDOG;
+    }
+    if csr.iwdgrstf().bit_is_set() {
+        r |= ResetCause::INDEP_WATCHDOG;
+    }
+    if csr.sftrstf().bit_is_set() {
+        r |= ResetCause::SOFTWARE;
+    }
+    if csr.borrstf().bit_is_set() {
+        r |= ResetCause::BROWNOUT;
+    }
+    if csr.pinrstf().bit_is_set() {
+        r |= ResetCause::PIN;
+    }
+    if csr.oblrstf().bit_is_set() {
+        r |= ResetCause::OPTION_BYTE;
+    }
+    if csr.firewallrstf().bit_is_set() {
+        r |= ResetCause::FIREWALL;
+    }
+
+    rcc.csr.modify(|_, w| w.rmvf().set_bit());
+    r
+}
+
 pub struct System {
     _private: (),
 }

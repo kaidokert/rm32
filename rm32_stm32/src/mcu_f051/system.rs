@@ -1,5 +1,40 @@
 //! System control (IRQ, watchdog, reset) for STM32F051.
 
+/// Snapshot reset-cause flags and clear them. F0 has POR/PDR (`porrstf`)
+/// instead of BOR, which maps to `BROWNOUT` as the closest portable flag.
+pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
+    use rm32::reset_cause::ResetCause;
+
+    let rcc = unsafe { &*crate::pac::RCC::ptr() };
+    let csr = rcc.csr.read();
+    let mut r = ResetCause::empty();
+
+    if csr.lpwrrstf().bit_is_set() {
+        r |= ResetCause::LOW_POWER;
+    }
+    if csr.wwdgrstf().bit_is_set() {
+        r |= ResetCause::WINDOW_WATCHDOG;
+    }
+    if csr.iwdgrstf().bit_is_set() {
+        r |= ResetCause::INDEP_WATCHDOG;
+    }
+    if csr.sftrstf().bit_is_set() {
+        r |= ResetCause::SOFTWARE;
+    }
+    if csr.porrstf().bit_is_set() {
+        r |= ResetCause::BROWNOUT;
+    }
+    if csr.pinrstf().bit_is_set() {
+        r |= ResetCause::PIN;
+    }
+    if csr.oblrstf().bit_is_set() {
+        r |= ResetCause::OPTION_BYTE;
+    }
+
+    rcc.csr.modify(|_, w| w.rmvf().set_bit());
+    r
+}
+
 pub struct System {
     _private: (),
 }
