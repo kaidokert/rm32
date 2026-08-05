@@ -6,6 +6,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
+    bemf_pins: rm32::board::BemfPins,
 ) -> InitResult<super::system::SystemControl, super::adc::AdcReader, super::telemetry_uart::TelemUart>
 {
     use stm32g0xx_hal::prelude::*;
@@ -31,7 +32,7 @@ pub fn init(
     let phase = G0APhaseDriver::new(false);
     let sys = super::system::SystemControl::new(dp.IWDG);
     super::comp_init::init_comp2();
-    let comp = super::comparator::new_comparator();
+    let comp = super::comparator::new_comparator(bemf_pins);
     let interval = Tim2Interval::new();
     let com_timer = Tim14Com::new();
 

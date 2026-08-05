@@ -7,6 +7,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
+    bemf_pins: rm32::board::BemfPins,
 ) -> InitResult<super::system::System, super::adc::L431Adc, super::telemetry_uart::L431TelemUart> {
     use stm32l4xx_hal::pac;
     use stm32l4xx_hal::prelude::*;
@@ -62,8 +63,8 @@ pub fn init(
     let phase = G0APhaseDriver::new(false); // same pins for L4_N
 
     // COMP2 init
-    super::comp_init::init_comp2();
-    let comp = super::comparator::new_comparator();
+    super::comp_init::init_comp2(bemf_pins.phase_a);
+    let comp = super::comparator::new_comparator(bemf_pins);
     let interval = Tim2Interval::new();
     let com_timer = Tim14Com::new(); // L431 uses TIM16, but TIM14 struct works (same register layout)
 

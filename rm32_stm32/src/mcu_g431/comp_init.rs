@@ -3,7 +3,7 @@
 //! G431 uses dual comparators switched per commutation step:
 //!   COMP1: INP=PA1(IO1), INM per step — EXTI21
 //!   COMP2: INP=PA3(IO2), INM per step — EXTI22
-//! BEMF inputs: PA0(INM IO2), PA4(INM IO1), PA5(INM IO1)
+//! BEMF inputs: PA0/PA2(INMSEL=0b111), PA4/PA5(INMSEL=0b110)
 
 use crate::pac;
 
@@ -18,11 +18,13 @@ pub fn init_comp() {
         // Enable GPIOA clock
         rcc.ahb2enr().modify(|_, w| w.gpioaen().set_bit());
 
-        // PA0, PA1, PA3, PA4, PA5 as analog
+        // PA0, PA1, PA2, PA3, PA4, PA5 as analog
         gpioa.moder().modify(|_, w| {
             w.moder0()
                 .bits(0b11)
                 .moder1()
+                .bits(0b11)
+                .moder2()
                 .bits(0b11)
                 .moder3()
                 .bits(0b11)
@@ -32,20 +34,20 @@ pub fn init_comp() {
                 .bits(0b11)
         });
 
-        // COMP1: INP=PA1(IO1), INM=PA4(IO1=0b000), enable
+        // COMP1: INP=PA1, INM=PA4, enable
         comp.c1csr().write(|w| {
             w.inmsel()
-                .bits(0b000)
+                .bits(0b110)
                 .inpsel()
                 .bit(false) // IO1 = PA1
                 .en()
                 .set_bit()
         });
 
-        // COMP2: INP=PA3(IO2), INM=PA5(IO1=0b000), enable
+        // COMP2: INP=PA3, INM=PA5, enable
         comp.c2csr().write(|w| {
             w.inmsel()
-                .bits(0b000)
+                .bits(0b110)
                 .inpsel()
                 .bit(true) // IO2 = PA3
                 .en()

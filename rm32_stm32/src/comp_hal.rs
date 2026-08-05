@@ -15,10 +15,3 @@ pub trait ExtiOps {
     fn enable_interrupt(&self);
     fn mask_and_clear(&self);
 }
-
-/// Phase input mux values (MCU-specific).
-pub struct InmselMap {
-    pub phase_a: u32,
-    pub phase_b: u32,
-    pub phase_c: u32,
-}

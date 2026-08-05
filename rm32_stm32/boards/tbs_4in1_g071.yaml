@@ -3,3 +3,7 @@ mcu: stm32g071
 dead_time: 60
 current_adc_channel: 5
 voltage_adc_channel: 6
+bemf_pins:
+  phase_a: PB3
+  phase_b: PB7
+  phase_c: PA2

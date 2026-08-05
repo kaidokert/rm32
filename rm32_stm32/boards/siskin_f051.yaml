@@ -8,3 +8,7 @@ current_adc_channel: 6
 voltage_adc_channel: 3
 stall_protect_interval: 6500
 min_bemf_counts: 2
+bemf_pins:
+  phase_a: PA4
+  phase_b: PA0
+  phase_c: PA5

@@ -3,3 +3,7 @@ mcu: stm32f051
 dead_time: 45
 current_adc_channel: 6
 voltage_adc_channel: 3
+bemf_pins:
+  phase_a: PA4
+  phase_b: PA0
+  phase_c: PA5
