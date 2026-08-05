@@ -10,7 +10,6 @@ use std::path::Path;
 
 /// BEMF pin config — simple format (single comparator, shared INP).
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct BemfPinsSimple {
     phase_a: String,
     phase_b: String,
@@ -109,11 +108,49 @@ fn default_kv() -> u8 {
     1
 }
 
+fn enabled_mcu() -> &'static str {
+    let mut enabled = Vec::new();
+    if cfg!(feature = "stm32g071") {
+        enabled.push("stm32g071");
+    }
+    if cfg!(feature = "stm32f051") {
+        enabled.push("stm32f051");
+    }
+    if cfg!(feature = "stm32l431") {
+        enabled.push("stm32l431");
+    }
+    if cfg!(feature = "stm32g431") {
+        enabled.push("stm32g431");
+    }
+
+    match enabled.as_slice() {
+        [mcu] => mcu,
+        [] => panic!("No supported MCU feature is enabled"),
+        _ => panic!("Exactly one MCU feature must be enabled; got {enabled:?}"),
+    }
+}
+
 // ---- BEMF pin-to-register mapping per MCU ----
 //
 // Each MCU family encodes comparator input selection differently.
 // These functions map symbolic pin names (e.g. "PB7") to the packed u32
 // value that the per-MCU set_inmsel() expects.
+
+fn validate_simple_common(mcu: &str, pins: &BemfPinsSimple) {
+    let expected = match mcu {
+        "stm32l431" => Some("PB4"),
+        "stm32g071" => Some("PA3"),
+        "stm32f051" => Some("PA1"),
+        _ => None,
+    };
+    match (pins.common.as_deref(), expected) {
+        (Some(actual), Some(expected)) if actual != expected => {
+            panic!("Common BEMF pin {actual} does not match {mcu} comparator input {expected}")
+        }
+        (Some(actual), None) => panic!("Common BEMF pin {actual} is not supported for MCU {mcu}"),
+        _ => {}
+    }
+}
 
 /// STM32L431 COMP2 inverting input: 3-bit INMSEL + 2-bit INMESEL.
 /// Packed as `(inmesel << 8) | inmsel`. set_inmsel unpacks both.
@@ -153,7 +190,7 @@ fn f051_comp1_inm(pin: &str) -> u32 {
 /// config = (inmsel << 4) | (inpsel << 2), comp_selector = 0(COMP1) or 1(COMP2).
 fn g431_dual_comp(comp: u8, inm: &str, inp: &str) -> u32 {
     let inmsel: u32 = match (comp, inm) {
-        (1, "PA5") | (2, "PA4") => 0b000, // IO1 on respective COMP
+        (1, "PA4") | (2, "PA5") => 0b000, // IO1 on respective COMP
         (1, "PA0") | (2, "PA7") => 0b001, // IO2 on respective COMP
         _ => panic!("Unknown G431 COMP{comp} INM pin: {inm}"),
     };
@@ -175,6 +212,8 @@ fn g431_dual_comp(comp: u8, inm: &str, inp: &str) -> u32 {
 
 /// Resolve simple-format BEMF pins to packed u32 values based on MCU.
 fn resolve_simple_bemf(mcu: &str, pins: &BemfPinsSimple) -> (u32, u32, u32) {
+    validate_simple_common(mcu, pins);
+
     match mcu {
         "stm32l431" => (
             l431_comp2_inm(&pins.phase_a),
@@ -237,6 +276,13 @@ fn main() {
         .unwrap_or_else(|e| panic!("Failed to read board config '{}': {}", board_path, e));
     let board: BoardYaml = serde_yaml::from_str(&yaml)
         .unwrap_or_else(|e| panic!("Failed to parse board config '{}': {}", board_path, e));
+
+    let enabled_mcu = enabled_mcu();
+    assert_eq!(
+        board.mcu, enabled_mcu,
+        "Board MCU '{}' does not match enabled MCU feature '{}'",
+        board.mcu, enabled_mcu
+    );
 
     // Resolve BEMF pins from symbolic names to packed register values
     let (bemf_a, bemf_b, bemf_c) = match &board.bemf_pins {
