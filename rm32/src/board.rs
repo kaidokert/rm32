@@ -14,6 +14,9 @@
 /// - G431: `(config << 16) | comp_selector` for dual-comp routing
 ///
 /// Values are computed by build.rs from symbolic pin names in the board YAML.
+///
+/// TODO: replace this packed representation with typed comparator routes:
+/// https://github.com/kaidokert/rm32/issues/42
 #[derive(Clone, Copy)]
 pub struct BemfPins {
     pub phase_a: u32,
