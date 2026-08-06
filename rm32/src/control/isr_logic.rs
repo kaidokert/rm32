@@ -211,10 +211,10 @@ pub fn bemf_zero_cross<C: hal::Comparator, I: hal::IntervalTimer, T: hal::ComTim
     comp: &mut C,
     interval: &mut I,
     com_timer: &mut T,
-) {
+) -> bool {
     for _ in 0..bemf.filter_level() {
         if comp.output_level() == commutation.rising() {
-            return;
+            return false;
         }
     }
     comp.mask_interrupts();
@@ -222,4 +222,5 @@ pub fn bemf_zero_cross<C: hal::Comparator, I: hal::IntervalTimer, T: hal::ComTim
     interval.set_count(0);
     bemf.record_zc_timing(count);
     com_timer.set_and_enable(bemf.com_timer_delay());
+    true
 }
