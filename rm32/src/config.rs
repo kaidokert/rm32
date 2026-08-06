@@ -163,6 +163,18 @@ impl EepromConfig {
         self.eeprom_version <= EEPROM_VERSION
     }
 
+    /// Static commutation advance in AM32's temp_advance units.
+    pub fn temp_advance(&self) -> u8 {
+        let advance = self.advance_level;
+        if advance < 4 {
+            advance << 3
+        } else if (10..=42).contains(&advance) {
+            advance - 10
+        } else {
+            16
+        }
+    }
+
     /// Apply defaults for fields added in newer EEPROM versions.
     /// Uses VERSION_DEFAULTS as the reference — changing a default in one place
     /// automatically propagates to the migration logic.
@@ -374,6 +386,31 @@ mod tests {
         cfg.max_ramp = 42; // custom value
         cfg.apply_version_defaults();
         assert_eq!(cfg.max_ramp, 42); // should NOT be overwritten
+    }
+
+    #[test]
+    fn temp_advance_maps_supported_eeprom_formats() {
+        let mut cfg = EepromConfig::default();
+
+        for (level, want) in [(0u8, 0u8), (1, 8), (2, 16), (3, 24)] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), want, "old format {level}");
+        }
+
+        for (level, want) in [(10u8, 0u8), (26, 16), (42, 32)] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), want, "new format {level}");
+        }
+    }
+
+    #[test]
+    fn temp_advance_falls_back_for_reserved_values() {
+        let mut cfg = EepromConfig::default();
+
+        for level in [4u8, 9, 43, 255] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), 16, "fallback {level}");
+        }
     }
 
     // --- MotorConfig derivation tests ---
