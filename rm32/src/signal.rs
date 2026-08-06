@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn detect_dshot300_across_timer_wrap() {
         let mut buf = [0u32; 32];
-        let mut t: u32 = 65000;
+        let mut t: u32 = 65300;
         for (i, slot) in buf.iter_mut().enumerate() {
             *slot = t & 0xFFFF;
             t += if i % 2 == 0 { 5 } else { 15 };
