@@ -498,11 +498,14 @@ impl<LED: OutputPin> MainState<LED> {
         };
         shared.set_filter_level(filter);
 
-        // Auto advance — scales with duty cycle
+        // Auto advance scales with duty; otherwise publish the static EEPROM
+        // advance mapping used by AM32.
         if self.config.auto_advance != 0 {
             let level =
                 crate::functions::map(shared.duty_cycle_setpoint() as i32, 100, 2000, 13, 23) as u8;
             shared.set_auto_advance(level);
+        } else {
+            shared.set_auto_advance(self.config.temp_advance());
         }
 
         // Note: send_esc_info_flag is checked and cleared by firmware main.rs
