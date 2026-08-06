@@ -420,9 +420,7 @@ impl BemfState {
     /// Sync BEMF config from main→ISR published state.
     pub(crate) fn sync_config(&mut self, filter_level: u8, auto_advance: u8, min_counts: u8) {
         self.filter_level = filter_level;
-        if auto_advance > 0 {
-            self.temp_advance = auto_advance;
-        }
+        self.temp_advance = auto_advance;
         self.min_counts_up = min_counts;
         self.min_counts_down = min_counts;
     }
@@ -780,6 +778,17 @@ mod tests {
         assert_eq!(p.bemf_timeout(), 20);
         p.set_bemf_timeout_happened(5);
         assert_eq!(p.bemf_timeout_happened(), 5);
+    }
+
+    #[test]
+    fn sync_config_accepts_zero_temp_advance() {
+        let mut b = BemfState::default();
+        b.set_temp_advance(16);
+
+        b.sync_config(5, 0, 2);
+
+        assert_eq!(b.temp_advance(), 0);
+        assert_eq!(b.filter_level(), 5);
     }
 
     // --- DutyState ramp profile selection tests ---

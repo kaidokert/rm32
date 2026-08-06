@@ -665,7 +665,9 @@ fn main() {
             if mc.dead_time_override > 0 {
                 harness.duty.apply_dead_time_override(mc.dead_time_override);
             }
-            harness.bemf.set_temp_advance(harness.config.temp_advance());
+            let temp_advance = harness.config.temp_advance();
+            harness.shared.set_auto_advance(temp_advance);
+            harness.bemf.set_temp_advance(temp_advance);
             println!("ok");
             io::stdout().flush().unwrap();
         } else if let Some(rest) = line.strip_prefix("config ") {

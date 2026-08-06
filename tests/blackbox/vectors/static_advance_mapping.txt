@@ -8,14 +8,14 @@ eeprom.eeprom_version=3
 
 @sequence
 # Old format 0-3 maps in 7.5 degree steps.
-config eeprom.advance_level=2
+config eeprom.advance_level=1
 load_eeprom
-tick 1 | | temp_advance=16
+tick 1 | | temp_advance=8
 
 # New format 10-42 maps to 0-32 directly after subtracting 10.
-config eeprom.advance_level=26
+config eeprom.advance_level=10
 load_eeprom
-tick 1 | | temp_advance=16
+tick 1 | | temp_advance=0
 
 # Reserved values fall back to AM32's default 15 degree advance.
 config eeprom.advance_level=9

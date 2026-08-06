@@ -153,6 +153,10 @@ impl EepromConfig {
 }
 
 pub const EEPROM_VERSION: u8 = 3;
+const ADVANCE_OLD_FORMAT_MAX: u8 = 3;
+const ADVANCE_NEW_FORMAT_MIN: u8 = 10;
+const ADVANCE_NEW_FORMAT_MAX: u8 = 42;
+const ADVANCE_FALLBACK: u8 = 16;
 
 impl EepromConfig {
     /// Check if loaded EEPROM data is valid (not blank/corrupt).
@@ -164,14 +168,17 @@ impl EepromConfig {
     }
 
     /// Static commutation advance in AM32's temp_advance units.
+    ///
+    /// AM32 accepts legacy configurator values 0-3 and newer values 10-42.
+    /// Values outside both ranges use the factory 15 degree advance.
     pub fn temp_advance(&self) -> u8 {
         let advance = self.advance_level;
-        if advance < 4 {
+        if advance <= ADVANCE_OLD_FORMAT_MAX {
             advance << 3
-        } else if (10..=42).contains(&advance) {
-            advance - 10
+        } else if (ADVANCE_NEW_FORMAT_MIN..=ADVANCE_NEW_FORMAT_MAX).contains(&advance) {
+            advance - ADVANCE_NEW_FORMAT_MIN
         } else {
-            16
+            ADVANCE_FALLBACK
         }
     }
 
