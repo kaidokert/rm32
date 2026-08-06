@@ -1,0 +1,13 @@
+# EEPROM load with EDT arm input type
+# Triggers input_type==EDTARM_IN (4) block.
+
+@config
+armed=0
+inputSet=1
+dshot=1
+
+@sequence
+config eeprom.eeprom_version=2
+config eeprom.input_type=4
+load_eeprom
+tick 1 | | armed=0

@@ -8,7 +8,7 @@ dshot=1
 EDT_ARMED=1
 running=1
 old_routine=0
-zero_crosses=200
+zero_crosses=2000  # above RECLIMB_CONFIRM_ZC=1500 -- this vector tests the TEMPERATURE ceiling, not the reclimb clamp
 commutation_interval=1000
 eeprom.limits.temperature=80
 
@@ -16,6 +16,10 @@ eeprom.limits.temperature=80
 # Normal temperature: duty_cycle_maximum should be 2000
 tick 1  | throttle=2047 | duty_cycle_maximum=2000
 
-# Overheat: set degrees_celsius above limit
+# Overheat: set degrees_celsius above limit.
+# degrees_celsius sets the mock ADC raw value; measurements only refresh in
+# the 1 kHz dispatch block (every PID_LOOP_DIVIDER=20 ticks, AM32
+# main.c:2010 PROCESS_ADC_FLAG). Allow >20 ticks for the reading to
+# propagate to the duty ceiling.
 config degrees_celsius=85
-tick 1  | throttle=2047 | duty_cycle_maximum<2000
+ticks 40 | throttle=2047 | duty_cycle_maximum<2000

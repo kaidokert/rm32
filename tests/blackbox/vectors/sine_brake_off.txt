@@ -1,0 +1,15 @@
+# Sine mode no brake (brake_on_stop=0)
+# Zero throttle → allOff, e_rpm=0
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+stepper_sine=1
+eeprom.use_sine_start=1
+eeprom.comp_pwm=1
+eeprom.brake_on_stop=0
+
+@sequence
+ticks 3 | throttle=0 | stepper_sine=1

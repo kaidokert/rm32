@@ -1,0 +1,17 @@
+# EEPROM load with invalid limits triggers guard clauses
+# Exercises the sine_mode_changeover, drag_brake_strength, temperature guards.
+
+@config
+armed=0
+inputSet=1
+dshot=1
+
+@sequence
+config eeprom.eeprom_version=2
+config eeprom.beep_volume=20
+config eeprom.sine_mode_changeover_thottle_level=0
+config eeprom.drag_brake_strength=0
+config eeprom.limits=0
+config eeprom.sine_mode_power=0
+load_eeprom
+tick 1 | | armed=0

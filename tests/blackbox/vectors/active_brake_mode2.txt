@@ -1,0 +1,16 @@
+# Active brake on stop (mode 2)
+# When brake_on_stop=2, armed, and throttle=0: comStep(2) + active brake power duty
+# This exercises the mode-2 branch that calls comStep with a fixed step.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.brake_on_stop=2
+eeprom.comp_pwm=1
+eeprom.active_brake_power=50
+
+@sequence
+# Zero throttle with brake mode 2 → active brake
+ticks 5 | throttle=0 | prop_brake_active=0

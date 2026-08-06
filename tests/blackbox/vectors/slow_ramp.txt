@@ -1,0 +1,25 @@
+# Slow ramp mode (max_ramp < 10)
+# When eeprom.max_ramp < 10, ramp_divider=9 and all ramp profiles use raw value.
+# This produces much slower ramp rates for specialized low-speed applications.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=1000
+eeprom.max_ramp=5
+last_duty_cycle=0
+
+@sequence
+# With slow ramp (max_ramp=5), duty should ramp up very slowly
+tick 1  | throttle=2047 | duty_cycle_setpoint>0
+
+# After a few ticks, duty should be non-zero but still low (slow ramp)
+ticks 10 | throttle=2047 | last_duty_cycle>0
+
+# Duty should still be well below setpoint after only 10 ticks
+ticks 10 | throttle=2047 | duty_cycle<1000

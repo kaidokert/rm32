@@ -1,0 +1,20 @@
+# Servo DMA realignment (buffersize=3)
+# When input pin is HIGH during servo transfercomplete, sets buffersize=3
+# to capture an extra edge for realignment.
+
+@config
+armed=0
+inputSet=1
+servoPwm=1
+dshot=0
+
+@sequence
+# Servo mode with pin HIGH → buffersize should be set to 3
+config input_pin_state=1
+config dma_0=1000 dma_1=2500
+ticks 3 | transfer=1 |
+
+# Pin LOW → normal buffersize=2
+config input_pin_state=0
+ticks 3 | transfer=1 |
+config transfer=0

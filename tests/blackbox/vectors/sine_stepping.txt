@@ -1,0 +1,20 @@
+# Sine mode — slow stepping
+# With stepper_sine=1 and input 49-136, each main_loop tick advances
+# one phase position and computes step_delay.
+# delayMicros is stubbed to no-op in harness.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+stepper_sine=1
+eeprom.use_sine_start=1
+eeprom.comp_pwm=1
+eeprom.motor_poles=14
+
+@sequence
+# Low throttle — slow sine stepping
+# With throttle=50 (just above 48), sine stepper advances phase positions.
+# stepper_sine may or may not remain 1 depending on phase wrap.
+ticks 5 | throttle=50 |

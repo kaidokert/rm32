@@ -1,0 +1,17 @@
+# EEPROM load with RC car mode
+# Triggers RC-car init overrides in loadEEpromSettings.
+
+@config
+armed=0
+inputSet=1
+dshot=1
+
+@sequence
+config eeprom.eeprom_version=2
+config eeprom.rc_car_reverse=1
+config eeprom.stuck_rotor_protection=1
+config eeprom.use_sine_start=1
+config eeprom.variable_pwm=2
+config eeprom.comp_pwm=1
+load_eeprom
+tick 1 | | armed=0
