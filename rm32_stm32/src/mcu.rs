@@ -28,3 +28,12 @@ pub use crate::mcu_g071::chip::*;
 pub use crate::mcu_g431::chip::*;
 #[cfg(feature = "stm32l431")]
 pub use crate::mcu_l431::chip::*;
+
+#[cfg(feature = "stm32f051")]
+pub use crate::mcu_f051::system::read_and_clear_reset_cause;
+#[cfg(feature = "stm32g071")]
+pub use crate::mcu_g071::system::read_and_clear_reset_cause;
+#[cfg(feature = "stm32g431")]
+pub use crate::mcu_g431::system::read_and_clear_reset_cause;
+#[cfg(feature = "stm32l431")]
+pub use crate::mcu_l431::system::read_and_clear_reset_cause;

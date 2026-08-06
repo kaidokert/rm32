@@ -26,6 +26,7 @@ pub mod main_state;
 pub mod motor_mode;
 pub mod ntc;
 pub mod pid;
+pub mod reset_cause;
 pub mod servo;
 pub mod shared_comm;
 pub mod shared_state;
