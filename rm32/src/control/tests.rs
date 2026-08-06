@@ -320,8 +320,10 @@ mod tests {
         bemf.set_filter_level(2);
         bemf.set_wait_time(500);
 
-        isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
+        let accepted =
+            isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
+        assert!(accepted);
         assert!(comp.mask_called);
     }
 
@@ -338,8 +340,10 @@ mod tests {
 
         bemf.set_filter_level(2);
 
-        isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
+        let accepted =
+            isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
 
+        assert!(!accepted);
         assert!(!comp.mask_called);
     }
 

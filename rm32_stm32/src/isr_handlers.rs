@@ -91,7 +91,7 @@ pub fn handle_tim14() {
 /// BEMF zero-cross detected (COMP ISR body).
 pub fn handle_comp() {
     let state = ISR_LOCAL.get();
-    rm32::control::isr_logic::bemf_zero_cross(
+    let _accepted = rm32::control::isr_logic::bemf_zero_cross(
         &state.commutation,
         &mut state.bemf,
         &mut state.hal.comp,
