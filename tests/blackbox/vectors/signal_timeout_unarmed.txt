@@ -1,0 +1,13 @@
+# Signal timeout — unarmed ESC resets input after 2s signal loss
+# REQ-SAFE-SIGNAL_TIMEOUT (unarmed path)
+# C firmware: unarmed + signaltimeout > 40000 → inputSet=0
+
+@config
+armed=0
+inputSet=1
+dshot=1
+
+@sequence
+# Unarmed, input detected, no signal arriving (throttle=-1 disables injection)
+config throttle=-1
+ticks 42000 | | inputSet=0

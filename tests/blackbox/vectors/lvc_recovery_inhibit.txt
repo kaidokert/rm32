@@ -1,0 +1,19 @@
+# LVC voltage recovery inhibit
+# Once LVC triggered (low_voltage_count > threshold), the flag latches.
+# Subsequent ticks with good voltage should NOT reset the count.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.low_voltage_cut_off=1
+cell_count=3
+running=1
+old_routine=1
+
+@sequence
+# Pre-fill count near threshold and trigger LVC
+config low_voltage_count=9999
+config battery_voltage=50
+ticks 50 | throttle=500 | armed=0

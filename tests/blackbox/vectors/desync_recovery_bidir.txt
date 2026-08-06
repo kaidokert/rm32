@@ -1,0 +1,26 @@
+# Desync detection with average_interval reset
+# When motor has > 100 zero crosses and desyncs, average_interval resets to 5000.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=500
+average_interval=500
+last_average_interval=500
+
+@sequence
+# Normal operation
+tick 1 | throttle=1000 | running=1
+
+# Force a desync: set average_interval far from last
+config average_interval=100
+config last_average_interval=1000
+config desync_check=1
+
+# The desync check should detect the mismatch and reset
+ticks 2 | throttle=1000 | zero_crosses=0

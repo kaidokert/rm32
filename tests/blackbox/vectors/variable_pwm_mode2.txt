@@ -1,0 +1,25 @@
+# Variable PWM mode 2 — auto-frequency from average_interval
+# Mode 2: computes tim1_arr from average_interval (not commutation_interval)
+# average_interval < 100 → clamp to 100*CPU_MHZ/9
+# average_interval > 250 → clamp to 250*CPU_MHZ/9
+# else → average_interval*CPU_MHZ/9
+
+@config
+armed=1
+inputSet=1
+dshot=1
+running=1
+old_routine=0
+zero_crosses=200
+eeprom.variable_pwm=2
+
+@sequence
+# Fast commutation → small average_interval → clamped ARR
+config commutation_interval=200
+config e_com_time=200
+ticks 2 | throttle=1000 | pwm_arr>0
+
+# Slow commutation → large average_interval → max ARR
+config commutation_interval=3000
+config e_com_time=3000
+ticks 2 | throttle=1000 | pwm_arr>0

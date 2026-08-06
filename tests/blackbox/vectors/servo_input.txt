@@ -19,6 +19,9 @@ config dma_12=12100 dma_13=13100 dma_14=14100 dma_15=15100 dma_16=16100
 config dma_17=17100 dma_18=18100 dma_19=19100 dma_20=20100 dma_21=21100
 config dma_22=22100 dma_23=23100 dma_24=24100 dma_25=25100 dma_26=26100
 config dma_27=27100 dma_28=28100 dma_29=29100 dma_30=30100 dma_31=31100
+# First frame: tentative detection (re-confirmation requires 2 matching frames)
+tick 1  | transfer=1 |
+# Second frame: confirmed detection
 tick 1  | transfer=1 | inputSet=1 servoPwm=1
 
 # Now with inputSet=1 and servoPwm=1, inject a servo pulse and call transfercomplete

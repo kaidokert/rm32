@@ -1,0 +1,24 @@
+# EEPROM load triggers init overrides
+# load_eeprom re-runs the config derivation from eepromBuffer.
+# read_flash_bin is a no-op in the harness, so eepromBuffer keeps our values.
+# Must set eeprom_version >= EEPROM_VERSION to skip version-upgrade block.
+
+@config
+armed=0
+inputSet=1
+dshot=1
+
+@sequence
+# Set eeprom fields, then load_eeprom to run derivation
+config eeprom.eeprom_version=2
+config eeprom.pwm_frequency=24
+config eeprom.startup_power=100
+config eeprom.driving_brake_strength=5
+config eeprom.max_ramp=5
+config eeprom.bi_direction=1
+config eeprom.stall_protection=1
+config eeprom.sine_mode_changeover_thottle_level=0
+config eeprom.drag_brake_strength=0
+config eeprom.limits=50
+load_eeprom
+tick 1 | | armed=0

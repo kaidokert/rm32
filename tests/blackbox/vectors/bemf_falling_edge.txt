@@ -1,0 +1,21 @@
+# Falling-edge BEMF zero-cross detection in old_routine
+# When rising=0, uses bemfcounter > min_bemf_counts_down for ZC detection.
+# Exercises the falling-edge path of the BEMF filter.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=1
+zero_crosses=0
+commutation_interval=5000
+step=2
+
+@sequence
+# Trigger BEMF detection with comp output matching falling edge
+# step=2 → rising=0 for falling-edge detection
+# comp=0 means output low (below threshold → valid falling-edge ZC)
+ticks 5 | throttle=500 comp=0 | running=1
+ticks 5 | throttle=500 comp=1 | running=1

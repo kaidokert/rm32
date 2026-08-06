@@ -1,0 +1,26 @@
+# Protocol re-confirmation (second-frame validation)
+# On first detectInput, checkDshot/checkServo sets dshot=1 or servoPwm=1.
+# On second call (still inputSet=0), the re-confirmation path runs.
+
+@config
+armed=0
+inputSet=0
+dshot=0
+servoPwm=0
+
+@sequence
+# First detection frame: builds DShot-like buffer, triggers detectInput
+# After first call: dshot=1 but inputSet still 0
+# Second call: dshot==1, so checkDshot() re-confirmation runs
+config dma_0=100 dma_1=103 dma_2=106 dma_3=109 dma_4=112 dma_5=115
+config dma_6=118 dma_7=121 dma_8=124 dma_9=127 dma_10=130 dma_11=133
+config dma_12=136 dma_13=139 dma_14=142 dma_15=145 dma_16=148 dma_17=151
+config dma_18=154 dma_19=157 dma_20=160 dma_21=163 dma_22=166 dma_23=169
+config dma_24=172 dma_25=175 dma_26=178 dma_27=181 dma_28=184 dma_29=187
+config dma_30=190 dma_31=193
+
+# Two transfers with inputSet=0 — second hits re-confirmation
+tick 1 | transfer=1 |
+config inputSet=0
+tick 1 | transfer=1 |
+config transfer=0

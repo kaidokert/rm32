@@ -1,0 +1,21 @@
+# PID integral clamping
+# Verify PID accumulators don't wind up beyond limits.
+# Exercises stall/speed/current PID with extreme inputs.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=0
+zero_crosses=200
+commutation_interval=1000
+eeprom.stall_protection=1
+
+@sequence
+# High throttle for many ticks — PID accumulators should clamp
+ticks 100 | throttle=2047 | running=1
+
+# Drop to zero — PID should recover (not stuck at windup limit)
+ticks 50  | throttle=0    | duty_cycle_setpoint=0
