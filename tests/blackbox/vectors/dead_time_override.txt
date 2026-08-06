@@ -1,23 +1,22 @@
-# Dead time override from driving_brake_strength
-# When driving_brake_strength < 10, dead time is increased and all
-# duty thresholds are adjusted upward. This prevents FET shoot-through
-# during braking.
+# Dead-time override raises duty floor via driving_brake_strength
+# Verifies that derive_motor_config dead_time_override is applied
+# to duty limits during load_eeprom.
+#
+# With driving_brake_strength=5, dead_time=60:
+#   dead_time_override = 60 + (150 - 5*10) = 160
+#   minimum_duty = 5 + 160 = 165
+# Throttle=200 maps to setpoint ~300 (raised floor vs ~153 without override)
 
 @config
 armed=1
 inputSet=1
 dshot=1
 EDT_ARMED=1
+running=0
 eeprom.driving_brake_strength=5
-running=1
-old_routine=0
-zero_crosses=200
-commutation_interval=1000
 
 @sequence
-# With driving_brake_strength=5: dead_time_override = dead_time + (150 - 50) = dead_time+100
-# The duty thresholds should be elevated
-tick 1  | throttle=1000 | armed=1
+load_eeprom
 
-# Verify motor responds (running state maintained)
-ticks 5 | throttle=1000 | running=1
+# Low throttle with override: setpoint reflects raised minimum duty
+tick 1  | throttle=200 | duty_cycle_setpoint>250

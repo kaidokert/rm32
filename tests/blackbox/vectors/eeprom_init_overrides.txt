@@ -10,7 +10,7 @@ dshot=1
 
 @sequence
 # Set eeprom fields, then load_eeprom to run derivation
-config eeprom.eeprom_version=2
+config eeprom.eeprom_version=3
 config eeprom.pwm_frequency=24
 config eeprom.startup_power=100
 config eeprom.driving_brake_strength=5

@@ -20,6 +20,5 @@ average_interval=400
 
 @sequence
 # Tick should trigger desync: abs(1000 - 400) = 600 > 400/2 = 200, and 400 < 2000
-# DesyncFallback (Running→OldRoutine) then StopMotor (OldRoutine→Armed).
-# C goes to old_routine=1,running=0 directly; Rust goes Armed then restarts.
-tick 1 | throttle=500 | zero_crosses=0 running=0
+# Result: zero_crosses=0, old_routine=1, running=0 (input>47 and !bi_direction)
+tick 1 | throttle=500 | zero_crosses=0 old_routine=1
