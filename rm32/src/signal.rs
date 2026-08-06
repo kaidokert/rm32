@@ -11,21 +11,35 @@ pub enum SignalType {
 
 /// Detect input type from DMA buffer pulse pattern.
 pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
+    if dma_buffer.len() < 3 {
+        return SignalType::None;
+    }
+
     let mut smallest = 20000u16;
     let mut average_pulse = 0u32;
-    let mut last = dma_buffer[0];
+    let mut count = 0u32;
 
-    for sample in &dma_buffer[1..31] {
+    // The first captured slot can still hold the previous frame tail. Start
+    // from buf[1] and subtract at timer width so 16-bit counter wraps stay
+    // valid pulse widths.
+    let mut last = dma_buffer[1] as u16;
+    let end = dma_buffer.len().min(32);
+    for sample in &dma_buffer[2..end] {
+        let sample = *sample as u16;
         let diff = sample.wrapping_sub(last);
         if diff > 0 {
-            if (diff as u16) < smallest {
-                smallest = diff as u16;
+            if diff < smallest {
+                smallest = diff;
             }
-            average_pulse += diff;
+            average_pulse += diff as u32;
+            count += 1;
         }
-        last = *sample;
+        last = sample;
     }
-    average_pulse /= 32;
+    if count == 0 {
+        return SignalType::None;
+    }
+    average_pulse /= count;
 
     // Check DShot600: smallest 1-4, average < 60
     if (1..4).contains(&smallest) && average_pulse < 60 {
@@ -104,6 +118,41 @@ mod tests {
     fn detect_out_of_range() {
         let buf = [0u32; 32]; // all zeros, no valid pulses
         assert_eq!(detect_input(&buf, 48), SignalType::None);
+    }
+
+    #[test]
+    fn detect_dshot300_across_timer_wrap() {
+        let mut buf = [0u32; 32];
+        let mut t: u32 = 65000;
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = t & 0xFFFF;
+            t += if i % 2 == 0 { 5 } else { 15 };
+        }
+        assert_eq!(detect_input(&buf, 80), SignalType::Dshot300);
+    }
+
+    #[test]
+    fn detect_dshot600_across_timer_wrap() {
+        let mut buf = [0u32; 32];
+        let mut t: u32 = 65500;
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = t & 0xFFFF;
+            t += if i % 2 == 0 { 2 } else { 6 };
+        }
+        assert_eq!(detect_input(&buf, 80), SignalType::Dshot600);
+    }
+
+    #[test]
+    fn detect_dshot300_with_stale_first_slot() {
+        let mut buf = [0u32; 32];
+        buf[0] = 11385;
+        let mut t = 11092u32;
+        buf[1] = t;
+        for (i, slot) in buf[2..].iter_mut().enumerate() {
+            t += if i % 2 == 0 { 7 } else { 13 };
+            *slot = t & 0xFFFF;
+        }
+        assert_eq!(detect_input(&buf, 80), SignalType::Dshot300);
     }
 
     #[test]
