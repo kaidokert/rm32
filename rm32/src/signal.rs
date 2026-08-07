@@ -6,6 +6,7 @@ pub enum SignalType {
     None,
     Dshot600,
     Dshot300,
+    Dshot150,
     ServoPwm,
 }
 
@@ -48,6 +49,10 @@ pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
     // Check DShot300: smallest 4-8, average < 100
     if (4..=8).contains(&smallest) && average_pulse < 100 {
         return SignalType::Dshot300;
+    }
+    // Check DShot150: smallest 9-16, average < 200
+    if (9..=16).contains(&smallest) && average_pulse < 200 {
+        return SignalType::Dshot150;
     }
     // Check Servo: smallest > 200
     if smallest > 200 && smallest < 20000 {
@@ -183,12 +188,20 @@ mod tests {
     }
 
     #[test]
+    fn detect_dshot150() {
+        let mut buf = [0u32; 32];
+        for i in 0..32 {
+            buf[i] = 100 + i as u32 * 10;
+        }
+        assert_eq!(detect_input(&buf, 48), SignalType::Dshot150);
+    }
+
+    #[test]
     fn detect_rejects_ambiguous() {
         let mut buf = [0u32; 32];
         for i in 0..32 {
-            buf[i] = 100 + i as u32 * 12;
-        } // smallest=12, >8
-        // average = 12*31/32 ~ 11, not matching servo (>200) either
+            buf[i] = 100 + i as u32 * 20;
+        } // smallest=20, >16 (past DShot150), <200 (not servo)
         assert_eq!(detect_input(&buf, 48), SignalType::None);
     }
 
