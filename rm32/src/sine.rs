@@ -137,7 +137,10 @@ pub fn sine_step(
             // Higher throttle — accelerate to changeover
             positions.advance(forward);
             if input > crate::constants::SINE_CHANGEOVER_THROTTLE {
+                let phase_a = positions.a;
                 positions.a = 0;
+                positions.b = (positions.b - phase_a).rem_euclid(360);
+                positions.c = (positions.c - phase_a).rem_euclid(360);
             }
             let pwm = sine_drive(
                 positions,
@@ -376,8 +379,33 @@ mod tests {
             } => {
                 assert_eq!(commutation_interval, 9000);
                 assert_eq!(step, 3);
+                assert_eq!(p.a, 0);
+                assert_eq!(p.b, 120);
+                assert_eq!(p.c, 240);
             }
             _ => panic!("expected Changeover"),
         }
+    }
+
+    #[test]
+    fn sine_step_threshold_is_strict() {
+        let mut p = PhasePositions {
+            a: 90,
+            b: 210,
+            c: 330,
+        };
+        let (result, _) = sine_step(
+            &mut p,
+            crate::constants::SINE_CHANGEOVER_THROTTLE,
+            true,
+            true,
+            14,
+            3,
+            60,
+            1999,
+            5,
+        );
+        assert!(matches!(result, SineStepResult::Continue(_)));
+        assert_ne!(p.a, 0);
     }
 }
