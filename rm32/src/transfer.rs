@@ -94,7 +94,9 @@ impl TransferState {
         if !input_set {
             let sig = signal::detect_input(dma_buffer, 48);
             action = match sig {
-                signal::SignalType::Dshot600 | signal::SignalType::Dshot300 => {
+                signal::SignalType::Dshot600
+                | signal::SignalType::Dshot300
+                | signal::SignalType::Dshot150 => {
                     TransferAction::InputDetected(DetectedProtocol::Dshot)
                 }
                 signal::SignalType::ServoPwm => {
