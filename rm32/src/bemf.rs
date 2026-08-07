@@ -4,6 +4,8 @@
 mod tests {
     use crate::control::state::BemfState;
 
+    const SATURATION_STEPS: usize = u8::MAX as usize + 10;
+
     #[test]
     fn increments_counter_on_correct_polarity_rising() {
         let mut b = BemfState::default();
@@ -58,8 +60,18 @@ mod tests {
     #[test]
     fn bad_count_saturates_on_repeated_wrong_polarity() {
         let mut b = BemfState::default();
-        for _ in 0..300 {
+        for _ in 0..SATURATION_STEPS {
             b.update(false, false);
+        }
+        assert_eq!(b.bad_count(), u8::MAX);
+        assert_eq!(b.counter(), 0);
+    }
+
+    #[test]
+    fn rising_bad_count_saturates_on_repeated_wrong_polarity() {
+        let mut b = BemfState::default();
+        for _ in 0..SATURATION_STEPS {
+            b.update(true, true);
         }
         assert_eq!(b.bad_count(), u8::MAX);
         assert_eq!(b.counter(), 0);
@@ -101,9 +113,9 @@ mod tests {
         let mut b = BemfState::default();
         b.set_temp_advance(u8::MAX);
 
-        let new_ci = b.record_zero_cross(100, 100);
+        let new_ci = b.record_zero_cross(18_000, 18_000);
 
-        assert_eq!(new_ci, 100);
+        assert_eq!(new_ci, 18_000);
         assert_eq!(b.com_timer_delay(), 1);
     }
 
@@ -111,12 +123,12 @@ mod tests {
     fn update_timing_from_timer_clamps_wait_time_underflow() {
         let mut b = BemfState::default();
         b.set_temp_advance(u8::MAX);
-        b.record_zc_timing(100);
-        b.record_zc_timing(100);
+        b.record_zc_timing(18_000);
+        b.record_zc_timing(18_000);
 
-        let new_ci = b.update_timing_from_timer(100);
+        let new_ci = b.update_timing_from_timer(18_000);
 
-        assert_eq!(new_ci, 100);
+        assert_eq!(new_ci, 18_000);
         assert_eq!(b.com_timer_delay(), 1);
     }
 }
