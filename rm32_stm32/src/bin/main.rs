@@ -12,6 +12,7 @@ use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
+use rm32::ws2812::LedStatus;
 
 use rm32::main_state::MainState;
 use rm32_stm32::init::InitResult;
@@ -56,8 +57,7 @@ fn main() -> ! {
     let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
     let mut led = rm32_stm32::ws2812_hal::Ws2812Gpio::new(led_pin, Chip::CPU_FREQUENCY_MHZ);
     if BOARD.has_led {
-        use rm32::ws2812::{LedStatus, send_status};
-        cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Boot));
+        led.set_status(LedStatus::Boot);
     }
 
     // --- Startup tune (before peripherals move to ISR) ---
@@ -275,8 +275,7 @@ fn main() -> ! {
             });
 
             if BOARD.has_led {
-                use rm32::ws2812::{LedStatus, send_status};
-                cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Armed));
+                led.set_status(LedStatus::Armed);
             }
         }
 
@@ -286,8 +285,7 @@ fn main() -> ! {
             if main_state.protection.bemf_timeout_happened() > main_state.protection.bemf_timeout()
                 && main_state.config.stuck_rotor_protection != 0
             {
-                use rm32::ws2812::{LedStatus, send_status};
-                cortex_m::interrupt::free(|_| send_status(&mut led, LedStatus::Error));
+                led.set_status(LedStatus::Error);
             }
         }
 
