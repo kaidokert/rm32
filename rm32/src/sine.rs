@@ -136,6 +136,9 @@ pub fn sine_step(
         } else {
             // Higher throttle — accelerate to changeover
             positions.advance(forward);
+            if input > crate::constants::SINE_CHANGEOVER_THROTTLE {
+                positions.a = 0;
+            }
             let pwm = sine_drive(
                 positions,
                 gate_drive_offset,
@@ -358,11 +361,12 @@ mod tests {
 
     #[test]
     fn sine_step_changeover_at_high_throttle() {
-        // Set phase A to 1 so one advance(true) wraps to 0
+        // High throttle forces changeover even when the next sine step would
+        // not naturally wrap phase A to 0.
         let mut p = PhasePositions {
-            a: 1,
-            b: 121,
-            c: 241,
+            a: 90,
+            b: 210,
+            c: 330,
         };
         let (result, _) = sine_step(&mut p, 500, true, true, 14, 3, 60, 1999, 5);
         match result {
