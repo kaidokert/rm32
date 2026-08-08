@@ -179,6 +179,7 @@ fn main() -> ! {
         // Apply startup duty from EEPROM
         isr.duty
             .set_duty_limits(minimum_duty_cycle, min_startup_duty, startup_max_duty);
+        isr.duty.apply_max_ramp(main_state.config.max_ramp);
         // Apply servo EEPROM calibration to transfer state
         if isr.config.eeprom_version > 0 {
             isr.transfer.servo.set_calibration(
