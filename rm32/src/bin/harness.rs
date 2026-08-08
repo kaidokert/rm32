@@ -650,6 +650,7 @@ fn main() {
         } else if line.starts_with("state") {
             harness.print_state();
         } else if line.starts_with("load_eeprom") {
+            harness.config.normalize_after_load();
             // Apply EEPROM settings: derive motor config and update state
             let mc = harness.config.derive_motor_config(
                 1999,  // base TIM1 ARR (matches firmware Chip::TIM1_AUTORELOAD)

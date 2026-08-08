@@ -157,6 +157,7 @@ const ADVANCE_OLD_FORMAT_MAX: u8 = 3;
 const ADVANCE_NEW_FORMAT_MIN: u8 = 10;
 const ADVANCE_NEW_FORMAT_MAX: u8 = 42;
 const ADVANCE_FALLBACK: u8 = 16;
+const RC_CAR_DUTY_BOOST: u16 = 50;
 
 impl EepromConfig {
     /// Check if loaded EEPROM data is valid (not blank/corrupt).
@@ -250,6 +251,12 @@ pub struct MotorConfig {
 }
 
 impl EepromConfig {
+    /// Normalize EEPROM-derived settings before computing runtime config.
+    pub fn normalize_after_load(&mut self) {
+        self.apply_rc_car_overrides();
+        self.apply_comp_pwm_guard();
+    }
+
     /// Normalize RC-car mode settings after EEPROM load.
     pub fn apply_rc_car_overrides(&mut self) {
         if self.rc_car_reverse == 0 {
@@ -336,7 +343,11 @@ impl EepromConfig {
 
         // PID gains
         let kv_div = kv_divider.max(1) as u16;
-        let rc_boost = if self.rc_car_reverse != 0 { 50 } else { 0 };
+        let rc_boost = if self.rc_car_reverse != 0 {
+            RC_CAR_DUTY_BOOST
+        } else {
+            0
+        };
 
         MotorConfig {
             minimum_duty: minimum_duty + rc_boost,
@@ -496,6 +507,24 @@ mod tests {
         cfg.apply_comp_pwm_guard();
 
         assert_eq!(cfg.use_sine_start, 1);
+    }
+
+    #[test]
+    fn normalize_after_load_applies_rc_car_and_comp_pwm_guards() {
+        let mut cfg = EepromConfig::default();
+        cfg.rc_car_reverse = 1;
+        cfg.stuck_rotor_protection = 1;
+        cfg.use_sine_start = 1;
+        cfg.variable_pwm = 1;
+        cfg.comp_pwm = 1;
+
+        cfg.normalize_after_load();
+
+        assert_eq!(cfg.stuck_rotor_protection, 0);
+        assert_eq!(cfg.bi_direction, 1);
+        assert_eq!(cfg.use_sine_start, 0);
+        assert_eq!(cfg.variable_pwm, 0);
+        assert_eq!(cfg.comp_pwm, 0);
     }
 
     // --- MotorConfig derivation tests ---
