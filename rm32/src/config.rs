@@ -157,6 +157,7 @@ const ADVANCE_OLD_FORMAT_MAX: u8 = 3;
 const ADVANCE_NEW_FORMAT_MIN: u8 = 10;
 const ADVANCE_NEW_FORMAT_MAX: u8 = 42;
 const ADVANCE_FALLBACK: u8 = 16;
+const RC_CAR_DUTY_BOOST: u16 = 50;
 
 impl EepromConfig {
     /// Check if loaded EEPROM data is valid (not blank/corrupt).
@@ -250,6 +251,32 @@ pub struct MotorConfig {
 }
 
 impl EepromConfig {
+    /// Normalize EEPROM-derived settings before computing runtime config.
+    pub fn normalize_after_load(&mut self) {
+        self.apply_rc_car_overrides();
+        self.apply_comp_pwm_guard();
+    }
+
+    /// Normalize RC-car mode settings after EEPROM load.
+    pub fn apply_rc_car_overrides(&mut self) {
+        if self.rc_car_reverse == 0 {
+            return;
+        }
+
+        self.stuck_rotor_protection = 0;
+        self.bi_direction = 1;
+        self.use_sine_start = 0;
+        self.variable_pwm = 0;
+        self.comp_pwm = 0;
+    }
+
+    /// Sine startup requires complementary PWM.
+    pub fn apply_comp_pwm_guard(&mut self) {
+        if self.comp_pwm == 0 {
+            self.use_sine_start = 0;
+        }
+    }
+
     /// Derive motor configuration from EEPROM settings and board hardware.
     ///
     /// `default_arr`: TIM1 auto-reload at default 24kHz (MCU-specific: CPU_MHZ*1e6/24000-1)
@@ -316,9 +343,15 @@ impl EepromConfig {
 
         // PID gains
         let kv_div = kv_divider.max(1) as u16;
+        let rc_boost = if self.rc_car_reverse != 0 {
+            RC_CAR_DUTY_BOOST
+        } else {
+            0
+        };
+
         MotorConfig {
-            minimum_duty,
-            min_startup_duty,
+            minimum_duty: minimum_duty + rc_boost,
+            min_startup_duty: min_startup_duty + rc_boost,
             startup_max_duty,
             timer1_max_arr,
             dead_time_override,
@@ -420,6 +453,80 @@ mod tests {
         }
     }
 
+    #[test]
+    fn rc_car_mode_normalizes_incompatible_settings() {
+        let mut cfg = EepromConfig::default();
+        cfg.rc_car_reverse = 1;
+        cfg.stuck_rotor_protection = 1;
+        cfg.use_sine_start = 1;
+        cfg.variable_pwm = 1;
+        cfg.comp_pwm = 1;
+
+        cfg.apply_rc_car_overrides();
+
+        assert_eq!(cfg.stuck_rotor_protection, 0);
+        assert_eq!(cfg.bi_direction, 1);
+        assert_eq!(cfg.use_sine_start, 0);
+        assert_eq!(cfg.variable_pwm, 0);
+        assert_eq!(cfg.comp_pwm, 0);
+    }
+
+    #[test]
+    fn rc_car_overrides_are_noop_when_disabled() {
+        let mut cfg = EepromConfig::default();
+        cfg.stuck_rotor_protection = 1;
+        cfg.use_sine_start = 1;
+        cfg.variable_pwm = 1;
+        cfg.comp_pwm = 1;
+
+        cfg.apply_rc_car_overrides();
+
+        assert_eq!(cfg.stuck_rotor_protection, 1);
+        assert_eq!(cfg.use_sine_start, 1);
+        assert_eq!(cfg.variable_pwm, 1);
+        assert_eq!(cfg.comp_pwm, 1);
+    }
+
+    #[test]
+    fn comp_pwm_guard_disables_sine_start_without_complementary_pwm() {
+        let mut cfg = EepromConfig::default();
+        cfg.use_sine_start = 1;
+        cfg.comp_pwm = 0;
+
+        cfg.apply_comp_pwm_guard();
+
+        assert_eq!(cfg.use_sine_start, 0);
+    }
+
+    #[test]
+    fn comp_pwm_guard_keeps_sine_start_when_complementary_pwm_is_enabled() {
+        let mut cfg = EepromConfig::default();
+        cfg.use_sine_start = 1;
+        cfg.comp_pwm = 1;
+
+        cfg.apply_comp_pwm_guard();
+
+        assert_eq!(cfg.use_sine_start, 1);
+    }
+
+    #[test]
+    fn normalize_after_load_applies_rc_car_and_comp_pwm_guards() {
+        let mut cfg = EepromConfig::default();
+        cfg.rc_car_reverse = 1;
+        cfg.stuck_rotor_protection = 1;
+        cfg.use_sine_start = 1;
+        cfg.variable_pwm = 1;
+        cfg.comp_pwm = 1;
+
+        cfg.normalize_after_load();
+
+        assert_eq!(cfg.stuck_rotor_protection, 0);
+        assert_eq!(cfg.bi_direction, 1);
+        assert_eq!(cfg.use_sine_start, 0);
+        assert_eq!(cfg.variable_pwm, 0);
+        assert_eq!(cfg.comp_pwm, 0);
+    }
+
     // --- MotorConfig derivation tests ---
 
     #[test]
@@ -446,6 +553,22 @@ mod tests {
         assert_eq!(mc.minimum_duty, 50);
         assert_eq!(mc.min_startup_duty, 150);
         assert_eq!(mc.timer1_max_arr, 2999);
+    }
+
+    #[test]
+    fn motor_config_rc_car_mode_boosts_duty_floors() {
+        let mut cfg = EepromConfig::default();
+        cfg.minimum_duty_cycle = 5;
+        cfg.startup_power = 100;
+        let normal = cfg.derive_motor_config(2999, 60, 1, false);
+
+        cfg.rc_car_reverse = 1;
+
+        let rc_car = cfg.derive_motor_config(2999, 60, 1, false);
+
+        assert_eq!(rc_car.minimum_duty, normal.minimum_duty + 50);
+        assert_eq!(rc_car.min_startup_duty, normal.min_startup_duty + 50);
+        assert_eq!(rc_car.startup_max_duty, normal.startup_max_duty);
     }
 
     #[test]
