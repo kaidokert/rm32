@@ -663,6 +663,7 @@ fn main() {
             harness
                 .duty
                 .set_duty_limits(mc.minimum_duty, mc.min_startup_duty, mc.startup_max_duty);
+            harness.duty.apply_max_ramp(harness.config.max_ramp);
             if mc.dead_time_override > 0 {
                 harness.duty.apply_dead_time_override(mc.dead_time_override);
             }

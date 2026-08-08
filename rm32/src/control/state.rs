@@ -4,6 +4,10 @@
 
 use crate::pid::Pid;
 
+const SLOW_RAMP_THRESHOLD: u8 = 10;
+const SLOW_RAMP_DIVIDER: u8 = 9;
+const RAMP_SCALE_DIVISOR: u8 = 10;
+
 /// BEMF zero-cross detection state.
 #[derive(Clone)]
 pub struct BemfState {
@@ -147,6 +151,22 @@ impl DutyState {
     /// Set ramp divider (test setup).
     pub fn set_ramp_divider(&mut self, v: u8) {
         self.ramp_divider = v;
+    }
+
+    /// Apply EEPROM max_ramp to ramp rate profiles.
+    pub fn apply_max_ramp(&mut self, max_ramp: u8) {
+        if max_ramp < SLOW_RAMP_THRESHOLD {
+            self.ramp_divider = SLOW_RAMP_DIVIDER;
+            self.max_ramp_startup = max_ramp;
+            self.max_ramp_low_rpm = max_ramp;
+            self.max_ramp_high_rpm = max_ramp;
+        } else {
+            self.ramp_divider = 0;
+            let scaled = max_ramp / RAMP_SCALE_DIVISOR;
+            self.max_ramp_startup = self.max_ramp_startup.min(scaled);
+            self.max_ramp_low_rpm = self.max_ramp_low_rpm.min(scaled);
+            self.max_ramp_high_rpm = self.max_ramp_high_rpm.min(scaled);
+        }
     }
 
     /// Compute PWM compare value from duty cycle and timer auto-reload.
@@ -766,6 +786,44 @@ mod tests {
         assert_eq!(d.minimum, 5);
         assert_eq!(d.min_startup, 120);
         assert_eq!(d.startup_max, 200);
+    }
+
+    #[test]
+    fn apply_max_ramp_below_ten_uses_slow_ramp_mode() {
+        let mut d = ramp_test_duty(400, 500);
+        d.apply_max_ramp(7);
+
+        d.ramp_limit(0, 0, 200, 1000, false);
+
+        assert_eq!(d.cycle(), 400);
+
+        d.set_cycle(500);
+        for _ in 0..10 {
+            d.increment_ramp_count();
+        }
+        d.ramp_limit(0, 0, 200, 1000, false);
+
+        assert_eq!(d.cycle(), 407);
+    }
+
+    #[test]
+    fn apply_max_ramp_clamps_profiles_when_ten_or_above() {
+        let mut d = ramp_test_duty(400, 500);
+        d.apply_max_ramp(30);
+
+        d.ramp_limit(0, 0, 200, 100, false);
+
+        assert_eq!(d.cycle(), 403);
+    }
+
+    #[test]
+    fn apply_max_ramp_does_not_increase_existing_profiles() {
+        let mut d = ramp_test_duty(400, 500);
+        d.apply_max_ramp(200);
+
+        d.ramp_limit(0, 0, 50, 1000, false);
+
+        assert_eq!(d.cycle(), 402);
     }
 
     // --- ProtectionState tests ---
