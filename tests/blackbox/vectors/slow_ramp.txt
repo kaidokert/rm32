@@ -15,6 +15,8 @@ eeprom.max_ramp=5
 last_duty_cycle=0
 
 @sequence
+load_eeprom
+
 # With slow ramp (max_ramp=5), duty should ramp up very slowly
 tick 1  | throttle=2047 | duty_cycle_setpoint>0
 

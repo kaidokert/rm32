@@ -4,6 +4,10 @@
 
 use crate::pid::Pid;
 
+const SLOW_RAMP_THRESHOLD: u8 = 10;
+const SLOW_RAMP_DIVIDER: u8 = 9;
+const RAMP_SCALE_DIVISOR: u8 = 10;
+
 /// BEMF zero-cross detection state.
 #[derive(Clone)]
 pub struct BemfState {
@@ -151,14 +155,14 @@ impl DutyState {
 
     /// Apply EEPROM max_ramp to ramp rate profiles.
     pub fn apply_max_ramp(&mut self, max_ramp: u8) {
-        if max_ramp < 10 {
-            self.ramp_divider = 9;
+        if max_ramp < SLOW_RAMP_THRESHOLD {
+            self.ramp_divider = SLOW_RAMP_DIVIDER;
             self.max_ramp_startup = max_ramp;
             self.max_ramp_low_rpm = max_ramp;
             self.max_ramp_high_rpm = max_ramp;
         } else {
             self.ramp_divider = 0;
-            let scaled = max_ramp / 10;
+            let scaled = max_ramp / RAMP_SCALE_DIVISOR;
             self.max_ramp_startup = self.max_ramp_startup.min(scaled);
             self.max_ramp_low_rpm = self.max_ramp_low_rpm.min(scaled);
             self.max_ramp_high_rpm = self.max_ramp_high_rpm.min(scaled);
