@@ -68,13 +68,13 @@ impl TimerOps for G431Timer {
             tim.cnt().write(|w| w.cnt().bits(0));
         }
     }
-    fn configure_output(&self, period: u16) {
+    fn configure_output(&self, prescaler: u16, arr: u16) {
         let tim = unsafe { &*pac::TIM15::PTR };
         unsafe {
             tim.ccmr1_output().write(|w| w.bits(0x60));
             tim.ccer().write(|w| w.bits(0x03));
-            tim.psc().write(|w| w.psc().bits(0));
-            tim.arr().write(|w| w.arr().bits(period as u32));
+            tim.psc().write(|w| w.psc().bits(prescaler));
+            tim.arr().write(|w| w.arr().bits(arr as u32));
             tim.egr().write(|w| w.ug().set_bit());
             tim.bdtr().modify(|_, w| w.moe().set_bit());
         }

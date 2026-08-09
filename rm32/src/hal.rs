@@ -104,6 +104,9 @@ pub trait InputCapture {
     fn gcr_buffer(&mut self) -> &mut [u32; 37];
     /// Whether the input is currently in output mode (bidir DShot TX).
     fn is_output(&self) -> bool;
+    /// Set the timer prescaler for bidir DShot output.
+    /// Called during protocol detection. DShot600=0, DShot300=1, DShot150=3.
+    fn set_output_prescaler(&mut self, _prescaler: u16) {}
 }
 
 /// ADC readings (voltage, current, temperature)

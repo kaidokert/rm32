@@ -163,7 +163,12 @@ pub fn handle_exti_frame() -> CaptureConfig {
         TransferAction::InputDetected(proto) => {
             shared.set_input_set(true);
             match proto {
-                DetectedProtocol::Dshot => shared.set_dshot(true),
+                DetectedProtocol::Dshot => {
+                    shared.set_dshot(true);
+                    if let Some(prescaler) = actions.next_capture.prescaler {
+                        state.hal.input.set_output_prescaler(prescaler);
+                    }
+                }
                 DetectedProtocol::Servo => shared.set_servo_pwm(true),
             }
         }
