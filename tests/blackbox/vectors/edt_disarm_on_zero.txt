@@ -1,0 +1,16 @@
+# EDT-arm zero-throttle disarm
+# When EDT_ARM_ENABLE=1, a zero-throttle DShot frame clears EDT_ARMED.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+EDT_ARM_ENABLE=1
+
+@sequence
+# Zero throttle with EDT_ARM_ENABLE clears EDT_ARMED.
+tick 1  | dshot_frame=0    | newinput=0 edt_armed=0
+
+# Subsequent throttle is still accepted as normal DShot input.
+tick 1  | dshot_frame=1500 | newinput=1500

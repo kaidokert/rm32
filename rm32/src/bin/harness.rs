@@ -170,6 +170,7 @@ struct Harness {
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
+    edt_arm_enable: bool,
     play_tone_flag: u8,
     frametime_low: u16,
     frametime_high: u16,
@@ -207,6 +208,7 @@ impl Harness {
             dshot: false,
             servo_pwm: false,
             edt_armed: false,
+            edt_arm_enable: false,
             play_tone_flag: 0,
             frametime_low: 400,
             frametime_high: 600,
@@ -290,8 +292,9 @@ impl Harness {
                 }
             }
             TransferAction::DshotThrottle { value, telemetry } => {
-                if self.edt_armed || value == 0 {
-                    self.shared.set_newinput(value);
+                self.shared.set_newinput(value);
+                if value == 0 && self.edt_arm_enable {
+                    self.edt_armed = false;
                 }
                 if telemetry {
                     self.shared.set_send_telemetry(true);
@@ -313,7 +316,7 @@ impl Harness {
                     &mut self.config,
                     &mut fwd,
                     &mut self.edt_armed,
-                    false,
+                    self.edt_arm_enable,
                 );
                 self.commutation.set_forward(fwd);
                 match result {
@@ -410,7 +413,7 @@ impl Harness {
              inputSet={} dshot={} servoPwm={} \
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
-             send_telemetry={} send_esc_info_flag={} play_tone_flag={}",
+             send_telemetry={} send_esc_info_flag={} play_tone_flag={} edt_armed={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -451,6 +454,7 @@ impl Harness {
             self.shared.send_telemetry() as i32,
             self.shared.send_esc_info_flag() as i32,
             self.play_tone_flag,
+            self.edt_armed as i32,
         );
         io::stdout().flush().unwrap();
     }
@@ -540,7 +544,7 @@ impl Harness {
             "commutation_interval" => self.shared.set_commutation_interval(v as u32),
             "zero_input_count" => self.zero_input_count = v as u16,
             "EDT_ARMED" => self.edt_armed = v != 0,
-            "EDT_ARM_ENABLE" => {}
+            "EDT_ARM_ENABLE" => self.edt_arm_enable = v != 0,
             "dshot_telemetry" => self.shared.set_dshot_telemetry(v != 0),
             "signaltimeout" => self.shared.set_signal_timeout(v as u16),
             "cell_count" => self.main.cell_count = v as u8, // pub field

@@ -1,7 +1,6 @@
-# EDT armed throttle gate
-# DShot throttle values > 47 are only applied when EDT_ARMED=1.
-# Without EDT_ARMED, throttle is rejected (newinput stays 0).
-# Golden values captured from C harness.
+# DShot throttle is independent from EDT armed state.
+# EDT telemetry/arm mode is an extension; normal DShot throttle must still
+# update newinput when EDT_ARMED=0.
 
 @config
 armed=0
@@ -9,11 +8,11 @@ inputSet=1
 dshot=1
 
 @sequence
-# EDT_ARMED=0: throttle rejected
+# EDT_ARMED=0: normal DShot throttle is accepted
 config EDT_ARMED=0
-tick 1  | dshot_frame=1500 | newinput=0
+tick 1  | dshot_frame=1500 | newinput=1500
 
-# EDT_ARMED=1: throttle accepted
+# EDT_ARMED=1: throttle remains accepted
 config EDT_ARMED=1
 tick 1  | dshot_frame=1500 | newinput=1500
 

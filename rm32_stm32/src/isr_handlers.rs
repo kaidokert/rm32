@@ -167,8 +167,9 @@ pub fn handle_exti_frame() {
             }
         }
         TransferAction::DshotThrottle { value, telemetry } => {
-            if state.edt_armed || value == 0 {
-                shared.set_newinput(value);
+            shared.set_newinput(value);
+            if value == 0 && state.edt_arm_enable {
+                state.edt_armed = false;
             }
             if telemetry {
                 shared.set_send_telemetry(true);
@@ -188,7 +189,7 @@ pub fn handle_exti_frame() {
                 &mut state.config,
                 &mut state.forward,
                 &mut state.edt_armed,
-                state.cmd.extended_telemetry(),
+                state.edt_arm_enable,
             );
             match result {
                 rm32::dshot_commands::CommandResult::SaveSettings => {

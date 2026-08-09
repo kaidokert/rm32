@@ -80,6 +80,7 @@ pub struct IsrState<H> {
     pub config: EepromConfig,
     pub forward: bool,
     pub edt_armed: bool,
+    pub edt_arm_enable: bool,
     pub armed_timeout_count: u32,
     pub frametime_low: u16,
     pub frametime_high: u16,
