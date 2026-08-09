@@ -26,8 +26,8 @@ pub trait TimerOps {
     fn configure_capture(&self, prescaler: u8);
     /// Configure for PWM output: CCMR1=PWM1, output enable.
     /// `prescaler`: timer clock divider (0 = no division).
-    /// `arr`: auto-reload value in post-prescaler timer ticks.
-    fn configure_output(&self, prescaler: u16, arr: u16);
+    /// The backend selects the MCU-specific DShot output ARR.
+    fn configure_output(&self, prescaler: u16);
     /// Enable timer + DMA request + capture/output channel.
     fn start(&self);
     /// Get raw pointer to CCR1 register (for DMA PAR).
