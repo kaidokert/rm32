@@ -175,6 +175,7 @@ struct Harness {
     frametime_low: u16,
     frametime_high: u16,
     zero_input_count: u16,
+    dshot_output_prescaler: u16,
 }
 
 impl Harness {
@@ -213,6 +214,7 @@ impl Harness {
             frametime_low: 400,
             frametime_high: 600,
             zero_input_count: 0,
+            dshot_output_prescaler: 0,
             adc: MockAdc {
                 voltage: 0,
                 current: 0,
@@ -289,6 +291,11 @@ impl Harness {
                     DetectedProtocol::Dshot => {
                         self.dshot = true;
                         self.shared.set_dshot(true);
+                        if let Some(prescaler) = actions.next_capture.prescaler {
+                            self.dshot_output_prescaler = hal::DshotOutputPrescaler::new(prescaler)
+                                .expect("invalid DShot output prescaler")
+                                .raw();
+                        }
                     }
                     DetectedProtocol::Servo => {
                         self.servo_pwm = true;
@@ -430,7 +437,7 @@ impl Harness {
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
              send_telemetry={} send_esc_info_flag={} play_tone_flag={} \
-             edt_armed={} edt_arm_enable={}",
+             edt_armed={} edt_arm_enable={} dshot_output_prescaler={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -473,6 +480,7 @@ impl Harness {
             self.play_tone_flag,
             self.edt_armed as i32,
             self.edt_arm_enable as i32,
+            self.dshot_output_prescaler,
         );
         io::stdout().flush().unwrap();
     }

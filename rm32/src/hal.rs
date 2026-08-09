@@ -88,6 +88,28 @@ pub trait TelemetryUart {
     fn send_dma(&mut self, data: &[u8]);
 }
 
+/// Bidir DShot output timer prescaler.
+///
+/// AM32 uses these PSC values for DShot response timing: DShot600 on normal
+/// clocks = 0, DShot300 or high-clock DShot600 = 1, high-clock DShot300 = 3.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DshotOutputPrescaler(u16);
+
+impl DshotOutputPrescaler {
+    pub const DSHOT600: Self = Self(0);
+
+    pub fn new(value: u16) -> Option<Self> {
+        match value {
+            0 | 1 | 3 => Some(Self(value)),
+            _ => None,
+        }
+    }
+
+    pub fn raw(self) -> u16 {
+        self.0
+    }
+}
+
 /// Input signal capture (DShot/Servo via DMA)
 pub trait InputCapture {
     fn receive_dshot_dma(&mut self);
@@ -104,6 +126,9 @@ pub trait InputCapture {
     fn gcr_buffer(&mut self) -> &mut [u32; 37];
     /// Whether the input is currently in output mode (bidir DShot TX).
     fn is_output(&self) -> bool;
+    /// Set the timer prescaler for bidir DShot output.
+    /// Called during protocol detection. DShot600=0, DShot300=1, DShot150=3.
+    fn set_output_prescaler(&mut self, prescaler: DshotOutputPrescaler);
 }
 
 /// ADC readings (voltage, current, temperature)
@@ -147,4 +172,23 @@ pub trait System {
     fn reload_watchdog(&mut self);
     fn delay_micros(&mut self, us: u32);
     fn delay_millis(&mut self, ms: u32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DshotOutputPrescaler;
+
+    #[test]
+    fn dshot_output_prescaler_accepts_supported_values() {
+        for value in [0, 1, 3] {
+            assert_eq!(DshotOutputPrescaler::new(value).unwrap().raw(), value);
+        }
+    }
+
+    #[test]
+    fn dshot_output_prescaler_rejects_unsupported_values() {
+        assert_eq!(DshotOutputPrescaler::new(2), None);
+        assert_eq!(DshotOutputPrescaler::new(4), None);
+        assert_eq!(DshotOutputPrescaler::new(u16::MAX), None);
+    }
 }

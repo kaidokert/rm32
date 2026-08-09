@@ -84,12 +84,12 @@ impl TimerOps for F051Timer {
         tim.egr.write(|w| w.ug().set_bit());
         tim.cnt.write(|w| unsafe { w.bits(0) });
     }
-    fn configure_output(&self, period: u16) {
+    fn configure_output(&self, prescaler: u16) {
         let tim = unsafe { &*TIM15::ptr() };
         tim.ccmr1_output().write(|w| unsafe { w.bits(0x60) });
         tim.ccer.write(|w| unsafe { w.bits(0x03) });
-        tim.psc.write(|w| unsafe { w.bits(0) });
-        tim.arr.write(|w| unsafe { w.bits(period as u32) });
+        tim.psc.write(|w| unsafe { w.bits(prescaler as u32) });
+        tim.arr.write(|w| unsafe { w.bits(61) });
         tim.egr.write(|w| w.ug().set_bit());
         tim.bdtr.modify(|_, w| w.moe().set_bit());
     }

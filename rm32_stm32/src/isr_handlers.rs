@@ -6,7 +6,7 @@
 
 use crate::isr::{self, TargetIsrState};
 use crate::mcu::ChipConfig;
-use rm32::hal::InputCapture;
+use rm32::hal::{DshotOutputPrescaler, InputCapture};
 use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
@@ -163,7 +163,15 @@ pub fn handle_exti_frame() -> CaptureConfig {
         TransferAction::InputDetected(proto) => {
             shared.set_input_set(true);
             match proto {
-                DetectedProtocol::Dshot => shared.set_dshot(true),
+                DetectedProtocol::Dshot => {
+                    shared.set_dshot(true);
+                    if let Some(prescaler) = actions.next_capture.prescaler {
+                        state.hal.input.set_output_prescaler(
+                            DshotOutputPrescaler::new(prescaler)
+                                .expect("invalid DShot output prescaler"),
+                        );
+                    }
+                }
                 DetectedProtocol::Servo => shared.set_servo_pwm(true),
             }
         }
