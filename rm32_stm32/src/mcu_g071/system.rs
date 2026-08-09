@@ -64,6 +64,10 @@ impl System for SystemControl {
         cortex_m::interrupt::disable();
     }
 
+    fn irqs_enabled(&self) -> bool {
+        cortex_m::register::primask::read().is_active()
+    }
+
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) {
         let iwdg = unsafe { &*stm32g0xx_hal::stm32::IWDG::PTR };
         unsafe {
