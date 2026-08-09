@@ -20,6 +20,7 @@ tick 1  | dshot_frame=1500 | newinput=1500
 # EDT-arm mode: non-zero throttle is blocked until EDT_ARMED is set.
 config EDT_ARM_ENABLE=1
 config EDT_ARMED=0
+# Zero throttle clears the prior accepted input before checking the gated path.
 tick 1  | dshot_frame=0    | newinput=0
 tick 1  | dshot_frame=1500 | newinput=0
 

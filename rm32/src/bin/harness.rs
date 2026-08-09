@@ -233,6 +233,10 @@ impl Harness {
         *self = Self::new();
     }
 
+    fn sync_edt_arm_enable_from_config(&mut self) {
+        self.edt_arm_enable = self.config.input_type() == InputType::EdtArm;
+    }
+
     fn build_dshot_frame(&mut self, value: u16) {
         let mut bits = [0u8; 16];
         for (i, bit) in bits[..11].iter_mut().enumerate() {
@@ -645,6 +649,76 @@ impl Harness {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dshot_harness() -> Harness {
+        let mut harness = Harness::new();
+        harness.shared.set_input_set(true);
+        harness.shared.set_dshot(true);
+        harness.dshot = true;
+        harness
+    }
+
+    #[test]
+    fn normal_dshot_accepts_throttle_without_edt_arm() {
+        let mut harness = dshot_harness();
+        harness.edt_arm_enable = false;
+        harness.edt_armed = false;
+
+        harness.build_dshot_frame(1500);
+        harness.handle_transfer();
+
+        assert_eq!(harness.shared.newinput(), 1500);
+    }
+
+    #[test]
+    fn edt_arm_blocks_throttle_until_armed() {
+        let mut harness = dshot_harness();
+        harness.edt_arm_enable = true;
+        harness.edt_armed = false;
+
+        harness.build_dshot_frame(1500);
+        harness.handle_transfer();
+
+        assert_eq!(harness.shared.newinput(), 0);
+
+        harness.edt_armed = true;
+        harness.build_dshot_frame(1500);
+        harness.handle_transfer();
+
+        assert_eq!(harness.shared.newinput(), 1500);
+    }
+
+    #[test]
+    fn edt_arm_zero_throttle_clears_armed_state() {
+        let mut harness = dshot_harness();
+        harness.edt_arm_enable = true;
+        harness.edt_armed = true;
+        harness.shared.set_newinput(1500);
+
+        harness.build_dshot_frame(0);
+        harness.handle_transfer();
+
+        assert_eq!(harness.shared.newinput(), 0);
+        assert!(!harness.edt_armed);
+    }
+
+    #[test]
+    fn load_config_derives_edt_arm_enable() {
+        let mut harness = Harness::new();
+
+        harness.config.input_type = InputType::Dshot as u8;
+        harness.sync_edt_arm_enable_from_config();
+        assert!(!harness.edt_arm_enable);
+
+        harness.config.input_type = InputType::EdtArm as u8;
+        harness.sync_edt_arm_enable_from_config();
+        assert!(harness.edt_arm_enable);
+    }
+}
+
 fn main() {
     let mut harness = Harness::new();
     let stdin = io::stdin();
@@ -675,7 +749,7 @@ fn main() {
             );
             harness.main.config = harness.config;
             harness.main.apply_motor_config(&mc);
-            harness.edt_arm_enable = harness.config.input_type() == InputType::EdtArm;
+            harness.sync_edt_arm_enable_from_config();
             harness
                 .duty
                 .set_duty_limits(mc.minimum_duty, mc.min_startup_duty, mc.startup_max_duty);
