@@ -170,6 +170,7 @@ struct Harness {
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
+    play_tone_flag: u8,
     frametime_low: u16,
     frametime_high: u16,
     zero_input_count: u16,
@@ -206,6 +207,7 @@ impl Harness {
             dshot: false,
             servo_pwm: false,
             edt_armed: false,
+            play_tone_flag: 0,
             frametime_low: 400,
             frametime_high: 600,
             zero_input_count: 0,
@@ -315,6 +317,9 @@ impl Harness {
                 );
                 self.commutation.set_forward(fwd);
                 match result {
+                    CommandResult::PlayTone(tone) => {
+                        self.play_tone_flag = tone;
+                    }
                     CommandResult::SaveSettings => {
                         self.shared.set_save_settings_flag(true);
                     }
@@ -343,6 +348,7 @@ impl Harness {
     fn do_tick(&mut self) {
         // Clear one-shot flags from previous tick (so print_state can observe them)
         self.shared.set_send_esc_info_flag(false);
+        self.play_tone_flag = 0;
 
         // Apply persistent throttle
         if self.has_throttle {
@@ -404,7 +410,7 @@ impl Harness {
              inputSet={} dshot={} servoPwm={} \
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
-             send_telemetry={} send_esc_info_flag={}",
+             send_telemetry={} send_esc_info_flag={} play_tone_flag={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -444,6 +450,7 @@ impl Harness {
             self.bemf.temp_advance(),
             self.shared.send_telemetry() as i32,
             self.shared.send_esc_info_flag() as i32,
+            self.play_tone_flag,
         );
         io::stdout().flush().unwrap();
     }
