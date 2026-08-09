@@ -182,7 +182,7 @@ impl Harness {
         Self {
             shared: SharedState::new(),
             commutation: Commutation::new(),
-            bemf: BemfState::default(),
+            bemf: BemfState::with_cpu_mhz(64),
             duty: DutyState::default(),
             config: EepromConfig::default(),
             armed_timeout_count: 0,
