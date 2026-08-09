@@ -89,7 +89,7 @@ fn main() -> ! {
     // --- Build ISR state and move to global ---
     let isr_state = IsrState {
         commutation: Commutation::new(),
-        bemf: BemfState::default(),
+        bemf: BemfState::with_cpu_mhz(Chip::CPU_FREQUENCY_MHZ as u8),
         duty: DutyState::default(),
         hal,
         cmd: rm32::dshot_commands::CommandProcessor::default(),
