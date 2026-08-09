@@ -5,7 +5,7 @@
 //! instead of the legacy MotorState/tick.rs path.
 
 use rm32::commutation::Commutation;
-use rm32::config::EepromConfig;
+use rm32::config::{EepromConfig, InputType};
 use rm32::control::context::MotorContext;
 use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
@@ -292,7 +292,9 @@ impl Harness {
                 }
             }
             TransferAction::DshotThrottle { value, telemetry } => {
-                self.shared.set_newinput(value);
+                if !self.edt_arm_enable || self.edt_armed || value == 0 {
+                    self.shared.set_newinput(value);
+                }
                 if value == 0 && self.edt_arm_enable {
                     self.edt_armed = false;
                 }
@@ -413,7 +415,8 @@ impl Harness {
              inputSet={} dshot={} servoPwm={} \
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
-             send_telemetry={} send_esc_info_flag={} play_tone_flag={} edt_armed={}",
+             send_telemetry={} send_esc_info_flag={} play_tone_flag={} \
+             edt_armed={} edt_arm_enable={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -455,6 +458,7 @@ impl Harness {
             self.shared.send_esc_info_flag() as i32,
             self.play_tone_flag,
             self.edt_armed as i32,
+            self.edt_arm_enable as i32,
         );
         io::stdout().flush().unwrap();
     }
@@ -671,6 +675,7 @@ fn main() {
             );
             harness.main.config = harness.config;
             harness.main.apply_motor_config(&mc);
+            harness.edt_arm_enable = harness.config.input_type() == InputType::EdtArm;
             harness
                 .duty
                 .set_duty_limits(mc.minimum_duty, mc.min_startup_duty, mc.startup_max_duty);

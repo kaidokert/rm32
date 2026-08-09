@@ -176,8 +176,7 @@ fn main() -> ! {
     isr::with_isr_state(|isr| {
         isr.config = main_state.config;
         isr.forward = main_state.config.dir_reversed == 0;
-        isr.edt_arm_enable =
-            main_state.config.input_type() == rm32::config::InputType::EdtArm;
+        isr.edt_arm_enable = main_state.config.input_type() == rm32::config::InputType::EdtArm;
         // Apply timer1_max_arr from pwm_frequency config (ISR reads from SharedComm)
         // Apply startup duty from EEPROM
         isr.duty

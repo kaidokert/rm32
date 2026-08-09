@@ -6,16 +6,26 @@
 armed=0
 inputSet=1
 dshot=1
+EDT_ARM_ENABLE=0
 
 @sequence
-# EDT_ARMED=0: normal DShot throttle is accepted
+# Normal DShot: throttle is accepted without EDT arming.
 config EDT_ARMED=0
 tick 1  | dshot_frame=1500 | newinput=1500
 
-# EDT_ARMED=1: throttle remains accepted
+# Normal DShot: throttle remains accepted if EDT_ARMED happens to be set.
 config EDT_ARMED=1
 tick 1  | dshot_frame=1500 | newinput=1500
 
-# Commands (value <= 47) work regardless of EDT_ARMED
+# EDT-arm mode: non-zero throttle is blocked until EDT_ARMED is set.
+config EDT_ARM_ENABLE=1
+config EDT_ARMED=0
+tick 1  | dshot_frame=0    | newinput=0
+tick 1  | dshot_frame=1500 | newinput=0
+
+config EDT_ARMED=1
+tick 1  | dshot_frame=1500 | newinput=1500
+
+# Zero throttle remains accepted.
 config EDT_ARMED=0
 tick 1  | dshot_frame=0    | newinput=0

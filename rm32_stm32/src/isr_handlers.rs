@@ -167,7 +167,9 @@ pub fn handle_exti_frame() {
             }
         }
         TransferAction::DshotThrottle { value, telemetry } => {
-            shared.set_newinput(value);
+            if !state.edt_arm_enable || state.edt_armed || value == 0 {
+                shared.set_newinput(value);
+            }
             if value == 0 && state.edt_arm_enable {
                 state.edt_armed = false;
             }
