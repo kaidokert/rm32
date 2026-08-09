@@ -418,6 +418,10 @@ impl TimingState {
     }
 }
 
+pub const fn bad_count_threshold_for_cpu_mhz(cpu_mhz: u8) -> u8 {
+    cpu_mhz / 24
+}
+
 impl Default for BemfState {
     fn default() -> Self {
         Self {
@@ -426,7 +430,7 @@ impl Default for BemfState {
             min_counts_up: 2,
             min_counts_down: 2,
             bad_count: 0,
-            bad_count_threshold: 2,
+            bad_count_threshold: bad_count_threshold_for_cpu_mhz(64),
             filter_level: 5,
             wait_time: 0,
             last_zc_time: 0,
@@ -437,6 +441,13 @@ impl Default for BemfState {
 }
 
 impl BemfState {
+    pub fn with_cpu_mhz(cpu_mhz: u8) -> Self {
+        Self {
+            bad_count_threshold: bad_count_threshold_for_cpu_mhz(cpu_mhz),
+            ..Self::default()
+        }
+    }
+
     /// Sync BEMF config from main→ISR published state.
     pub(crate) fn sync_config(&mut self, filter_level: u8, auto_advance: u8, min_counts: u8) {
         self.filter_level = filter_level;

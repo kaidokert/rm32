@@ -2,9 +2,17 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::control::state::BemfState;
+    use crate::control::state::{BemfState, bad_count_threshold_for_cpu_mhz};
 
     const SATURATION_STEPS: usize = u8::MAX as usize + 10;
+
+    #[test]
+    fn bad_count_threshold_derives_from_cpu_frequency() {
+        assert_eq!(bad_count_threshold_for_cpu_mhz(48), 2);
+        assert_eq!(bad_count_threshold_for_cpu_mhz(64), 2);
+        assert_eq!(bad_count_threshold_for_cpu_mhz(80), 3);
+        assert_eq!(bad_count_threshold_for_cpu_mhz(170), 7);
+    }
 
     #[test]
     fn increments_counter_on_correct_polarity_rising() {
@@ -29,15 +37,18 @@ mod tests {
 
     #[test]
     fn resets_counter_when_bad_count_exceeds_threshold() {
-        let mut b = BemfState::default();
-        // Default bad_count_threshold=2
+        let mut b = BemfState::with_cpu_mhz(80);
+        // AM32: CPU_FREQUENCY_MHZ / 24 -> 3 on the 80 MHz L431.
         for _ in 0..10 {
             b.update(false, true);
         }
         assert_eq!(b.counter(), 10);
-        // 3 bad readings exceed threshold (2)
+        // 3 bad readings do not exceed the threshold.
         b.update(true, true);
         b.update(true, true);
+        b.update(true, true);
+        assert_eq!(b.counter(), 10);
+        // The 4th does.
         b.update(true, true);
         assert_eq!(b.counter(), 0);
     }
