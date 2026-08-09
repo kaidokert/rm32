@@ -101,6 +101,9 @@ pub const MIN_ZC_FOR_ADVANCE: u32 = 5;
 /// Signal timeout threshold (20kHz ticks). 10000 = 0.5 second with no valid input.
 pub const SIGNAL_TIMEOUT_DISARM: u16 = 10000;
 
+/// Unarmed signal timeout threshold (20kHz ticks). 40000 = 2 seconds.
+pub const SIGNAL_TIMEOUT_UNARMED: u16 = 40000;
+
 /// Sine startup: throttle below which BEMF timeout is cleared.
 pub const SINE_BEMF_CLEAR_THROTTLE: u16 = 160;
 
