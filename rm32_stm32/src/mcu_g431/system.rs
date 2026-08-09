@@ -55,6 +55,9 @@ impl rm32::hal::System for System {
     fn disable_irq(&mut self) {
         cortex_m::interrupt::disable();
     }
+    fn irqs_enabled(&self) -> bool {
+        cortex_m::register::primask::read().is_active()
+    }
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) {
         let iwdg = unsafe { &*crate::pac::IWDG::PTR };
         unsafe {

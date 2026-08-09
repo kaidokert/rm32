@@ -141,6 +141,7 @@ pub trait System {
     fn reset(&mut self) -> !;
     fn enable_irq(&mut self);
     fn disable_irq(&mut self);
+    fn irqs_enabled(&self) -> bool;
     /// Start the independent watchdog with given prescaler and reload values.
     fn start_watchdog(&mut self, prescaler: u8, reload: u16);
     fn reload_watchdog(&mut self);
