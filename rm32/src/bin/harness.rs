@@ -277,6 +277,7 @@ impl Harness {
             &mut self.zero_input_count,
             self.frametime_low,
             self.frametime_high,
+            64,
         );
 
         // Apply transfer actions
@@ -344,6 +345,15 @@ impl Harness {
                 self.shared.set_signal_timeout(0);
             }
             TransferAction::ServoCalibrating => {
+                self.shared.set_signal_timeout(0);
+            }
+            TransferAction::ServoCalibrationDone {
+                low_threshold,
+                high_threshold,
+            } => {
+                self.config.servo_low_threshold = low_threshold;
+                self.config.servo_high_threshold = high_threshold;
+                self.shared.set_save_settings_flag(true);
                 self.shared.set_signal_timeout(0);
             }
             TransferAction::None => {}
