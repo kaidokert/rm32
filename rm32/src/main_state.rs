@@ -112,6 +112,8 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub(crate) last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
+    /// Set when signal timeout handling requests a firmware reset.
+    pub needs_reset: bool,
     /// Custom LED pin (NoLed if board has no custom LED)
     pub(crate) led: LED,
     pub(crate) led_counter: u16,
@@ -156,6 +158,7 @@ impl MainState<NoLed> {
             desync_check: false,
             last_armed: false,
             just_armed: false,
+            needs_reset: false,
             led: NoLed,
             led_counter: 0,
             ten_khz_counter: 0,
@@ -343,10 +346,17 @@ impl<LED: OutputPin> MainState<LED> {
             self.timing.last_average_interval = self.timing.average_interval;
         }
 
-        // Signal timeout
-        if shared.signal_timeout() > crate::constants::SIGNAL_TIMEOUT_DISARM && shared.armed() {
-            shared.transition(crate::motor_mode::MotorEvent::Disarm);
+        // Signal timeout thresholds fire only after the counter exceeds the limit.
+        let signal_timeout = shared.signal_timeout();
+        if shared.armed() {
+            if signal_timeout > crate::constants::SIGNAL_TIMEOUT_DISARM {
+                shared.transition(crate::motor_mode::MotorEvent::Disarm);
+                shared.set_input_set(false);
+                self.needs_reset = true;
+            }
+        } else if shared.input_set() && signal_timeout > crate::constants::SIGNAL_TIMEOUT_UNARMED {
             shared.set_input_set(false);
+            self.needs_reset = true;
         }
 
         // eRPM
@@ -709,5 +719,62 @@ mod tests {
         }
 
         assert_eq!(shared.current_limit_adjust(), motor_cfg.minimum_duty);
+    }
+
+    #[test]
+    fn signal_timeout_armed_requests_reset() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+        shared.set_input_set(true);
+        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_DISARM {
+            shared.increment_signal_timeout();
+        }
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(!shared.armed());
+        assert!(!shared.input_set());
+        assert!(main.needs_reset);
+    }
+
+    #[test]
+    fn signal_timeout_unarmed_resets_input_and_requests_reset() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::Disarmed);
+        shared.set_input_set(true);
+        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_UNARMED {
+            shared.increment_signal_timeout();
+        }
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(!shared.input_set());
+        assert!(main.needs_reset);
+    }
+
+    #[test]
+    fn signal_timeout_unarmed_without_prior_input_does_not_reset() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::Disarmed);
+        assert!(!shared.input_set());
+        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_UNARMED {
+            shared.increment_signal_timeout();
+        }
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(!main.needs_reset);
     }
 }

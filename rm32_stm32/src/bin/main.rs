@@ -329,6 +329,10 @@ fn main() -> ! {
             telem.send_dma(&info_pkt);
         }
 
+        if main_state.needs_reset {
+            sys.reset();
+        }
+
         sys.reload_watchdog();
         cortex_m::asm::wfi();
     }
