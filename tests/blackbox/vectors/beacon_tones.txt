@@ -1,0 +1,19 @@
+# Beacon tones (DShot commands 2-5)
+# DShot commands 1-5 trigger play_tone_flag for beacon/lost-drone locator.
+# Must be unarmed + dshot_frame builds actual DShot packet through decode.
+
+@config
+armed=0
+inputSet=1
+dshot=1
+zero_input_count=31
+
+@sequence
+# Command 2 via actual DShot frame (value 2 = command range)
+tick 1  | dshot_frame=2 | newinput=0
+
+# Command 3
+tick 1  | dshot_frame=3 | newinput=0
+
+# Command 5
+tick 1  | dshot_frame=5 | newinput=0
