@@ -305,10 +305,15 @@ fn main() -> ! {
         // EEPROM save on DShot command
         if shared.save_settings_flag() {
             shared.set_save_settings_flag(false);
-            // Copy ISR config back and write to flash
-            isr::with_isr_state(|isr| {
-                main_state.config = isr.config;
-            });
+            if let Some((low, high)) = shared.take_servo_calibration() {
+                main_state.config.servo_low_threshold = low;
+                main_state.config.servo_high_threshold = high;
+            } else {
+                // Copy pre-ISR-local config updates back and write to flash.
+                isr::with_isr_state(|isr| {
+                    main_state.config = isr.config;
+                });
+            }
             let mut flash = FlashStorage::new();
             use rm32::hal::Flash as _;
             flash.write(eeprom_address, main_state.config.as_bytes());

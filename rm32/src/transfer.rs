@@ -303,6 +303,45 @@ mod tests {
     }
 
     #[test]
+    fn servo_pin_low_requests_normal_capture() {
+        let mut state = TransferState::default();
+        state.servo.set_calibration(1100, 1900, 1500, 100);
+        let mut zic = 0;
+        let actions = state.process(
+            &[1000, 2500],
+            true,
+            false,
+            true,
+            false,
+            false,
+            false,
+            0,
+            0,
+            false,
+            false,
+            &mut zic,
+            400,
+            600,
+            64,
+        );
+
+        assert_eq!(actions.next_capture, CaptureConfig::SERVO);
+        assert!(matches!(actions.action, TransferAction::ServoThrottle(_)));
+    }
+
+    #[test]
+    fn dshot_mode_requests_dshot_capture() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let actions = state.process(
+            &[0; 32], true, true, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+            600, 64,
+        );
+
+        assert_eq!(actions.next_capture, CaptureConfig::DSHOT);
+    }
+
+    #[test]
     fn servo_calibration_done_returns_thresholds() {
         let mut state = TransferState::default();
         state.servo.set_calibration_required(true);

@@ -225,6 +225,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
         } => {
             state.config.servo_low_threshold = low_threshold;
             state.config.servo_high_threshold = high_threshold;
+            shared.publish_servo_calibration(low_threshold, high_threshold);
             shared.set_save_settings_flag(true);
             shared.set_signal_timeout(0);
         }
