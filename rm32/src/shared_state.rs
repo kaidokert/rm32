@@ -68,6 +68,7 @@ pub struct SharedState {
     min_bemf_counts: AtomicU8,     // min zero-cross detection threshold
     auto_advance: AtomicU8,        // commutation timing advance level
     prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
+    all_off_request: AtomicBool,   // main requests ISR-context phase shutdown
 }
 
 impl Default for SharedState {
@@ -112,6 +113,7 @@ impl SharedState {
             min_bemf_counts: AtomicU8::new(2),
             auto_advance: AtomicU8::new(0),
             prop_brake_active: AtomicBool::new(false),
+            all_off_request: AtomicBool::new(false),
         }
     }
 
@@ -449,6 +451,15 @@ impl SharedState {
     pub fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.store(v, REL);
     }
+    pub fn all_off_request(&self) -> bool {
+        self.all_off_request.load(ACQ)
+    }
+    pub fn request_all_off(&self) {
+        self.all_off_request.store(true, REL);
+    }
+    pub fn clear_all_off_request(&self) {
+        self.all_off_request.store(false, REL);
+    }
 }
 
 impl crate::shared_comm::MotorState for SharedState {
@@ -555,6 +566,15 @@ impl crate::shared_comm::MainControl for SharedState {
     }
     fn set_prop_brake_active(&self, v: bool) {
         SharedState::set_prop_brake_active(self, v);
+    }
+    fn all_off_request(&self) -> bool {
+        SharedState::all_off_request(self)
+    }
+    fn request_all_off(&self) {
+        SharedState::request_all_off(self);
+    }
+    fn clear_all_off_request(&self) {
+        SharedState::clear_all_off_request(self);
     }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
