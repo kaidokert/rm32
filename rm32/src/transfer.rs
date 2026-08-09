@@ -43,12 +43,63 @@ pub enum TransferAction {
     ServoThrottle(u16),
     /// Servo calibration in progress (signal alive, no throttle value)
     ServoCalibrating,
+    /// Servo calibration complete; persist thresholds to EEPROM.
+    ServoCalibrationDone {
+        low_threshold: u8,
+        high_threshold: u8,
+    },
+}
+
+/// DMA capture setup requested for the next input frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptureConfig {
+    /// DMA transfer count.
+    pub ndtr: u32,
+    /// Timer prescaler update, if protocol detection changed the capture rate.
+    pub prescaler: Option<u16>,
+}
+
+impl CaptureConfig {
+    pub const DSHOT: Self = Self {
+        ndtr: 32,
+        prescaler: None,
+    };
+    pub const SERVO: Self = Self {
+        ndtr: 2,
+        prescaler: None,
+    };
+    pub const SERVO_REALIGN: Self = Self {
+        ndtr: 3,
+        prescaler: None,
+    };
+
+    pub const DSHOT600_DETECTED: Self = Self {
+        ndtr: 32,
+        prescaler: Some(0),
+    };
+    pub const DSHOT300_DETECTED: Self = Self {
+        ndtr: 32,
+        prescaler: Some(1),
+    };
+    pub const DSHOT150_DETECTED: Self = Self {
+        ndtr: 32,
+        prescaler: Some(3),
+    };
+
+    pub fn servo_detected(cpu_mhz: u8) -> Self {
+        Self {
+            ndtr: 2,
+            prescaler: Some(cpu_mhz.saturating_sub(1) as u16),
+        }
+    }
 }
 
 /// Actions the caller (ISR) should take after transfer complete.
 pub struct TransferActions {
     /// Primary action
     pub action: TransferAction,
+    /// Capture setup for the next DMA cycle.
+    pub next_capture: CaptureConfig,
     /// DShot frame timing update (from unarmed averaging)
     pub frametime: Option<(u16, u16)>,
 }
@@ -69,6 +120,7 @@ impl TransferState {
     /// `disable_stick_cal`: config disable_stick_calibration flag
     /// `zero_input_count`: current zero input counter
     /// `frametime_low/high`: current DShot frame timing bounds
+    /// `cpu_mhz`: MCU core/timer clock in MHz for capture prescaler selection
     #[allow(clippy::too_many_arguments)]
     pub fn process(
         &mut self,
@@ -86,25 +138,38 @@ impl TransferState {
         zero_input_count: &mut u16,
         frametime_low: u16,
         frametime_high: u16,
+        cpu_mhz: u8,
     ) -> TransferActions {
         let mut action = TransferAction::None;
         let mut frametime = None;
 
         // --- Input detection ---
         if !input_set {
-            let sig = signal::detect_input(dma_buffer, 48);
-            action = match sig {
-                signal::SignalType::Dshot600
-                | signal::SignalType::Dshot300
-                | signal::SignalType::Dshot150 => {
-                    TransferAction::InputDetected(DetectedProtocol::Dshot)
-                }
-                signal::SignalType::ServoPwm => {
-                    TransferAction::InputDetected(DetectedProtocol::Servo)
-                }
-                _ => TransferAction::None,
+            let sig = signal::detect_input(dma_buffer, cpu_mhz);
+            let (action, next_capture) = match sig {
+                signal::SignalType::Dshot600 => (
+                    TransferAction::InputDetected(DetectedProtocol::Dshot),
+                    CaptureConfig::DSHOT600_DETECTED,
+                ),
+                signal::SignalType::Dshot300 => (
+                    TransferAction::InputDetected(DetectedProtocol::Dshot),
+                    CaptureConfig::DSHOT300_DETECTED,
+                ),
+                signal::SignalType::Dshot150 => (
+                    TransferAction::InputDetected(DetectedProtocol::Dshot),
+                    CaptureConfig::DSHOT150_DETECTED,
+                ),
+                signal::SignalType::ServoPwm => (
+                    TransferAction::InputDetected(DetectedProtocol::Servo),
+                    CaptureConfig::servo_detected(cpu_mhz),
+                ),
+                signal::SignalType::None => (TransferAction::None, CaptureConfig::DSHOT),
             };
-            return TransferActions { action, frametime };
+            return TransferActions {
+                action,
+                next_capture,
+                frametime,
+            };
         }
 
         // --- DShot processing ---
@@ -137,9 +202,16 @@ impl TransferState {
                         *zero_input_count = 0;
                         TransferAction::None
                     }
-                    ServoResult::Calibrating
-                    | ServoResult::CalibrationHighDone
-                    | ServoResult::CalibrationDone { .. } => TransferAction::ServoCalibrating,
+                    ServoResult::Calibrating | ServoResult::CalibrationHighDone => {
+                        TransferAction::ServoCalibrating
+                    }
+                    ServoResult::CalibrationDone {
+                        low_threshold_eeprom,
+                        high_threshold_eeprom,
+                    } => TransferAction::ServoCalibrationDone {
+                        low_threshold: low_threshold_eeprom,
+                        high_threshold: high_threshold_eeprom,
+                    },
                 };
             }
         }
@@ -185,6 +257,110 @@ impl TransferState {
             }
         }
 
-        TransferActions { action, frametime }
+        let next_capture = if servo_mode && input_pin_high {
+            CaptureConfig::SERVO_REALIGN
+        } else if servo_mode {
+            CaptureConfig::SERVO
+        } else {
+            CaptureConfig::DSHOT
+        };
+
+        TransferActions {
+            action,
+            next_capture,
+            frametime,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn servo_pin_high_requests_realign_capture() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let actions = state.process(
+            &[0, 0, 0],
+            true,
+            false,
+            true,
+            false,
+            false,
+            true,
+            0,
+            0,
+            false,
+            false,
+            &mut zic,
+            400,
+            600,
+            64,
+        );
+
+        assert_eq!(actions.next_capture, CaptureConfig::SERVO_REALIGN);
+    }
+
+    #[test]
+    fn servo_calibration_done_returns_thresholds() {
+        let mut state = TransferState::default();
+        state.servo.set_calibration_required(true);
+        let mut zic = 0;
+
+        for _ in 0..51 {
+            let high = state.process(
+                &[1000, 2900],
+                true,
+                false,
+                true,
+                false,
+                false,
+                false,
+                0,
+                0,
+                false,
+                false,
+                &mut zic,
+                400,
+                600,
+                64,
+            );
+            assert!(matches!(
+                high.action,
+                TransferAction::ServoCalibrating | TransferAction::ServoCalibrationDone { .. }
+            ));
+        }
+
+        let mut done = TransferAction::None;
+        for _ in 0..76 {
+            done = state
+                .process(
+                    &[1000, 2100],
+                    true,
+                    false,
+                    true,
+                    false,
+                    false,
+                    false,
+                    0,
+                    0,
+                    false,
+                    false,
+                    &mut zic,
+                    400,
+                    600,
+                    64,
+                )
+                .action;
+        }
+
+        assert!(matches!(
+            done,
+            TransferAction::ServoCalibrationDone {
+                low_threshold: _,
+                high_threshold: _
+            }
+        ));
     }
 }

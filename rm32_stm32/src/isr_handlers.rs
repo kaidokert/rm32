@@ -7,6 +7,7 @@
 use crate::isr::{self, TargetIsrState};
 use crate::mcu::ChipConfig;
 use rm32::hal::InputCapture;
+use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
 ///
@@ -130,7 +131,7 @@ pub fn handle_dma_tc() {
 }
 
 /// Software-triggered frame processing (EXTI ISR body).
-pub fn handle_exti_frame() {
+pub fn handle_exti_frame() -> CaptureConfig {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
@@ -154,10 +155,10 @@ pub fn handle_exti_frame() {
         &mut zic,
         state.frametime_low,
         state.frametime_high,
+        crate::mcu::Chip::CPU_FREQUENCY_MHZ as u8,
     );
     shared.set_zero_input_count(zic);
 
-    use rm32::transfer::{DetectedProtocol, TransferAction};
     match actions.action {
         TransferAction::InputDetected(proto) => {
             shared.set_input_set(true);
@@ -218,12 +219,22 @@ pub fn handle_exti_frame() {
         TransferAction::ServoCalibrating => {
             shared.set_signal_timeout(0);
         }
+        TransferAction::ServoCalibrationDone {
+            low_threshold,
+            high_threshold,
+        } => {
+            state.config.servo_low_threshold = low_threshold;
+            state.config.servo_high_threshold = high_threshold;
+            shared.set_save_settings_flag(true);
+            shared.set_signal_timeout(0);
+        }
         TransferAction::None => {}
     }
     if let Some((low, high)) = actions.frametime {
         state.frametime_low = low;
         state.frametime_high = high;
     }
+    actions.next_capture
 }
 
 /// CRSF UART RX byte handler. Call from UART RX interrupt with each received byte.
