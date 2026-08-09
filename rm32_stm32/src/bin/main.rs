@@ -29,6 +29,8 @@ include!(concat!(env!("OUT_DIR"), "/board_config.rs"));
 
 #[entry]
 fn main() -> ! {
+    cortex_m::interrupt::disable();
+
     rtt_target::rtt_init_print!();
 
     // Snapshot reset-cause flags before anything clears them. Sticky in
