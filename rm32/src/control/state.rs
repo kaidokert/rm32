@@ -426,7 +426,8 @@ impl Default for BemfState {
             min_counts_up: 2,
             min_counts_down: 2,
             bad_count: 0,
-            bad_count_threshold: 2,
+            // AM32: CPU_FREQUENCY_MHZ / 24 -> 3 on the 80 MHz L431.
+            bad_count_threshold: 3,
             filter_level: 5,
             wait_time: 0,
             last_zc_time: 0,

@@ -30,14 +30,17 @@ mod tests {
     #[test]
     fn resets_counter_when_bad_count_exceeds_threshold() {
         let mut b = BemfState::default();
-        // Default bad_count_threshold=2
+        // Default bad_count_threshold=3 (AM32: CPU_FREQUENCY_MHZ / 24 on L431)
         for _ in 0..10 {
             b.update(false, true);
         }
         assert_eq!(b.counter(), 10);
-        // 3 bad readings exceed threshold (2)
+        // 3 bad readings do not exceed the threshold.
         b.update(true, true);
         b.update(true, true);
+        b.update(true, true);
+        assert_eq!(b.counter(), 10);
+        // The 4th does.
         b.update(true, true);
         assert_eq!(b.counter(), 0);
     }

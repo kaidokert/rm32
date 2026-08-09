@@ -4,6 +4,8 @@
 //! Timing via cortex_m::asm::delay (cycle-counting busy wait).
 //! Generic over any OutputPin — works with HAL pins from any MCU.
 
+use crate::gpio_regs::GpioPort;
+use crate::mcu::PortB;
 use embedded_hal::digital::OutputPin;
 use rm32::ws2812::WS2812Pin;
 
@@ -53,8 +55,6 @@ pub struct GpioBPin {
 impl GpioBPin {
     /// Create a GPIOB output pin. Configures MODER as output, OSPEEDR as high speed.
     pub fn new(pin: u8) -> Self {
-        use crate::gpio_regs::GpioPort as _;
-        use crate::mcu::PortB;
         let offset = pin as u32 * 2;
         PortB::modify_moder(|v| (v & !(0b11 << offset)) | (0b01 << offset));
         // Set high speed (OSPEEDR)
@@ -73,14 +73,10 @@ impl embedded_hal::digital::ErrorType for GpioBPin {
 
 impl OutputPin for GpioBPin {
     fn set_high(&mut self) -> Result<(), Self::Error> {
-        use crate::gpio_regs::GpioPort;
-        use crate::mcu::PortB;
         PortB::write_bsrr(self.set_mask);
         Ok(())
     }
     fn set_low(&mut self) -> Result<(), Self::Error> {
-        use crate::gpio_regs::GpioPort;
-        use crate::mcu::PortB;
         PortB::write_bsrr(self.reset_mask);
         Ok(())
     }
