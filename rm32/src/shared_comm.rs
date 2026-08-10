@@ -164,6 +164,10 @@ pub trait MainControl {
     fn request_isr_action(&self, _action: IsrAction) {}
     fn clear_isr_action(&self, _action: IsrAction) {}
 
+    /// Sine changeover step request (0 = none, 1-6 = execute changeover with step).
+    fn changeover_step(&self) -> u8;
+    fn set_changeover_step(&self, step: u8);
+
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {
         1999

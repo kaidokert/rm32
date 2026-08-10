@@ -70,6 +70,7 @@ pub struct SharedState {
     auto_advance: AtomicU8,        // commutation timing advance level
     prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
     isr_action: AtomicU8,          // main requests one-shot ISR-context work
+    changeover_step: AtomicU8,     // sine changeover step (0=none, 1-6=pending)
     one_khz_counter: AtomicU8,     // incremented by TIM6 ISR, consumed by main
     telem_counter: AtomicU16,      // incremented by TIM6 ISR for interval telemetry
 }
@@ -117,6 +118,7 @@ impl SharedState {
             auto_advance: AtomicU8::new(0),
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
+            changeover_step: AtomicU8::new(0),
             one_khz_counter: AtomicU8::new(0),
             telem_counter: AtomicU16::new(0),
         }
@@ -489,6 +491,12 @@ impl SharedState {
             .compare_exchange(action as u8, IsrAction::None as u8, REL, ACQ)
             .ok();
     }
+    pub fn changeover_step(&self) -> u8 {
+        self.changeover_step.load(ACQ)
+    }
+    pub fn set_changeover_step(&self, step: u8) {
+        self.changeover_step.store(step, REL);
+    }
 }
 
 impl crate::shared_comm::MotorState for SharedState {
@@ -614,6 +622,12 @@ impl crate::shared_comm::MainControl for SharedState {
     fn clear_isr_action(&self, action: IsrAction) {
         SharedState::clear_isr_action(self, action);
     }
+    fn changeover_step(&self) -> u8 {
+        SharedState::changeover_step(self)
+    }
+    fn set_changeover_step(&self, step: u8) {
+        SharedState::set_changeover_step(self, step);
+    }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
     }
@@ -738,6 +752,15 @@ mod tests {
         MainControl::clear_isr_action(&shared, IsrAction::ResetIntervalTimer);
 
         assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
+    }
+
+    #[test]
+    fn changeover_step_handoff_roundtrips() {
+        let shared = SharedState::new();
+
+        assert_eq!(MainControl::changeover_step(&shared), 0);
+        MainControl::set_changeover_step(&shared, 5);
+        assert_eq!(MainControl::changeover_step(&shared), 5);
     }
 
     #[test]

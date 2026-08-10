@@ -1,0 +1,15 @@
+# Sine-to-BLDC changeover.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+stepper_sine=1
+eeprom.use_sine_start=1
+eeprom.comp_pwm=1
+eeprom.motor_poles=14
+eeprom.stall_protection=1
+
+@sequence
+tick 1 | throttle=500 | stepper_sine=0 running=1 old_routine=1 step=5 commutation_interval=9000

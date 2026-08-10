@@ -133,6 +133,9 @@ pub const SINE_SLOW_STEP_THROTTLE: u16 = 137;
 /// Sine mode: throttle above which changeover to BLDC may occur.
 pub const SINE_CHANGEOVER_THROTTLE: u16 = 200;
 
+/// Sine startup changeover commutation step.
+pub const SINE_CHANGEOVER_STEP: u8 = 5;
+
 /// Sine mode step delay at high throttle (µs).
 pub const SINE_FAST_STEP_DELAY: u16 = 80;
 
