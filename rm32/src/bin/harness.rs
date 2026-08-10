@@ -11,6 +11,7 @@ use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
+use rm32::hal::PwmOutput;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 use rm32::system::SystemTick;
@@ -436,6 +437,33 @@ impl Harness {
         if self.has_throttle {
             self.shared.set_newinput(self.throttle_value);
             self.shared.set_signal_timeout(0);
+        }
+
+        if let Some((result, (ch1, ch2, ch3))) =
+            self.system.tick_sine(&self.shared, &self.config, 60, 1999)
+        {
+            self.hal.pwm.set_compare1(ch1);
+            self.hal.pwm.set_compare2(ch2);
+            self.hal.pwm.set_compare3(ch3);
+            match result {
+                rm32::sine::SineStepResult::Continue(_) => {}
+                rm32::sine::SineStepResult::Changeover {
+                    commutation_interval,
+                    step,
+                } => {
+                    self.system.apply_sine_changeover(
+                        &self.shared,
+                        &mut self.main,
+                        commutation_interval,
+                    );
+                    self.shared.set_changeover_step(step);
+                }
+                rm32::sine::SineStepResult::Idle => {
+                    let brake = rm32::system::SystemTick::handle_sine_idle(&self.config, 1999);
+                    self.system.input_state.set_prop_brake_active(brake);
+                    self.shared.set_prop_brake_active(brake);
+                }
+            }
         }
 
         // Advance interval timer

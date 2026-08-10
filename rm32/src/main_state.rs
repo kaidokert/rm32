@@ -179,6 +179,11 @@ impl<LED: OutputPin> MainState<LED> {
         &self.timing
     }
 
+    /// Mutable access to timing state.
+    pub fn timing_mut(&mut self) -> &mut TimingState {
+        &mut self.timing
+    }
+
     /// Read-only access to PID state.
     pub fn pid(&self) -> &PidState {
         &self.pid

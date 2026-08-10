@@ -31,6 +31,7 @@ pub struct TestShared {
     pub telem_counter: Cell<u16>,
     pub prop_brake_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
+    pub changeover_step: Cell<u8>,
 }
 
 impl Default for TestShared {
@@ -66,6 +67,7 @@ impl TestShared {
             telem_counter: Cell::new(0),
             prop_brake_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
+            changeover_step: Cell::new(0),
         }
     }
 }
@@ -216,6 +218,12 @@ impl MainControl for TestShared {
         if self.isr_action.get() == action {
             self.isr_action.set(IsrAction::None);
         }
+    }
+    fn changeover_step(&self) -> u8 {
+        self.changeover_step.get()
+    }
+    fn set_changeover_step(&self, step: u8) {
+        self.changeover_step.set(step);
     }
 }
 
