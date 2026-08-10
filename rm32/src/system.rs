@@ -56,6 +56,25 @@ impl SystemTick {
     ) {
         main.tick(shared, adc, telem);
     }
+
+    /// Run one complete main-loop pipeline with an injected ISR step.
+    ///
+    /// The host harness runs the ISR inline through `isr_tick`; firmware can
+    /// pass a no-op because the ISR runs asynchronously on hardware. The
+    /// callback receives `main` so host-side ISR synchronization can happen
+    /// before `tick_main()`.
+    pub fn run_tick<LED: OutputPin>(
+        &mut self,
+        shared: &SharedState,
+        main: &mut MainState<LED>,
+        adc: &mut dyn Adc,
+        telem: &mut dyn TelemetryUart,
+        isr_tick: impl FnOnce(&mut MainState<LED>),
+    ) {
+        self.tick_input(shared, main);
+        isr_tick(main);
+        self.tick_main(shared, main, adc, telem);
+    }
 }
 
 impl Default for SystemTick {

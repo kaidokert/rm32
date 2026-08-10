@@ -435,32 +435,41 @@ impl Harness {
             self.do_transfer = false;
         }
 
-        // --- Input processing (shared library function) ---
+        // --- Shared pipeline via run_tick (same orchestration as firmware) ---
         self.main.config = self.config;
-        self.system.tick_input(&self.shared, &mut self.main);
 
-        // --- ISR tick (harness runs inline, firmware runs in actual ISR) ---
-        let mut ctx = MotorContext {
-            commutation: &mut self.commutation,
-            bemf: &mut self.bemf,
-            duty: &mut self.duty,
-            config: &self.config,
-            armed_timeout_count: &mut self.armed_timeout_count,
-            voltage_based_ramp: false,
-            shared: &self.shared,
-            hal: &mut self.hal,
-        };
-        isr_logic::ten_khz_tick(&mut ctx);
+        let commutation = &mut self.commutation;
+        let bemf = &mut self.bemf;
+        let duty = &mut self.duty;
+        let config = &self.config;
+        let armed_timeout_count = &mut self.armed_timeout_count;
+        let shared = &self.shared;
+        let hal = &mut self.hal;
 
-        // Sync desync_check from commutation before main.tick()
-        if self.commutation.desync_check() {
-            self.main.set_desync_check(true);
-            self.commutation.set_desync_check(false);
-        }
+        self.system.run_tick(
+            shared,
+            &mut self.main,
+            &mut self.adc,
+            &mut self.telem,
+            |main| {
+                let mut ctx = MotorContext {
+                    commutation,
+                    bemf,
+                    duty,
+                    config,
+                    armed_timeout_count,
+                    voltage_based_ramp: false,
+                    shared,
+                    hal,
+                };
+                isr_logic::ten_khz_tick(&mut ctx);
 
-        // --- Main loop (shared library function) ---
-        self.system
-            .tick_main(&self.shared, &mut self.main, &mut self.adc, &mut self.telem);
+                if commutation.desync_check() {
+                    main.set_desync_check(true);
+                    commutation.set_desync_check(false);
+                }
+            },
+        );
 
         self.tick_count += 1;
     }
@@ -805,6 +814,16 @@ mod tests {
         assert_eq!(harness.hal_counts.all_off.get(), 0);
         assert_eq!(harness.hal_counts.full_brake.get(), 0);
         assert_eq!(harness.hal_counts.mask_interrupts.get(), 0);
+    }
+
+    #[test]
+    fn do_tick_runs_shared_pipeline() {
+        let mut harness = Harness::new();
+
+        harness.do_tick();
+
+        assert_eq!(harness.tick_count, 1);
+        assert_eq!(harness.shared.signal_timeout(), 1);
     }
 }
 
