@@ -14,7 +14,9 @@ use rm32::hal;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 use rm32::system::SystemTick;
+use std::cell::Cell;
 use std::io::{self, BufRead, Write};
+use std::rc::Rc;
 
 // --- Mock HAL (same as harness.rs) ---
 
@@ -41,6 +43,7 @@ impl hal::PwmOutput for MockPwm {
 
 struct MockComp {
     level: bool,
+    mask_interrupts: HalCounter,
 }
 impl hal::Comparator for MockComp {
     fn output_level(&self) -> bool {
@@ -49,14 +52,46 @@ impl hal::Comparator for MockComp {
     fn set_step(&mut self, _: u8, _: bool) {}
     fn change_input(&mut self) {}
     fn enable_interrupts(&mut self) {}
-    fn mask_interrupts(&mut self) {}
+    fn mask_interrupts(&mut self) {
+        self.mask_interrupts.set(self.mask_interrupts.get() + 1);
+    }
 }
 
-struct MockPhase;
+type HalCounter = Rc<Cell<u32>>;
+
+fn new_counter() -> HalCounter {
+    Rc::new(Cell::new(0))
+}
+
+#[derive(Clone)]
+struct HalCounts {
+    all_off: HalCounter,
+    full_brake: HalCounter,
+    mask_interrupts: HalCounter,
+}
+
+impl HalCounts {
+    fn new() -> Self {
+        Self {
+            all_off: new_counter(),
+            full_brake: new_counter(),
+            mask_interrupts: new_counter(),
+        }
+    }
+}
+
+struct MockPhase {
+    all_off: HalCounter,
+    full_brake: HalCounter,
+}
 impl hal::PhaseOutput for MockPhase {
     fn com_step(&mut self, _: u8) {}
-    fn all_off(&mut self) {}
-    fn full_brake(&mut self) {}
+    fn all_off(&mut self) {
+        self.all_off.set(self.all_off.get() + 1);
+    }
+    fn full_brake(&mut self) {
+        self.full_brake.set(self.full_brake.get() + 1);
+    }
     fn all_pwm(&mut self) {}
     fn proportional_brake(&mut self) {}
 }
@@ -149,6 +184,7 @@ struct Harness {
     duty: DutyState,
     config: EepromConfig,
     armed_timeout_count: u32,
+    hal_counts: HalCounts,
     hal: MockMotorHal,
     adc: MockAdc,
     telem: MockTelem,
@@ -180,6 +216,7 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
+        let counts = HalCounts::new();
         Self {
             shared: SharedState::new(),
             commutation: Commutation::new(),
@@ -193,11 +230,18 @@ impl Harness {
                     arr: 0,
                     duty_count: 0,
                 },
-                comp: MockComp { level: false },
-                phase: MockPhase,
+                comp: MockComp {
+                    level: false,
+                    mask_interrupts: counts.mask_interrupts.clone(),
+                },
+                phase: MockPhase {
+                    all_off: counts.all_off.clone(),
+                    full_brake: counts.full_brake.clone(),
+                },
                 interval: MockInterval { count: 0 },
                 com_timer: MockComTimer,
             },
+            hal_counts: counts,
             tick_count: 0,
             has_throttle: false,
             throttle_value: 0,
@@ -430,14 +474,16 @@ impl Harness {
              input={} adjusted_input={} newinput={} \
              bemfcounter={} zcfound={} rising={} \
              old_routine={} stepper_sine={} \
-             signaltimeout={} armed_timeout_count={} \
+             signaltimeout={} armed_timeout_count={} interval_timer_count={} \
              battery_voltage={} actual_current={} degrees_celsius={} \
              last_duty_cycle={} prop_brake_active={} \
              inputSet={} dshot={} servoPwm={} \
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
              send_telemetry={} send_esc_info_flag={} play_tone_flag={} \
-             edt_armed={} edt_arm_enable={} dshot_output_prescaler={}",
+             edt_armed={} edt_arm_enable={} \
+             alloff_count={} fullbrake_count={} mask_interrupts_count={} \
+             dshot_output_prescaler={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -461,6 +507,7 @@ impl Harness {
             self.shared.stepper_sine() as i32,
             self.shared.signal_timeout(),
             self.armed_timeout_count,
+            self.shared.interval_timer_count(),
             self.main.measurements().battery_voltage().0,
             self.main.measurements().actual_current().0,
             self.main.measurements().degrees_celsius().0,
@@ -480,6 +527,9 @@ impl Harness {
             self.play_tone_flag,
             self.edt_armed as i32,
             self.edt_arm_enable as i32,
+            self.hal_counts.all_off.get(),
+            self.hal_counts.full_brake.get(),
+            self.hal_counts.mask_interrupts.get(),
             self.dshot_output_prescaler,
         );
         io::stdout().flush().unwrap();
@@ -669,6 +719,8 @@ impl Harness {
 
 #[cfg(test)]
 mod tests {
+    use rm32::hal::{Comparator as _, PhaseOutput as _};
+
     use super::*;
 
     fn dshot_harness() -> Harness {
@@ -734,6 +786,25 @@ mod tests {
         harness.config.input_type = InputType::EdtArm as u8;
         harness.sync_edt_arm_enable_from_config();
         assert!(harness.edt_arm_enable);
+    }
+
+    #[test]
+    fn hal_call_counters_track_and_reset() {
+        let mut harness = Harness::new();
+
+        harness.hal.phase.all_off();
+        harness.hal.phase.full_brake();
+        harness.hal.comp.mask_interrupts();
+
+        assert_eq!(harness.hal_counts.all_off.get(), 1);
+        assert_eq!(harness.hal_counts.full_brake.get(), 1);
+        assert_eq!(harness.hal_counts.mask_interrupts.get(), 1);
+
+        harness.reset();
+
+        assert_eq!(harness.hal_counts.all_off.get(), 0);
+        assert_eq!(harness.hal_counts.full_brake.get(), 0);
+        assert_eq!(harness.hal_counts.mask_interrupts.get(), 0);
     }
 }
 
