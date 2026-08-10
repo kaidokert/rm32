@@ -19,6 +19,7 @@ pub struct TransferState {
     // Calibration entry
     enter_calibration_count: u8,
     last_input: u16,
+    pending_protocol: Option<DetectedProtocol>,
 }
 
 /// Detected input protocol during auto-detection.
@@ -64,6 +65,12 @@ impl CaptureConfig {
         ndtr: 32,
         prescaler: None,
     };
+    pub fn dshot_detection(cpu_mhz: u8) -> Self {
+        Self {
+            ndtr: 33,
+            prescaler: Some((cpu_mhz / 6) as u16),
+        }
+    }
     pub const SERVO: Self = Self {
         ndtr: 2,
         prescaler: None,
@@ -146,24 +153,43 @@ impl TransferState {
         // --- Input detection ---
         if !input_set {
             let sig = signal::detect_input(dma_buffer, cpu_mhz);
-            let (action, next_capture) = match sig {
-                signal::SignalType::Dshot600 => (
-                    TransferAction::InputDetected(DetectedProtocol::Dshot),
-                    CaptureConfig::DSHOT600_DETECTED,
-                ),
-                signal::SignalType::Dshot300 => (
-                    TransferAction::InputDetected(DetectedProtocol::Dshot),
-                    CaptureConfig::DSHOT300_DETECTED,
-                ),
-                signal::SignalType::Dshot150 => (
-                    TransferAction::InputDetected(DetectedProtocol::Dshot),
-                    CaptureConfig::DSHOT150_DETECTED,
-                ),
-                signal::SignalType::ServoPwm => (
-                    TransferAction::InputDetected(DetectedProtocol::Servo),
-                    CaptureConfig::servo_detected(cpu_mhz),
-                ),
-                signal::SignalType::None => (TransferAction::None, CaptureConfig::DSHOT),
+            let protocol = match sig {
+                signal::SignalType::Dshot600
+                | signal::SignalType::Dshot300
+                | signal::SignalType::Dshot150 => Some(DetectedProtocol::Dshot),
+                signal::SignalType::ServoPwm => Some(DetectedProtocol::Servo),
+                signal::SignalType::None => None,
+            };
+            let confirmed = match (protocol, self.pending_protocol) {
+                (Some(protocol), Some(pending)) if protocol == pending => {
+                    self.pending_protocol = None;
+                    Some(protocol)
+                }
+                (Some(protocol), _) => {
+                    self.pending_protocol = Some(protocol);
+                    None
+                }
+                (None, _) => {
+                    self.pending_protocol = None;
+                    None
+                }
+            };
+            let (action, next_capture) = if let Some(protocol) = confirmed {
+                let capture = match sig {
+                    signal::SignalType::Dshot600 => CaptureConfig::DSHOT600_DETECTED,
+                    signal::SignalType::Dshot300 => CaptureConfig::DSHOT300_DETECTED,
+                    signal::SignalType::Dshot150 => CaptureConfig::DSHOT150_DETECTED,
+                    signal::SignalType::ServoPwm => CaptureConfig::servo_detected(cpu_mhz),
+                    signal::SignalType::None => {
+                        unreachable!("confirmed input detection cannot have SignalType::None")
+                    }
+                };
+                (TransferAction::InputDetected(protocol), capture)
+            } else {
+                (
+                    TransferAction::None,
+                    CaptureConfig::dshot_detection(cpu_mhz),
+                )
             };
             return TransferActions {
                 action,
@@ -339,6 +365,107 @@ mod tests {
         );
 
         assert_eq!(actions.next_capture, CaptureConfig::DSHOT);
+    }
+
+    #[test]
+    fn first_dshot_detection_stays_tentative() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let mut buf = [0u32; 33];
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 5;
+        }
+
+        let actions = state.process(
+            &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
+            60,
+        );
+
+        assert!(matches!(actions.action, TransferAction::None));
+        assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+    }
+
+    #[test]
+    fn invalid_detection_clears_pending_protocol() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let mut dshot = [0u32; 33];
+        for (i, slot) in dshot.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 5;
+        }
+        let invalid = [0u32; 33];
+
+        let _ = state.process(
+            &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+            600, 60,
+        );
+        let _ = state.process(
+            &invalid, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+            600, 60,
+        );
+        let actions = state.process(
+            &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+            600, 60,
+        );
+
+        assert!(matches!(actions.action, TransferAction::None));
+        assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+    }
+
+    #[test]
+    fn matching_dshot_detection_locks_protocol_with_rate_prescaler() {
+        for (step, expected_capture) in [
+            (3, CaptureConfig::DSHOT600_DETECTED),
+            (5, CaptureConfig::DSHOT300_DETECTED),
+            (10, CaptureConfig::DSHOT150_DETECTED),
+        ] {
+            let mut state = TransferState::default();
+            let mut zic = 0;
+            let mut buf = [0u32; 33];
+            for (i, slot) in buf.iter_mut().enumerate() {
+                *slot = 100 + i as u32 * step;
+            }
+
+            let _ = state.process(
+                &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+                600, 60,
+            );
+            let actions = state.process(
+                &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
+                600, 60,
+            );
+
+            assert!(matches!(
+                actions.action,
+                TransferAction::InputDetected(DetectedProtocol::Dshot)
+            ));
+            assert_eq!(actions.next_capture, expected_capture);
+        }
+    }
+
+    #[test]
+    fn matching_servo_detection_locks_protocol() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let mut buf = [0u32; 33];
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 1000;
+        }
+
+        let _ = state.process(
+            &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
+            60,
+        );
+        let actions = state.process(
+            &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
+            60,
+        );
+
+        assert!(matches!(
+            actions.action,
+            TransferAction::InputDetected(DetectedProtocol::Servo)
+        ));
+        assert_eq!(actions.next_capture, CaptureConfig::servo_detected(60));
     }
 
     #[test]
