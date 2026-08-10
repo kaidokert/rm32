@@ -131,11 +131,9 @@ pub trait MainControl {
 
     /// One-shot request from main/input processing to turn off all phase
     /// outputs in ISR context.
-    fn all_off_request(&self) -> bool {
-        false
-    }
-    fn request_all_off(&self) {}
-    fn clear_all_off_request(&self) {}
+    fn all_off_request(&self) -> bool;
+    fn request_all_off(&self);
+    fn clear_all_off_request(&self);
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {

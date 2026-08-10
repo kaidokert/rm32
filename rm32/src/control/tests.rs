@@ -256,6 +256,8 @@ mod tests {
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
 
+        shared.mode.set(crate::motor_mode::MotorMode::OldRoutine);
+        shared.adjusted_input.set(1000);
         shared.request_all_off();
 
         isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
@@ -272,6 +274,9 @@ mod tests {
         assert!(hal.phase.all_off_called);
         assert!(hal.comp.mask_called);
         assert!(!shared.all_off_request());
+        assert_eq!(shared.duty_cycle_setpoint(), 0);
+        assert_eq!(hal.pwm.last_duty, 0);
+        assert_eq!(shared.signal_timeout(), 0);
     }
 
     #[test]

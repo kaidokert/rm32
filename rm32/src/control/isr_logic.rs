@@ -21,6 +21,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.phase().all_off();
         ctx.hal.comp().mask_interrupts();
         ctx.shared.clear_all_off_request();
+        return;
     }
 
     // Sync direction from shared (main loop may flip for bidirectional)
