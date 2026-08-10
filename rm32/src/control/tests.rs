@@ -247,6 +247,64 @@ mod tests {
     }
 
     #[test]
+    fn interval_telemetry_fires_every_configured_period() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut config = crate::config::EepromConfig {
+            telemetry_on_interval: 1,
+            ..Default::default()
+        };
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+        let interval_ticks =
+            crate::constants::telemetry_interval_ticks(config.telemetry_on_interval);
+
+        for _ in 0..interval_ticks - 1 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+            assert!(!shared.send_telemetry.get());
+        }
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(shared.send_telemetry.get());
+
+        config.telemetry_on_interval = 0;
+        shared.send_telemetry.set(false);
+        for _ in 0..interval_ticks * 2 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+        }
+        assert!(!shared.send_telemetry.get());
+    }
+
+    #[test]
     fn isr_tick_consumes_all_off_action() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();

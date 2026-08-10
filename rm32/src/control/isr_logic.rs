@@ -19,6 +19,13 @@ use crate::shared_comm::{IsrAction, SharedComm};
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.shared.one_khz_counter_inc();
 
+    if ctx.config.telemetry_on_interval != 0 {
+        let limit = telemetry_interval_ticks(ctx.config.telemetry_on_interval);
+        if ctx.shared.telem_counter_check_and_inc(limit) {
+            ctx.shared.set_send_telemetry(true);
+        }
+    }
+
     match ctx.shared.isr_action() {
         IsrAction::AllOff => {
             ctx.hal.phase().all_off();

@@ -123,6 +123,8 @@ pub trait IsrTiming {
     fn one_khz_counter_check_and_reset(&self, _divider: u8) -> bool {
         false
     }
+
+    fn telem_counter_check_and_inc(&self, limit: u16) -> bool;
 }
 
 /// Main-loop-produced control data consumed by the ISR.

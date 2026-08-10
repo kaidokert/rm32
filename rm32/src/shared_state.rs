@@ -71,6 +71,7 @@ pub struct SharedState {
     prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
     isr_action: AtomicU8,          // main requests one-shot ISR-context work
     one_khz_counter: AtomicU8,     // incremented by TIM6 ISR, consumed by main
+    telem_counter: AtomicU16,      // incremented by TIM6 ISR for interval telemetry
 }
 
 impl Default for SharedState {
@@ -117,6 +118,7 @@ impl SharedState {
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
             one_khz_counter: AtomicU8::new(0),
+            telem_counter: AtomicU16::new(0),
         }
     }
 
@@ -130,6 +132,16 @@ impl SharedState {
         self.one_khz_counter
             .fetch_update(REL, ACQ, |count| (count >= divider).then_some(0))
             .is_ok()
+    }
+
+    pub fn telem_counter_check_and_inc(&self, limit: u16) -> bool {
+        self.telem_counter
+            .fetch_update(REL, ACQ, |count| {
+                let next = count.saturating_add(1);
+                if next >= limit { Some(0) } else { Some(next) }
+            })
+            .map(|count| count.saturating_add(1) >= limit)
+            .unwrap_or(false)
     }
 
     // --- Motor mode ---
@@ -557,6 +569,9 @@ impl crate::shared_comm::IsrTiming for SharedState {
     fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
         SharedState::one_khz_counter_check_and_reset(self, divider)
     }
+    fn telem_counter_check_and_inc(&self, limit: u16) -> bool {
+        SharedState::telem_counter_check_and_inc(self, limit)
+    }
 }
 
 impl crate::shared_comm::MainControl for SharedState {
@@ -749,5 +764,17 @@ mod tests {
         shared.one_khz_counter_inc();
         assert!(shared.one_khz_counter_check_and_reset(20));
         assert!(!shared.one_khz_counter_check_and_reset(20));
+    }
+
+    #[test]
+    fn telem_counter_dispatches_on_limit_tick() {
+        let shared = SharedState::new();
+
+        for _ in 0..4 {
+            assert!(!shared.telem_counter_check_and_inc(5));
+        }
+
+        assert!(shared.telem_counter_check_and_inc(5));
+        assert!(!shared.telem_counter_check_and_inc(5));
     }
 }
