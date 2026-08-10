@@ -10,18 +10,25 @@ use crate::control::context::MotorContext;
 use crate::control::state::{BemfState, DutyState};
 use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutput, PwmOutput};
 use crate::motor_mode::MotorEvent;
-use crate::shared_comm::SharedComm;
+use crate::shared_comm::{IsrAction, SharedComm};
 
 /// 20kHz control loop tick.
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
-    if ctx.shared.all_off_request() {
-        ctx.hal.phase().all_off();
-        ctx.hal.comp().mask_interrupts();
-        ctx.shared.clear_all_off_request();
-        return;
+    match ctx.shared.isr_action() {
+        IsrAction::AllOff => {
+            ctx.hal.phase().all_off();
+            ctx.hal.comp().mask_interrupts();
+            ctx.shared.clear_isr_action(IsrAction::AllOff);
+            return;
+        }
+        IsrAction::ResetIntervalTimer => {
+            ctx.hal.interval().set_count(0);
+            ctx.shared.clear_isr_action(IsrAction::ResetIntervalTimer);
+        }
+        IsrAction::None => {}
     }
 
     // Sync direction from shared (main loop may flip for bidirectional)

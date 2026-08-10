@@ -7,6 +7,7 @@
 //! Acquire/Release ordering for cross-context data passing.
 
 use crate::motor_mode::MotorMode;
+use crate::shared_comm::IsrAction;
 use portable_atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 
 /// Store ordering — ensures writes are visible to other contexts.
@@ -68,7 +69,7 @@ pub struct SharedState {
     min_bemf_counts: AtomicU8,     // min zero-cross detection threshold
     auto_advance: AtomicU8,        // commutation timing advance level
     prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
-    all_off_request: AtomicBool,   // main requests ISR-context phase shutdown
+    isr_action: AtomicU8,          // main requests one-shot ISR-context work
 }
 
 impl Default for SharedState {
@@ -113,7 +114,7 @@ impl SharedState {
             min_bemf_counts: AtomicU8::new(2),
             auto_advance: AtomicU8::new(0),
             prop_brake_active: AtomicBool::new(false),
-            all_off_request: AtomicBool::new(false),
+            isr_action: AtomicU8::new(IsrAction::None as u8),
         }
     }
 
@@ -451,14 +452,16 @@ impl SharedState {
     pub fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.store(v, REL);
     }
-    pub fn all_off_request(&self) -> bool {
-        self.all_off_request.load(ACQ)
+    pub fn isr_action(&self) -> IsrAction {
+        IsrAction::from_u8(self.isr_action.load(ACQ))
     }
-    pub fn request_all_off(&self) {
-        self.all_off_request.store(true, REL);
+    pub fn request_isr_action(&self, action: IsrAction) {
+        self.isr_action.fetch_max(action as u8, REL);
     }
-    pub fn clear_all_off_request(&self) {
-        self.all_off_request.store(false, REL);
+    pub fn clear_isr_action(&self, action: IsrAction) {
+        self.isr_action
+            .compare_exchange(action as u8, IsrAction::None as u8, REL, ACQ)
+            .ok();
     }
 }
 
@@ -567,14 +570,14 @@ impl crate::shared_comm::MainControl for SharedState {
     fn set_prop_brake_active(&self, v: bool) {
         SharedState::set_prop_brake_active(self, v);
     }
-    fn all_off_request(&self) -> bool {
-        SharedState::all_off_request(self)
+    fn isr_action(&self) -> IsrAction {
+        SharedState::isr_action(self)
     }
-    fn request_all_off(&self) {
-        SharedState::request_all_off(self);
+    fn request_isr_action(&self, action: IsrAction) {
+        SharedState::request_isr_action(self, action);
     }
-    fn clear_all_off_request(&self) {
-        SharedState::clear_all_off_request(self);
+    fn clear_isr_action(&self, action: IsrAction) {
+        SharedState::clear_isr_action(self, action);
     }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
@@ -680,13 +683,25 @@ mod tests {
     }
 
     #[test]
-    fn all_off_request_handoff_is_clearable() {
+    fn isr_action_handoff_is_clearable() {
         let shared = SharedState::new();
 
-        assert!(!MainControl::all_off_request(&shared));
-        MainControl::request_all_off(&shared);
-        assert!(MainControl::all_off_request(&shared));
-        MainControl::clear_all_off_request(&shared);
-        assert!(!MainControl::all_off_request(&shared));
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::None);
+        MainControl::request_isr_action(&shared, IsrAction::ResetIntervalTimer);
+        MainControl::request_isr_action(&shared, IsrAction::AllOff);
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
+        MainControl::clear_isr_action(&shared, IsrAction::AllOff);
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::None);
+    }
+
+    #[test]
+    fn clear_isr_action_keeps_newer_higher_priority_request() {
+        let shared = SharedState::new();
+
+        MainControl::request_isr_action(&shared, IsrAction::ResetIntervalTimer);
+        MainControl::request_isr_action(&shared, IsrAction::AllOff);
+        MainControl::clear_isr_action(&shared, IsrAction::ResetIntervalTimer);
+
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
     }
 }
