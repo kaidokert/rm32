@@ -480,6 +480,16 @@ impl BemfState {
         !self.zc_found && self.counter > threshold
     }
 
+    /// Interval-timer count at the most recent accepted zero-cross.
+    pub fn this_zc_time(&self) -> u16 {
+        self.this_zc_time
+    }
+
+    /// Commutation wait time computed from the last zero-cross.
+    pub fn wait_time(&self) -> u16 {
+        self.wait_time
+    }
+
     /// Record a zero-cross detection: update timing, compute new CI and wait_time.
     /// Returns the new commutation interval.
     pub(crate) fn record_zero_cross(
@@ -620,6 +630,11 @@ impl Default for PidState {
 }
 
 impl ProtectionState {
+    /// Read low voltage count.
+    pub fn low_voltage_count(&self) -> u16 {
+        self.low_voltage_count
+    }
+
     /// Set low voltage count (for testing/harness).
     pub fn set_low_voltage_count(&mut self, v: u16) {
         self.low_voltage_count = v;
@@ -642,6 +657,29 @@ mod tests {
     use super::*;
 
     // These tests mirror the C Catch2 tests in tests/test_tenkhz.cpp.
+
+    #[test]
+    fn bemf_timing_accessors_report_current_values() {
+        let mut bemf = BemfState::default();
+
+        assert_eq!(bemf.this_zc_time(), 0);
+        assert_eq!(bemf.wait_time(), 0);
+
+        bemf.set_wait_time(123);
+        assert_eq!(bemf.wait_time(), 123);
+
+        bemf.record_zero_cross(456, 1000);
+        assert_eq!(bemf.this_zc_time(), 456);
+    }
+
+    #[test]
+    fn protection_low_voltage_count_accessor_matches_setter() {
+        let mut protection = ProtectionState::default();
+
+        assert_eq!(protection.low_voltage_count(), 0);
+        protection.set_low_voltage_count(42);
+        assert_eq!(protection.low_voltage_count(), 42);
+    }
 
     /// Mirrors C: "tenKhzRoutine current limit PID at 1kHz"
     /// C setup: currentPid.Kp=100, actual_current=5000, target=2000,
