@@ -18,6 +18,16 @@ pub enum IsrAction {
     AllOff = 2,
 }
 
+impl IsrAction {
+    pub const fn from_u8(value: u8) -> Self {
+        match value {
+            x if x == Self::ResetIntervalTimer as u8 => Self::ResetIntervalTimer,
+            x if x == Self::AllOff as u8 => Self::AllOff,
+            _ => Self::None,
+        }
+    }
+}
+
 /// Motor mode state machine — bidirectional ISR↔main.
 ///
 /// Only two methods require implementation: `motor_mode()` and `set_motor_mode()`.
@@ -138,11 +148,14 @@ pub trait MainControl {
     fn set_prop_brake_active(&self, _v: bool) {}
 
     /// One-shot request from main/input processing for ISR-context work.
+    ///
+    /// Variant values are ordered by priority; implementations keep the
+    /// highest pending action and clear only the action the ISR handled.
     fn isr_action(&self) -> IsrAction {
         IsrAction::None
     }
     fn request_isr_action(&self, _action: IsrAction) {}
-    fn clear_isr_action(&self) {}
+    fn clear_isr_action(&self, _action: IsrAction) {}
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {

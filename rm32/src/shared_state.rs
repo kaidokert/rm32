@@ -453,17 +453,15 @@ impl SharedState {
         self.prop_brake_active.store(v, REL);
     }
     pub fn isr_action(&self) -> IsrAction {
-        match self.isr_action.load(ACQ) {
-            x if x == IsrAction::ResetIntervalTimer as u8 => IsrAction::ResetIntervalTimer,
-            x if x == IsrAction::AllOff as u8 => IsrAction::AllOff,
-            _ => IsrAction::None,
-        }
+        IsrAction::from_u8(self.isr_action.load(ACQ))
     }
     pub fn request_isr_action(&self, action: IsrAction) {
         self.isr_action.fetch_max(action as u8, REL);
     }
-    pub fn clear_isr_action(&self) {
-        self.isr_action.store(IsrAction::None as u8, REL);
+    pub fn clear_isr_action(&self, action: IsrAction) {
+        self.isr_action
+            .compare_exchange(action as u8, IsrAction::None as u8, REL, ACQ)
+            .ok();
     }
 }
 
@@ -578,8 +576,8 @@ impl crate::shared_comm::MainControl for SharedState {
     fn request_isr_action(&self, action: IsrAction) {
         SharedState::request_isr_action(self, action);
     }
-    fn clear_isr_action(&self) {
-        SharedState::clear_isr_action(self);
+    fn clear_isr_action(&self, action: IsrAction) {
+        SharedState::clear_isr_action(self, action);
     }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
@@ -692,7 +690,18 @@ mod tests {
         MainControl::request_isr_action(&shared, IsrAction::ResetIntervalTimer);
         MainControl::request_isr_action(&shared, IsrAction::AllOff);
         assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
-        MainControl::clear_isr_action(&shared);
+        MainControl::clear_isr_action(&shared, IsrAction::AllOff);
         assert_eq!(MainControl::isr_action(&shared), IsrAction::None);
+    }
+
+    #[test]
+    fn clear_isr_action_keeps_newer_higher_priority_request() {
+        let shared = SharedState::new();
+
+        MainControl::request_isr_action(&shared, IsrAction::ResetIntervalTimer);
+        MainControl::request_isr_action(&shared, IsrAction::AllOff);
+        MainControl::clear_isr_action(&shared, IsrAction::ResetIntervalTimer);
+
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
     }
 }

@@ -186,8 +186,10 @@ impl MainControl for TestShared {
             self.isr_action.set(action);
         }
     }
-    fn clear_isr_action(&self) {
-        self.isr_action.set(IsrAction::None);
+    fn clear_isr_action(&self, action: IsrAction) {
+        if self.isr_action.get() == action {
+            self.isr_action.set(IsrAction::None);
+        }
     }
 }
 

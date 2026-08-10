@@ -21,12 +21,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         IsrAction::AllOff => {
             ctx.hal.phase().all_off();
             ctx.hal.comp().mask_interrupts();
-            ctx.shared.clear_isr_action();
+            ctx.shared.clear_isr_action(IsrAction::AllOff);
             return;
         }
         IsrAction::ResetIntervalTimer => {
             ctx.hal.interval().set_count(0);
-            ctx.shared.clear_isr_action();
+            ctx.shared.clear_isr_action(IsrAction::ResetIntervalTimer);
         }
         IsrAction::None => {}
     }
