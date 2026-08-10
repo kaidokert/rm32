@@ -664,6 +664,8 @@ impl crate::shared_comm::SharedComm for SharedState {
 
 #[cfg(test)]
 mod tests {
+    use crate::shared_comm::MainControl;
+
     use super::*;
 
     #[test]
@@ -675,5 +677,16 @@ mod tests {
 
         assert_eq!(shared.take_servo_calibration(), Some((42, 73)));
         assert_eq!(shared.take_servo_calibration(), None);
+    }
+
+    #[test]
+    fn all_off_request_handoff_is_clearable() {
+        let shared = SharedState::new();
+
+        assert!(!MainControl::all_off_request(&shared));
+        MainControl::request_all_off(&shared);
+        assert!(MainControl::all_off_request(&shared));
+        MainControl::clear_all_off_request(&shared);
+        assert!(!MainControl::all_off_request(&shared));
     }
 }
