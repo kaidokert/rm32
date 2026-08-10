@@ -505,7 +505,7 @@ impl Harness {
              dshot_telemetry={} \
              edt_armed={} edt_arm_enable={} \
              alloff_count={} fullbrake_count={} mask_interrupts_count={} \
-             dshot_output_prescaler={}",
+             dshot_output_prescaler={} needs_reset={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -554,6 +554,7 @@ impl Harness {
             self.hal_counts.full_brake.get(),
             self.hal_counts.mask_interrupts.get(),
             self.dshot_output_prescaler,
+            self.main.needs_reset as i32,
         );
         io::stdout().flush().unwrap();
     }

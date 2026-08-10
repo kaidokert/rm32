@@ -10,4 +10,4 @@ dshot=1
 @sequence
 # Unarmed, input detected, no signal arriving (throttle=-1 disables injection)
 config throttle=-1
-ticks 42000 | | inputSet=0
+ticks 42000 | | inputSet=0 needs_reset=1
