@@ -213,7 +213,11 @@ impl TransferState {
                 b
             };
             let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
-            if !armed && !dshot_telemetry && self.high_pin_count > 100 {
+            if !armed
+                && !dshot_telemetry
+                && input_pin_high
+                && self.high_pin_count > crate::constants::BIDIR_IDLE_HIGH_FRAMES
+            {
                 let inverted = dshot::decode_frame(&buf, frametime_low, frametime_high, true);
                 let inverted_ok = matches!(
                     inverted,
@@ -274,6 +278,9 @@ impl TransferState {
         if !armed {
             if dshot_mode && !dshot_telemetry && input_pin_high {
                 self.high_pin_count = self.high_pin_count.saturating_add(1);
+            } else {
+                self.high_pin_count = 0;
+                self.bidir_confirms = 0;
             }
 
             // DShot frame averaging (for dshot_frametime calibration)
@@ -499,6 +506,30 @@ mod tests {
                 600, 64,
             );
 
+            assert!(!actions.bidir_detected);
+        }
+    }
+
+    #[test]
+    fn bidir_autodetect_resets_when_pin_goes_low() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let normal = dshot_dma_buffer(0, false, false);
+        let inverted = dshot_dma_buffer(0, false, true);
+
+        for _ in 0..150 {
+            let actions = state.process(
+                &normal, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
+                600, 64,
+            );
+            assert!(!actions.bidir_detected);
+        }
+
+        for _ in 0..10 {
+            let actions = state.process(
+                &inverted, true, true, false, false, false, false, 0, 0, false, false, &mut zic,
+                400, 600, 64,
+            );
             assert!(!actions.bidir_detected);
         }
     }

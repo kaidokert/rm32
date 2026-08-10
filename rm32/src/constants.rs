@@ -68,6 +68,9 @@ pub const DESYNC_MAX_INTERVAL: u32 = 2000;
 /// auto-detected bidirectional DShot mode.
 pub const BIDIR_CONFIRM_FRAMES: u8 = 4;
 
+/// Consecutive high input-pin samples required before probing inverted-CRC DShot.
+pub const BIDIR_IDLE_HIGH_FRAMES: u8 = 100;
+
 /// BEMF timeout threshold at low throttle (< 150). Lenient to avoid false desync
 /// when motor is barely spinning and BEMF signal is weak.
 pub const BEMF_TIMEOUT_LENIENT: u8 = 100;
