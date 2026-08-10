@@ -1,0 +1,20 @@
+# Stuck rotor increment rate
+#
+# A single stale interval-timer sample should not make the BEMF timeout
+# counter advance every main-loop tick.
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=1
+eeprom.stuck_rotor_protection=1
+
+@sequence
+tick 1  | throttle=500 interval_timer=1000 comp=1 | running=1
+
+config interval_timer=50000
+
+ticks 20 | throttle=500 comp=1 | running=1 input>0

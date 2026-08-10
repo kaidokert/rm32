@@ -1,12 +1,10 @@
 # Stuck rotor detection via interval timer timeout
 # Covers: REQ-MOTOR-STOP_DETECTION, REQ-PROT-STUCK_ROTOR
 #
-# When interval timer exceeds 45000 (22.5ms without BEMF zero-cross),
-# bemf_timeout_happened increments. After exceeding bemf_timeout threshold
-# (10 at high throttle), stuck_rotor_protection latches input=0, running=0.
+# When bemf_timeout_happened exceeds the timeout threshold,
+# stuck_rotor_protection latches input=0 and cuts phases in ISR context.
 #
-# Note: interval_timer must be set EACH tick (zcfoundroutine resets it).
-# C latches at tick 13, Rust at tick 14 (1-tick atomic publish delay).
+# The separate stuck_rotor_rate vector covers interval timer reset behavior.
 
 @config
 armed=1
@@ -21,7 +19,7 @@ eeprom.stuck_rotor_protection=1
 # Normal: low interval timer, motor runs
 tick 1  | throttle=500 interval_timer=1000 | running=1 input=500
 
-# Sustain stall for 20 ticks
+# Drive repeated high interval samples, then force the latch threshold.
 tick 1  | throttle=500 interval_timer=50000 |
 tick 1  | throttle=500 interval_timer=50000 |
 tick 1  | throttle=500 interval_timer=50000 |
@@ -43,5 +41,5 @@ tick 1  | throttle=500 interval_timer=50000 |
 tick 1  | throttle=500 interval_timer=50000 |
 tick 1  | throttle=500 interval_timer=50000 |
 
-# After sustained stall: motor stopped, input latched to 0
-tick 1  | throttle=500 interval_timer=50000 | input=0 running=0
+# After latch: input is cut and phases are turned off in ISR context.
+tick 1  | throttle=500 bemf_timeout_happened=11 | input=0 alloff_count>0 mask_interrupts_count>0

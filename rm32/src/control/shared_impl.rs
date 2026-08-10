@@ -1,7 +1,7 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
 use crate::motor_mode::MotorMode;
-use crate::shared_comm::{IsrTiming, MainControl, MotorState, SharedComm};
+use crate::shared_comm::{IsrAction, IsrTiming, MainControl, MotorState, SharedComm};
 use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
@@ -28,7 +28,7 @@ pub struct TestShared {
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
     pub prop_brake_active: Cell<bool>,
-    pub all_off_request: Cell<bool>,
+    pub isr_action: Cell<IsrAction>,
 }
 
 impl Default for TestShared {
@@ -61,7 +61,7 @@ impl TestShared {
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
             prop_brake_active: Cell::new(false),
-            all_off_request: Cell::new(false),
+            isr_action: Cell::new(IsrAction::None),
         }
     }
 }
@@ -178,14 +178,16 @@ impl MainControl for TestShared {
     fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.set(v);
     }
-    fn all_off_request(&self) -> bool {
-        self.all_off_request.get()
+    fn isr_action(&self) -> IsrAction {
+        self.isr_action.get()
     }
-    fn request_all_off(&self) {
-        self.all_off_request.set(true);
+    fn request_isr_action(&self, action: IsrAction) {
+        if action > self.isr_action.get() {
+            self.isr_action.set(action);
+        }
     }
-    fn clear_all_off_request(&self) {
-        self.all_off_request.set(false);
+    fn clear_isr_action(&self) {
+        self.isr_action.set(IsrAction::None);
     }
 }
 

@@ -8,6 +8,7 @@ use crate::constants::*;
 use crate::control::state::{Measurements, PidState, ProtectionState, TimingState};
 use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
+use crate::shared_comm::IsrAction;
 use crate::telemetry;
 use embedded_hal::digital::OutputPin;
 
@@ -305,6 +306,7 @@ impl<LED: OutputPin> MainState<LED> {
                 self.protection.bemf_timeout_happened =
                     self.protection.bemf_timeout_happened.saturating_add(1);
             }
+            shared.request_isr_action(IsrAction::ResetIntervalTimer);
             shared.set_old_routine(true);
             if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
                 shared.transition(crate::motor_mode::MotorEvent::StopMotor);

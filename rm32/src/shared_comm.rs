@@ -10,6 +10,14 @@
 
 use crate::motor_mode::{MotorEvent, MotorMode};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+pub enum IsrAction {
+    None = 0,
+    ResetIntervalTimer = 1,
+    AllOff = 2,
+}
+
 /// Motor mode state machine — bidirectional ISR↔main.
 ///
 /// Only two methods require implementation: `motor_mode()` and `set_motor_mode()`.
@@ -129,11 +137,12 @@ pub trait MainControl {
     }
     fn set_prop_brake_active(&self, _v: bool) {}
 
-    /// One-shot request from main/input processing to turn off all phase
-    /// outputs in ISR context.
-    fn all_off_request(&self) -> bool;
-    fn request_all_off(&self);
-    fn clear_all_off_request(&self);
+    /// One-shot request from main/input processing for ISR-context work.
+    fn isr_action(&self) -> IsrAction {
+        IsrAction::None
+    }
+    fn request_isr_action(&self, _action: IsrAction) {}
+    fn clear_isr_action(&self) {}
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {

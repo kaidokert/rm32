@@ -162,7 +162,7 @@ pub(crate) fn process_input<S: SharedComm>(
         input_state.prop_brake_active = false;
         shared.set_adjusted_input(0);
         shared.set_prop_brake_active(false);
-        shared.request_all_off();
+        shared.request_isr_action(crate::shared_comm::IsrAction::AllOff);
         protection.bemf_timeout_happened = BEMF_FAULT_LATCHED;
         return;
     }
@@ -268,7 +268,7 @@ mod tests {
         process_input(&shared, &config, &mut prot, &mut input);
         assert_eq!(input.input, 0);
         assert_eq!(shared.adjusted_input.get(), 0);
-        assert!(shared.all_off_request());
+        assert_eq!(shared.isr_action(), crate::shared_comm::IsrAction::AllOff);
         assert_eq!(prot.bemf_timeout_happened, BEMF_FAULT_LATCHED);
     }
 
