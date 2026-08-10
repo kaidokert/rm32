@@ -14,4 +14,4 @@ tick 1       | throttle=500 | armed=1
 # Stop providing throttle (throttle=-1 disables injection)
 # signaltimeout increments in tenKhzRoutine, threshold is LOOP_FREQUENCY_HZ>>1 = 10000
 tick 1       | throttle=-1  |
-ticks 10002  |              | armed=0
+ticks 10002  |              | armed=0 inputSet=0 needs_reset=1
