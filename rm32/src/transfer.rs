@@ -216,7 +216,7 @@ impl TransferState {
             if !armed
                 && !dshot_telemetry
                 && input_pin_high
-                && self.high_pin_count > crate::constants::BIDIR_IDLE_HIGH_FRAMES
+                && self.high_pin_count >= crate::constants::BIDIR_IDLE_HIGH_FRAMES
             {
                 let inverted = dshot::decode_frame(&buf, frametime_low, frametime_high, true);
                 let inverted_ok = matches!(
@@ -282,7 +282,12 @@ impl TransferState {
                 self.high_pin_count = 0;
                 self.bidir_confirms = 0;
             }
+        } else {
+            self.high_pin_count = 0;
+            self.bidir_confirms = 0;
+        }
 
+        if !armed {
             // DShot frame averaging (for dshot_frametime calibration)
             if dshot_mode && self.average_count < 8 && *zero_input_count > 5 {
                 self.average_count += 1;
@@ -462,6 +467,9 @@ mod tests {
         let mut zic = 0;
         let frame = dshot_dma_buffer(0, false, true);
         let mut detected_at = None;
+        let expected_detect_at = crate::constants::BIDIR_IDLE_HIGH_FRAMES as usize
+            + crate::constants::BIDIR_CONFIRM_FRAMES as usize
+            - 1;
 
         for tick in 0..150 {
             let actions = state.process(
@@ -475,7 +483,7 @@ mod tests {
             }
         }
 
-        assert!(matches!(detected_at, Some(104..=110)));
+        assert_eq!(detected_at, Some(expected_detect_at));
     }
 
     #[test]
@@ -529,6 +537,38 @@ mod tests {
             let actions = state.process(
                 &inverted, true, true, false, false, false, false, 0, 0, false, false, &mut zic,
                 400, 600, 64,
+            );
+            assert!(!actions.bidir_detected);
+        }
+    }
+
+    #[test]
+    fn bidir_autodetect_resets_when_armed() {
+        let mut state = TransferState::default();
+        let mut zic = 0;
+        let frame = dshot_dma_buffer(0, false, true);
+        let partial_confirm_frames = crate::constants::BIDIR_IDLE_HIGH_FRAMES as usize
+            + crate::constants::BIDIR_CONFIRM_FRAMES as usize
+            - 1;
+
+        for _ in 0..partial_confirm_frames {
+            let actions = state.process(
+                &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
+                600, 64,
+            );
+            assert!(!actions.bidir_detected);
+        }
+
+        let armed = state.process(
+            &frame, true, true, false, false, true, true, 0, 0, false, false, &mut zic, 400, 600,
+            64,
+        );
+        assert!(!armed.bidir_detected);
+
+        for _ in 0..crate::constants::BIDIR_CONFIRM_FRAMES {
+            let actions = state.process(
+                &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
+                600, 64,
             );
             assert!(!actions.bidir_detected);
         }
