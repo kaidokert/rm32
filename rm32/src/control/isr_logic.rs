@@ -17,6 +17,13 @@ use crate::shared_comm::SharedComm;
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    if ctx.shared.all_off_request() {
+        ctx.hal.phase().all_off();
+        ctx.hal.comp().mask_interrupts();
+        ctx.shared.clear_all_off_request();
+        return;
+    }
+
     // Sync direction from shared (main loop may flip for bidirectional)
     ctx.commutation.forward = ctx.shared.forward();
     let tim1_arr = ctx.shared.tim1_arr();

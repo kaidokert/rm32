@@ -28,6 +28,7 @@ pub struct TestShared {
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
     pub prop_brake_active: Cell<bool>,
+    pub all_off_request: Cell<bool>,
 }
 
 impl Default for TestShared {
@@ -60,6 +61,7 @@ impl TestShared {
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
             prop_brake_active: Cell::new(false),
+            all_off_request: Cell::new(false),
         }
     }
 }
@@ -175,6 +177,15 @@ impl MainControl for TestShared {
     }
     fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.set(v);
+    }
+    fn all_off_request(&self) -> bool {
+        self.all_off_request.get()
+    }
+    fn request_all_off(&self) {
+        self.all_off_request.set(true);
+    }
+    fn clear_all_off_request(&self) {
+        self.all_off_request.set(false);
     }
 }
 
