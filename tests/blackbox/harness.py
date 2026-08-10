@@ -130,6 +130,11 @@ class AM32Harness:
         self._send(f"gcr_encode {args}")
         return self._parse_state(self._recv())
 
+    def edt_next(self, **kwargs):
+        """Advance the EDT scheduler and return the selected frame."""
+        self._send(f"edt_next {self._kvargs(**kwargs)}")
+        return self._parse_state(self._recv())
+
     def arm(self, input_type="dshot"):
         """Convenience: run the arming sequence.
         Sets inputSet=1, zero throttle, waits for armed=1."""
@@ -238,6 +243,8 @@ def run_test_vectors(harness, vectors_file):
         elif cmd == "gcr_encode":
             com_time = int(tokens[1])
             state = harness.gcr_encode(com_time, **inputs)
+        elif cmd == "edt_next":
+            state = harness.edt_next(**inputs)
         else:
             raise ValueError(f"Unknown command: {cmd}")
 

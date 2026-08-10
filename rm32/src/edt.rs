@@ -81,6 +81,12 @@ impl EdtScheduler {
 
         self.counter = self.counter.wrapping_add(1);
 
+        // Re-send EDT init periodically so a lost init frame does not leave
+        // the peer treating typed EDT frames as eRPM indefinitely.
+        if self.counter % 512 == 256 {
+            return EdtFrame::Extended(EDT_INIT_FRAME);
+        }
+
         // Alternate: extended frame, then eRPM
         if self.last_sent_extended {
             self.last_sent_extended = false;
@@ -92,12 +98,12 @@ impl EdtScheduler {
         // Voltage: every 200 frames (~4Hz)
         // Temperature: every 200 frames, offset from voltage
         let frame = if self.counter.is_multiple_of(40) {
-            // Current: 50mA per LSB
-            let payload = ((current_ma as i32).max(0) / 50) as u8;
+            // Current: 1A per LSB
+            let payload = ((current_ma as i32).max(0) / 1000).min(255) as u8;
             (EDT_CURRENT << 8) | payload as u16
         } else if self.counter % 200 == 100 {
-            // Voltage: 25mV per LSB
-            let payload = (voltage_mv / 25).min(255) as u8;
+            // Voltage: 0.25V per LSB
+            let payload = (voltage_mv / 250).min(255) as u8;
             (EDT_VOLTAGE << 8) | payload as u16
         } else if self.counter % 200 == 150 {
             // Temperature: direct degrees C
@@ -133,6 +139,25 @@ mod tests {
     }
 
     #[test]
+    fn init_frame_is_periodically_reannounced() {
+        let mut s = EdtScheduler::default();
+        s.request_init();
+        assert!(matches!(
+            s.next_frame(0, 0, 0),
+            EdtFrame::Extended(EDT_INIT_FRAME)
+        ));
+
+        for _ in 0..255 {
+            let _ = s.next_frame(1000, 12000, 25);
+        }
+
+        match s.next_frame(1000, 12000, 25) {
+            EdtFrame::Extended(v) => assert_eq!(v, EDT_INIT_FRAME),
+            _ => panic!("expected periodic init frame"),
+        }
+    }
+
+    #[test]
     fn deinit_frame_deactivates() {
         let mut s = EdtScheduler::default();
         s.request_init(); // activate first
@@ -159,11 +184,11 @@ mod tests {
         s.active = true;
         s.counter = u16::MAX; // next increment wraps to 0
 
-        let frame = s.next_frame(1500, 16800, 30);
+        let frame = s.next_frame(3500, 16800, 30);
         match frame {
             EdtFrame::Extended(v) => {
                 assert_eq!(v >> 8, EDT_CURRENT);
-                assert_eq!(v & 0xFF, 30); // 1500mA / 50 = 30
+                assert_eq!(v & 0xFF, 3);
             }
             _ => panic!("expected current frame at counter=0"),
         }
@@ -190,10 +215,10 @@ mod tests {
         s.active = true;
         s.counter = 99; // next will be 100
 
-        match s.next_frame(0, 4200, 25) {
+        match s.next_frame(0, 12300, 25) {
             EdtFrame::Extended(v) => {
                 assert_eq!(v >> 8, EDT_VOLTAGE);
-                assert_eq!(v & 0xFF, 168); // 4200mV / 25 = 168
+                assert_eq!(v & 0xFF, 49);
             }
             _ => panic!("expected voltage frame"),
         }
