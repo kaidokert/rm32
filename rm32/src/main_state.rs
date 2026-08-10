@@ -670,7 +670,7 @@ mod tests {
     }
 
     fn trip_one_khz(shared: &SharedState) {
-        for _ in 0..=crate::constants::PID_LOOP_DIVIDER {
+        for _ in 0..crate::constants::PID_LOOP_DIVIDER {
             shared.one_khz_counter_inc();
         }
     }

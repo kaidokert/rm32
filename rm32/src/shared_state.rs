@@ -127,12 +127,9 @@ impl SharedState {
     }
 
     pub fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
-        if self.one_khz_counter.load(ACQ) > divider {
-            self.one_khz_counter.store(0, REL);
-            true
-        } else {
-            false
-        }
+        self.one_khz_counter
+            .fetch_update(REL, ACQ, |count| (count >= divider).then_some(0))
+            .is_ok()
     }
 
     // --- Motor mode ---
@@ -736,6 +733,20 @@ mod tests {
             shared.one_khz_counter_inc();
         }
 
+        assert!(shared.one_khz_counter_check_and_reset(20));
+        assert!(!shared.one_khz_counter_check_and_reset(20));
+    }
+
+    #[test]
+    fn one_khz_counter_dispatches_on_divider_tick() {
+        let shared = SharedState::new();
+
+        for _ in 0..19 {
+            shared.one_khz_counter_inc();
+        }
+        assert!(!shared.one_khz_counter_check_and_reset(20));
+
+        shared.one_khz_counter_inc();
         assert!(shared.one_khz_counter_check_and_reset(20));
         assert!(!shared.one_khz_counter_check_and_reset(20));
     }
