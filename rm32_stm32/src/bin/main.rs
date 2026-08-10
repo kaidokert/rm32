@@ -239,10 +239,21 @@ fn main() -> ! {
                     commutation_interval,
                     step,
                 } => {
-                    system.apply_sine_changeover(shared, &mut main_state, commutation_interval);
-                    shared.set_changeover_step(step);
+                    system.apply_sine_changeover(
+                        shared,
+                        &mut main_state,
+                        commutation_interval,
+                        step,
+                    );
                 }
-                rm32::sine::SineStepResult::Idle => {}
+                rm32::sine::SineStepResult::Idle => {
+                    let brake = rm32::system::SystemTick::handle_sine_idle(
+                        &main_state.config,
+                        shared.tim1_arr(),
+                    );
+                    system.input_state.set_prop_brake_active(brake);
+                    shared.set_prop_brake_active(brake);
+                }
             }
         }
 

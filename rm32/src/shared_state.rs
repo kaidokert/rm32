@@ -755,6 +755,15 @@ mod tests {
     }
 
     #[test]
+    fn changeover_step_handoff_roundtrips() {
+        let shared = SharedState::new();
+
+        assert_eq!(MainControl::changeover_step(&shared), 0);
+        MainControl::set_changeover_step(&shared, 5);
+        assert_eq!(MainControl::changeover_step(&shared), 5);
+    }
+
+    #[test]
     fn one_khz_counter_saturates_until_consumed() {
         let shared = SharedState::new();
 

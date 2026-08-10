@@ -12,4 +12,4 @@ eeprom.motor_poles=14
 eeprom.stall_protection=1
 
 @sequence
-tick 1 | throttle=500 | stepper_sine=0 running=1 old_routine=1
+tick 1 | throttle=500 | stepper_sine=0 running=1 old_routine=1 step=5 commutation_interval=9000

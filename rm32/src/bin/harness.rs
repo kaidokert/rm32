@@ -455,8 +455,8 @@ impl Harness {
                         &self.shared,
                         &mut self.main,
                         commutation_interval,
+                        step,
                     );
-                    self.shared.set_changeover_step(step);
                 }
                 rm32::sine::SineStepResult::Idle => {
                     let brake = rm32::system::SystemTick::handle_sine_idle(&self.config, 1999);

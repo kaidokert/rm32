@@ -47,6 +47,8 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.pwm().generate_update_event();
         let ci = ctx.shared.commutation_interval();
         ctx.hal.com_timer().set_and_enable(ci as u16);
+        ctx.hal.comp().set_step(changeover, ctx.commutation.rising);
+        ctx.hal.comp().change_input();
         ctx.hal.comp().enable_interrupts();
         ctx.shared.set_changeover_step(0);
     }

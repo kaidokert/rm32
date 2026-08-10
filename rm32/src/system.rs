@@ -94,7 +94,7 @@ impl SystemTick {
             shared.armed(),
             shared.forward(),
             config.motor_poles,
-            5,
+            crate::constants::SINE_CHANGEOVER_STEP,
             dead_time,
             tim1_autoreload,
             config.sine_mode_power,
@@ -107,21 +107,25 @@ impl SystemTick {
         shared: &SharedState,
         main: &mut MainState<LED>,
         commutation_interval: u32,
+        step: u8,
     ) {
-        shared.transition(crate::motor_mode::MotorEvent::ExitSine);
         shared.set_commutation_interval(commutation_interval);
         shared.set_zero_crosses(20);
         shared.set_prop_brake_active(false);
         main.timing_mut().set_average_interval(commutation_interval);
         main.timing_mut()
             .set_last_average_interval(commutation_interval);
+        shared.set_changeover_step(step);
+        shared.transition(crate::motor_mode::MotorEvent::ExitSine);
     }
 
     /// Handle sine-mode idle brake-on-stop policy.
     pub fn handle_sine_idle(config: &crate::config::EepromConfig, tim1_arr: u16) -> bool {
         if config.brake_on_stop == 1 {
             let prop_brake_duty = config.drag_brake_strength as u32 * 200;
-            let adjusted = tim1_arr as u32 - ((prop_brake_duty * tim1_arr as u32) / 2000);
+            let tim1_arr = tim1_arr as u32;
+            let scaled = ((prop_brake_duty * tim1_arr) / 2000).min(tim1_arr);
+            let adjusted = tim1_arr - scaled;
             adjusted >= 100
         } else {
             false

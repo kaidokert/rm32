@@ -256,3 +256,19 @@ impl SharedComm for TestShared {
         self.send_telemetry.set(v);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::shared_comm::MainControl;
+
+    use super::*;
+
+    #[test]
+    fn changeover_step_handoff_roundtrips() {
+        let shared = TestShared::new();
+
+        assert_eq!(shared.changeover_step(), 0);
+        shared.set_changeover_step(5);
+        assert_eq!(shared.changeover_step(), 5);
+    }
+}

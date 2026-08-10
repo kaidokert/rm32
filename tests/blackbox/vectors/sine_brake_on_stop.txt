@@ -11,4 +11,4 @@ eeprom.brake_on_stop=1
 eeprom.drag_brake_strength=5
 
 @sequence
-ticks 3 | throttle=0 | prop_brake_active=1
+ticks 3 | throttle=0 | prop_brake_active=1 pwm_duty>0
