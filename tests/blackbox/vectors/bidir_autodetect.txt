@@ -1,0 +1,15 @@
+# Bidirectional DShot auto-detection
+
+@config
+armed=0
+inputSet=1
+dshot=1
+zero_input_count=31
+input_pin_state=1
+
+@sequence
+# High idle alone is not enough.
+ticks 110 | dshot_frame=0 | dshot_telemetry=0
+
+# Inverted CRC confirms bidirectional DShot.
+ticks 110 | dshot_frame_inverted=0 | dshot_telemetry=1

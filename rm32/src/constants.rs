@@ -64,6 +64,10 @@ pub const DESYNC_RESET_INTERVAL: u32 = 5000;
 /// Prevents false desync detection at very low RPM where intervals are naturally large.
 pub const DESYNC_MAX_INTERVAL: u32 = 2000;
 
+/// Consecutive inverted-CRC DShot frames required before committing
+/// auto-detected bidirectional DShot mode.
+pub const BIDIR_CONFIRM_FRAMES: u8 = 4;
+
 /// BEMF timeout threshold at low throttle (< 150). Lenient to avoid false desync
 /// when motor is barely spinning and BEMF signal is weak.
 pub const BEMF_TIMEOUT_LENIENT: u8 = 100;

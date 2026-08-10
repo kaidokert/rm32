@@ -198,6 +198,7 @@ struct Harness {
     throttle_value: u16,
     do_transfer: bool,
     dma_buffer: [u32; 64],
+    input_pin_high: bool,
 
     // Unified system tick (shared with firmware)
     system: SystemTick,
@@ -247,6 +248,7 @@ impl Harness {
             throttle_value: 0,
             do_transfer: false,
             dma_buffer: [0; 64],
+            input_pin_high: false,
             system: SystemTick::new(),
             transfer: rm32::transfer::TransferState::default(),
             cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
@@ -283,16 +285,19 @@ impl Harness {
         self.edt_arm_enable = self.config.input_type() == InputType::EdtArm;
     }
 
-    fn build_dshot_frame(&mut self, value: u16) {
+    fn build_dshot_frame_with_crc(&mut self, value: u16, inverted_crc: bool) {
         let mut bits = [0u8; 16];
         for (i, bit) in bits[..11].iter_mut().enumerate() {
             *bit = ((value >> (10 - i)) & 1) as u8;
         }
         bits[11] = 0;
-        let crc = (bits[0] ^ bits[4] ^ bits[8]) << 3
+        let mut crc = (bits[0] ^ bits[4] ^ bits[8]) << 3
             | (bits[1] ^ bits[5] ^ bits[9]) << 2
             | (bits[2] ^ bits[6] ^ bits[10]) << 1
             | (bits[3] ^ bits[7] ^ bits[11]);
+        if inverted_crc {
+            crc = (!crc) & 0xF;
+        }
         bits[12] = (crc >> 3) & 1;
         bits[13] = (crc >> 2) & 1;
         bits[14] = (crc >> 1) & 1;
@@ -306,6 +311,10 @@ impl Harness {
         }
     }
 
+    fn build_dshot_frame(&mut self, value: u16) {
+        self.build_dshot_frame_with_crc(value, false);
+    }
+
     fn handle_transfer(&mut self) {
         // Use library TransferState for all input processing
         let actions = self.transfer.process(
@@ -315,7 +324,7 @@ impl Harness {
             self.servo_pwm,
             self.shared.dshot_telemetry(),
             self.shared.armed(),
-            false, // input_pin_high
+            self.input_pin_high,
             self.shared.adjusted_input(),
             self.shared.newinput(),
             self.config.bi_direction != 0,
@@ -413,6 +422,9 @@ impl Harness {
             self.frametime_low = low;
             self.frametime_high = high;
         }
+        if actions.bidir_detected {
+            self.shared.set_dshot_telemetry(true);
+        }
     }
 
     fn do_tick(&mut self) {
@@ -490,6 +502,7 @@ impl Harness {
              pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
              send_telemetry={} send_esc_info_flag={} play_tone_flag={} \
+             dshot_telemetry={} \
              edt_armed={} edt_arm_enable={} \
              alloff_count={} fullbrake_count={} mask_interrupts_count={} \
              dshot_output_prescaler={}",
@@ -534,6 +547,7 @@ impl Harness {
             self.shared.send_telemetry() as i32,
             self.shared.send_esc_info_flag() as i32,
             self.play_tone_flag,
+            self.shared.dshot_telemetry() as i32,
             self.edt_armed as i32,
             self.edt_arm_enable as i32,
             self.hal_counts.all_off.get(),
@@ -560,6 +574,10 @@ impl Harness {
             "transfer" => self.do_transfer = v != 0,
             "dshot_frame" => {
                 self.build_dshot_frame(v as u16);
+                self.do_transfer = true;
+            }
+            "dshot_frame_inverted" => {
+                self.build_dshot_frame_with_crc(v as u16, true);
                 self.do_transfer = true;
             }
             "zc" => {
@@ -631,6 +649,7 @@ impl Harness {
             "EDT_ARMED" => self.edt_armed = v != 0,
             "EDT_ARM_ENABLE" => self.edt_arm_enable = v != 0,
             "dshot_telemetry" => self.shared.set_dshot_telemetry(v != 0),
+            "input_pin_state" => self.input_pin_high = v != 0,
             "signaltimeout" => self.shared.set_signal_timeout(v as u16),
             "cell_count" => self.main.cell_count = v as u8, // pub field
             "battery_voltage" => {
@@ -877,10 +896,10 @@ fn main() {
         } else if let Some(rest) = line.strip_prefix("ticks ") {
             let (n_str, kvs) = rest.split_once(' ').unwrap_or((rest, ""));
             let n: u32 = n_str.parse().unwrap_or(1);
-            if !kvs.is_empty() {
-                harness.parse_kvs(kvs);
-            }
             for _ in 0..n {
+                if !kvs.is_empty() {
+                    harness.parse_kvs(kvs);
+                }
                 harness.do_tick();
             }
             harness.print_state();
