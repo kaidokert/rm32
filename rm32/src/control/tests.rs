@@ -258,8 +258,10 @@ mod tests {
         let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
+        let interval_ticks =
+            crate::constants::telemetry_interval_ticks(config.telemetry_on_interval);
 
-        for _ in 0..599 {
+        for _ in 0..interval_ticks - 1 {
             isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
                 commutation: &mut comm,
                 bemf: &mut bemf,
@@ -287,7 +289,7 @@ mod tests {
 
         config.telemetry_on_interval = 0;
         shared.send_telemetry.set(false);
-        for _ in 0..1500 {
+        for _ in 0..interval_ticks * 2 {
             isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
                 commutation: &mut comm,
                 bemf: &mut bemf,

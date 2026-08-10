@@ -20,9 +20,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.shared.one_khz_counter_inc();
 
     if ctx.config.telemetry_on_interval != 0 {
-        let limit = (crate::constants::TELEMETRY_INTERVAL_MS - 1
-            + ctx.config.telemetry_on_interval as u16)
-            * 20;
+        let limit = telemetry_interval_ticks(ctx.config.telemetry_on_interval);
         if ctx.shared.telem_counter_check_and_inc(limit) {
             ctx.shared.set_send_telemetry(true);
         }

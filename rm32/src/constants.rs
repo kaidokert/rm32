@@ -31,6 +31,13 @@ pub const PID_LOOP_DIVIDER: u8 = 20;
 /// Base interval for periodic KISS telemetry, in milliseconds.
 pub const TELEMETRY_INTERVAL_MS: u16 = 30;
 
+/// Number of 20 kHz TIM6 ticks in one millisecond.
+pub const TELEMETRY_INTERVAL_TICKS_PER_MS: u16 = 20;
+
+pub const fn telemetry_interval_ticks(config_interval: u8) -> u16 {
+    (TELEMETRY_INTERVAL_MS - 1 + config_interval as u16) * TELEMETRY_INTERVAL_TICKS_PER_MS
+}
+
 /// Default initial commutation interval in timer ticks (0.5µs each).
 /// 10000 ticks = 5ms between commutations = very slow startup.
 pub const INITIAL_COMMUTATION_INTERVAL: u32 = 10000;
