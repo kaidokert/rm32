@@ -28,6 +28,7 @@ pub struct TestShared {
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
     pub one_khz_counter: Cell<u8>,
+    pub telem_counter: Cell<u16>,
     pub prop_brake_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
 }
@@ -62,6 +63,7 @@ impl TestShared {
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
             one_khz_counter: Cell::new(0),
+            telem_counter: Cell::new(0),
             prop_brake_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
         }
@@ -138,6 +140,16 @@ impl IsrTiming for TestShared {
             self.one_khz_counter.set(0);
             true
         } else {
+            false
+        }
+    }
+    fn telem_counter_check_and_inc(&self, limit: u16) -> bool {
+        let next = self.telem_counter.get().saturating_add(1);
+        if next >= limit {
+            self.telem_counter.set(0);
+            true
+        } else {
+            self.telem_counter.set(next);
             false
         }
     }

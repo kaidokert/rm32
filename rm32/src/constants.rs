@@ -28,6 +28,9 @@ pub const ARMING_TIMEOUT_TICKS: u32 = 20000;
 /// Number of 20 kHz TIM6 ticks between 1 kHz ADC/PID dispatches.
 pub const PID_LOOP_DIVIDER: u8 = 20;
 
+/// Base interval for periodic KISS telemetry, in milliseconds.
+pub const TELEMETRY_INTERVAL_MS: u16 = 30;
+
 /// Default initial commutation interval in timer ticks (0.5µs each).
 /// 10000 ticks = 5ms between commutations = very slow startup.
 pub const INITIAL_COMMUTATION_INTERVAL: u32 = 10000;
