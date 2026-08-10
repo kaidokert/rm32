@@ -138,3 +138,86 @@ impl Default for SystemTick {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::board::BoardConfig;
+    use crate::config::EepromConfig;
+    use crate::main_state::{ChipParams, MainState};
+    use crate::motor_mode::MotorEvent;
+    use crate::sine::SineStepResult;
+
+    use super::*;
+
+    fn main_state() -> MainState {
+        MainState::new(
+            &BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 48,
+            },
+        )
+    }
+
+    #[test]
+    fn tick_sine_runs_only_in_sine_mode() {
+        let shared = SharedState::new();
+        let mut system = SystemTick::new();
+        let config = EepromConfig::default();
+
+        assert!(system.tick_sine(&shared, &config, 60, 1999).is_none());
+
+        shared.transition(MotorEvent::Arm);
+        shared.transition(MotorEvent::EnterSine);
+        shared.set_newinput(crate::constants::SINE_CHANGEOVER_THROTTLE + 1);
+
+        let Some((
+            SineStepResult::Changeover {
+                commutation_interval,
+                step,
+            },
+            pwm,
+        )) = system.tick_sine(&shared, &config, 60, 1999)
+        else {
+            panic!("expected sine changeover");
+        };
+
+        assert_eq!(commutation_interval, 9000);
+        assert_eq!(step, crate::constants::SINE_CHANGEOVER_STEP);
+        assert!(pwm.0 > 0 || pwm.1 > 0 || pwm.2 > 0);
+    }
+
+    #[test]
+    fn apply_sine_changeover_publishes_handoff_before_exit() {
+        let shared = SharedState::new();
+        let mut main = main_state();
+        let mut system = SystemTick::new();
+
+        shared.transition(MotorEvent::Arm);
+        shared.transition(MotorEvent::EnterSine);
+        shared.set_prop_brake_active(true);
+
+        system.apply_sine_changeover(&shared, &mut main, 9000, 5);
+
+        assert!(shared.old_routine());
+        assert_eq!(shared.commutation_interval(), 9000);
+        assert_eq!(shared.zero_crosses(), 20);
+        assert_eq!(shared.changeover_step(), 5);
+        assert_eq!(main.timing().average_interval(), 9000);
+        assert!(!shared.prop_brake_active());
+    }
+
+    #[test]
+    fn handle_sine_idle_applies_brake_policy_without_underflow() {
+        let mut config = EepromConfig::default();
+
+        assert!(!SystemTick::handle_sine_idle(&config, 1999));
+
+        config.brake_on_stop = 1;
+        config.drag_brake_strength = 5;
+        assert!(SystemTick::handle_sine_idle(&config, 1999));
+
+        config.drag_brake_strength = u8::MAX;
+        assert!(!SystemTick::handle_sine_idle(&config, 1999));
+    }
+}
