@@ -10,6 +10,7 @@ use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
 use crate::shared_comm::IsrAction;
 use crate::telemetry;
+use crate::units::AdcCount;
 use embedded_hal::digital::OutputPin;
 
 use crate::shared_state::SharedState;
@@ -370,45 +371,6 @@ impl<LED: OutputPin> MainState<LED> {
             };
         }
 
-        // Low voltage cutoff
-        // Stepper sine (startup) uses fast 0.1s timeout; normal uses 10s
-        if self.config.low_voltage_cut_off != 0 {
-            let threshold = self.cell_count as u16 * self.low_cell_volt_cutoff;
-            if self.measurements.battery_voltage.0 < threshold && threshold > 0 {
-                self.protection.low_voltage_count += 1;
-            } else if !self.protection.low_voltage_cutoff {
-                self.protection.low_voltage_count = 0;
-            }
-            let lvc_limit = if shared.stepper_sine() {
-                LVC_STARTUP_THRESHOLD
-            } else {
-                LVC_NORMAL_THRESHOLD
-            };
-            if self.protection.low_voltage_count > lvc_limit {
-                self.protection.low_voltage_cutoff = true;
-                shared.transition(crate::motor_mode::MotorEvent::Disarm);
-            }
-        }
-
-        // ADC measurements — typed conversions via AdcCount
-        use crate::units::AdcCount;
-        let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
-        let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
-        self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
-        self.measurements.actual_current =
-            smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
-        self.measurements.degrees_celsius = if self.use_ntc {
-            crate::ntc::ntc_degrees(adc.raw_temperature())
-        } else {
-            adc.calc_temperature(adc.raw_temperature())
-        };
-        adc.start_conversion();
-
-        // Publish measurements to shared state (ISR reads for EDT)
-        shared.set_actual_current(self.measurements.actual_current.0);
-        shared.set_battery_voltage(self.measurements.battery_voltage.0);
-        shared.set_degrees_celsius(self.measurements.degrees_celsius.0);
-
         // Cell count auto-detection on arming transition
         let armed = shared.armed();
         self.just_armed = armed && !self.last_armed;
@@ -417,31 +379,75 @@ impl<LED: OutputPin> MainState<LED> {
         }
         self.last_armed = armed;
 
-        // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
-        if self.config.stall_protection != 0 && shared.running() {
-            let boost = self.pid.tick_stall(shared.commutation_interval() as i32);
-            shared.set_stall_protection_adjust(boost);
-        }
+        if shared.one_khz_counter_check_and_reset(crate::constants::PID_LOOP_DIVIDER) {
+            // ADC measurements — typed conversions via AdcCount
+            let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
+            let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
+            self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
+            self.measurements.actual_current =
+                smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
+            self.measurements.degrees_celsius = if self.use_ntc {
+                crate::ntc::ntc_degrees(adc.raw_temperature())
+            } else {
+                adc.calc_temperature(adc.raw_temperature())
+            };
+            adc.start_conversion();
 
-        // Current limit PID — reduces duty when current exceeds limit
-        {
-            let target = self.config.current_limit as i32 * 200;
-            let min_duty = self.minimum_duty.min(i16::MAX as u16) as i16;
-            let ceiling = self.pid.tick_current_limit(
-                self.measurements.actual_current.0,
-                target,
-                min_duty,
-                shared.running(),
-            );
-            shared.set_current_limit_adjust(ceiling);
-        }
+            // Publish measurements to shared state (ISR reads for EDT)
+            shared.set_actual_current(self.measurements.actual_current.0);
+            shared.set_battery_voltage(self.measurements.battery_voltage.0);
+            shared.set_degrees_celsius(self.measurements.degrees_celsius.0);
 
-        // Speed control PID — closed-loop RPM control
-        if let Some(override_input) =
-            self.pid
-                .tick_speed_control(shared.e_com_time(), zc, shared.running())
-        {
-            shared.set_newinput(override_input.clamp(48, 2047));
+            // Low voltage cutoff
+            if self.config.low_voltage_cut_off != 0 {
+                let threshold = if self.config.low_voltage_cut_off == 2 {
+                    self.config.absolute_voltage_cutoff as u16
+                } else {
+                    self.cell_count as u16 * self.low_cell_volt_cutoff
+                };
+                if self.measurements.battery_voltage.0 < threshold && threshold > 0 {
+                    self.protection.low_voltage_count += 1;
+                } else if !self.protection.low_voltage_cutoff {
+                    self.protection.low_voltage_count = 0;
+                }
+                let lvc_limit = if shared.stepper_sine() {
+                    LVC_STARTUP_THRESHOLD
+                } else {
+                    LVC_NORMAL_THRESHOLD
+                };
+                if self.protection.low_voltage_count > lvc_limit {
+                    self.protection.low_voltage_cutoff = true;
+                    shared.request_isr_action(IsrAction::AllOff);
+                    shared.transition(crate::motor_mode::MotorEvent::Disarm);
+                }
+            }
+
+            // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
+            if self.config.stall_protection != 0 && shared.running() {
+                let boost = self.pid.tick_stall(shared.commutation_interval() as i32);
+                shared.set_stall_protection_adjust(boost);
+            }
+
+            // Current limit PID — reduces duty when current exceeds limit
+            {
+                let target = self.config.current_limit as i32 * 200;
+                let min_duty = self.minimum_duty.min(i16::MAX as u16) as i16;
+                let ceiling = self.pid.tick_current_limit(
+                    self.measurements.actual_current.0,
+                    target,
+                    min_duty,
+                    shared.running(),
+                );
+                shared.set_current_limit_adjust(ceiling);
+            }
+
+            // Speed control PID — closed-loop RPM control
+            if let Some(override_input) =
+                self.pid
+                    .tick_speed_control(shared.e_com_time(), zc, shared.running())
+            {
+                shared.set_newinput(override_input.clamp(48, 2047));
+            }
         }
 
         // Telemetry send
@@ -663,6 +669,12 @@ mod tests {
         )
     }
 
+    fn trip_one_khz(shared: &SharedState) {
+        for _ in 0..crate::constants::PID_LOOP_DIVIDER {
+            shared.one_khz_counter_inc();
+        }
+    }
+
     #[test]
     fn stall_detection_increments_timeout() {
         use crate::motor_mode::MotorMode;
@@ -717,10 +729,73 @@ mod tests {
 
         let mut adc = MockAdc::with_raw_current(4095);
         for _ in 0..1000 {
+            trip_one_khz(&shared);
             main.tick(&shared, &mut adc, &mut MockTelem);
         }
 
         assert_eq!(shared.current_limit_adjust(), motor_cfg.minimum_duty);
+    }
+
+    #[test]
+    fn lvc_mode1_per_cell_triggers_disarm_and_all_off() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_comm::MainControl;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 1;
+        main.cell_count = 3;
+        main.low_cell_volt_cutoff = 330;
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(!shared.armed());
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
+    }
+
+    #[test]
+    fn lvc_does_not_run_before_one_khz_dispatch() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_comm::MainControl;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 1;
+        main.cell_count = 3;
+        main.low_cell_volt_cutoff = 330;
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(shared.armed());
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::None);
+    }
+
+    #[test]
+    fn lvc_mode2_absolute_cutoff() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 2;
+        main.config.absolute_voltage_cutoff = 100;
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert!(!shared.armed());
     }
 
     #[test]

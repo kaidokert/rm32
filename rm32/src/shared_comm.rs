@@ -118,6 +118,11 @@ pub trait IsrTiming {
         true
     }
     fn set_forward(&self, _v: bool) {}
+
+    fn one_khz_counter_inc(&self) {}
+    fn one_khz_counter_check_and_reset(&self, _divider: u8) -> bool {
+        false
+    }
 }
 
 /// Main-loop-produced control data consumed by the ISR.
