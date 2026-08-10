@@ -205,6 +205,7 @@ struct Harness {
     system: SystemTick,
     transfer: rm32::transfer::TransferState,
     cmd_proc: rm32::dshot_commands::CommandProcessor,
+    edt: rm32::edt::EdtScheduler,
     dshot: bool,
     servo_pwm: bool,
     edt_armed: bool,
@@ -253,6 +254,7 @@ impl Harness {
             system: SystemTick::new(),
             transfer: rm32::transfer::TransferState::default(),
             cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
+            edt: rm32::edt::EdtScheduler::default(),
             dshot: false,
             servo_pwm: false,
             edt_armed: false,
@@ -426,6 +428,51 @@ impl Harness {
         if actions.bidir_detected {
             self.shared.set_dshot_telemetry(true);
         }
+    }
+
+    fn edt_next_frame(&mut self, current: i16, voltage: u16, temperature: i16) -> i32 {
+        match self.edt.next_frame(current, voltage, temperature) {
+            rm32::edt::EdtFrame::Erpm => -1,
+            rm32::edt::EdtFrame::Extended(v) => v as i32,
+        }
+    }
+
+    fn run_edt_next_command(&mut self, args: &str) -> i32 {
+        let mut count = 1u16;
+        let mut current = 0i16;
+        let mut voltage = 0u16;
+        let mut temperature = 0i16;
+        let mut init = false;
+        let mut deinit = false;
+
+        for token in args.split_whitespace() {
+            if let Some(val) = token.strip_prefix("count=") {
+                count = val.parse().unwrap_or(1);
+            } else if let Some(val) = token.strip_prefix("current=") {
+                current = val.parse().unwrap_or(0);
+            } else if let Some(val) = token.strip_prefix("voltage=") {
+                voltage = val.parse().unwrap_or(0);
+            } else if let Some(val) = token.strip_prefix("temperature=") {
+                temperature = val.parse().unwrap_or(0);
+            } else if let Some(val) = token.strip_prefix("init=") {
+                init = val.parse::<u8>().unwrap_or(0) != 0;
+            } else if let Some(val) = token.strip_prefix("deinit=") {
+                deinit = val.parse::<u8>().unwrap_or(0) != 0;
+            }
+        }
+
+        if init {
+            self.edt.request_init();
+        }
+        if deinit {
+            self.edt.request_deinit();
+        }
+
+        let mut frame = -1;
+        for _ in 0..count {
+            frame = self.edt_next_frame(current, voltage, temperature);
+        }
+        frame
     }
 
     fn do_tick(&mut self) {
@@ -873,6 +920,31 @@ mod tests {
         assert_eq!(harness.tick_count, 1);
         assert_eq!(harness.shared.signal_timeout(), 1);
     }
+
+    #[test]
+    fn edt_next_command_drives_scheduler() {
+        let mut harness = Harness::new();
+
+        assert_eq!(harness.run_edt_next_command("init=1"), 0xE00);
+        assert_eq!(
+            harness.run_edt_next_command("count=40 current=3500 voltage=12300 temperature=45"),
+            0x603
+        );
+        assert_eq!(
+            harness.run_edt_next_command("count=60 current=3500 voltage=12300 temperature=45"),
+            0x431
+        );
+        assert_eq!(
+            harness.run_edt_next_command("count=50 current=3500 voltage=12300 temperature=45"),
+            0x22D
+        );
+        assert_eq!(
+            harness.run_edt_next_command("count=106 current=3500 voltage=12300 temperature=45"),
+            0xE00
+        );
+        assert_eq!(harness.run_edt_next_command("deinit=1"), 0xEFF);
+        assert_eq!(harness.run_edt_next_command(""), -1);
+    }
 }
 
 fn main() {
@@ -983,6 +1055,10 @@ fn main() {
                 " shift={} dshot_full={} padding={}",
                 shift, dshot_full, padding
             );
+            io::stdout().flush().unwrap();
+        } else if let Some(rest) = line.strip_prefix("edt_next") {
+            let frame = harness.run_edt_next_command(rest);
+            println!("edt_frame={}", frame);
             io::stdout().flush().unwrap();
         } else {
             eprintln!("harness2: unknown command '{}'", line);
