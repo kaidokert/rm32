@@ -17,6 +17,8 @@ use crate::shared_comm::{IsrAction, SharedComm};
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    ctx.shared.one_khz_counter_inc();
+
     match ctx.shared.isr_action() {
         IsrAction::AllOff => {
             ctx.hal.phase().all_off();

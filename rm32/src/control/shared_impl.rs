@@ -27,6 +27,7 @@ pub struct TestShared {
     pub min_bemf_counts: Cell<u8>,
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
+    pub one_khz_counter: Cell<u8>,
     pub prop_brake_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
 }
@@ -60,6 +61,7 @@ impl TestShared {
             min_bemf_counts: Cell::new(2),
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
+            one_khz_counter: Cell::new(0),
             prop_brake_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
         }
@@ -126,6 +128,18 @@ impl IsrTiming for TestShared {
     }
     fn set_forward(&self, v: bool) {
         self.forward.set(v);
+    }
+    fn one_khz_counter_inc(&self) {
+        self.one_khz_counter
+            .set(self.one_khz_counter.get().saturating_add(1));
+    }
+    fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
+        if self.one_khz_counter.get() > divider {
+            self.one_khz_counter.set(0);
+            true
+        } else {
+            false
+        }
     }
 }
 

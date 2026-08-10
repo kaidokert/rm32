@@ -70,6 +70,7 @@ pub struct SharedState {
     auto_advance: AtomicU8,        // commutation timing advance level
     prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
     isr_action: AtomicU8,          // main requests one-shot ISR-context work
+    one_khz_counter: AtomicU8,     // incremented by TIM6 ISR, consumed by main
 }
 
 impl Default for SharedState {
@@ -115,6 +116,22 @@ impl SharedState {
             auto_advance: AtomicU8::new(0),
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
+            one_khz_counter: AtomicU8::new(0),
+        }
+    }
+
+    pub fn one_khz_counter_inc(&self) {
+        self.one_khz_counter
+            .fetch_update(REL, ACQ, |cur| Some(cur.saturating_add(1)))
+            .ok();
+    }
+
+    pub fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
+        if self.one_khz_counter.load(ACQ) > divider {
+            self.one_khz_counter.store(0, REL);
+            true
+        } else {
+            false
         }
     }
 
@@ -537,6 +554,12 @@ impl crate::shared_comm::IsrTiming for SharedState {
     fn set_forward(&self, v: bool) {
         SharedState::set_forward(self, v);
     }
+    fn one_khz_counter_inc(&self) {
+        SharedState::one_khz_counter_inc(self);
+    }
+    fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
+        SharedState::one_khz_counter_check_and_reset(self, divider)
+    }
 }
 
 impl crate::shared_comm::MainControl for SharedState {
@@ -703,5 +726,17 @@ mod tests {
         MainControl::clear_isr_action(&shared, IsrAction::ResetIntervalTimer);
 
         assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
+    }
+
+    #[test]
+    fn one_khz_counter_saturates_until_consumed() {
+        let shared = SharedState::new();
+
+        for _ in 0..300 {
+            shared.one_khz_counter_inc();
+        }
+
+        assert!(shared.one_khz_counter_check_and_reset(20));
+        assert!(!shared.one_khz_counter_check_and_reset(20));
     }
 }

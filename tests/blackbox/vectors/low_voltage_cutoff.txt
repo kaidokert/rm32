@@ -21,4 +21,5 @@ tick 1  | throttle=500 | armed=1
 config low_voltage_count=9999
 
 # A few more ADC cycles (20 ticks each) should push it over
-ticks 100 | throttle=500 | armed=0
+# allOff must be called to physically cut FETs on LVC fault
+ticks 100 | throttle=500 | armed=0 alloff_count>0

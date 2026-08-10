@@ -25,6 +25,9 @@ pub const TIM1_DEFAULT_ARR: u16 = 1999;
 /// ESC arms after receiving zero throttle for this duration.
 pub const ARMING_TIMEOUT_TICKS: u32 = 20000;
 
+/// Number of 20 kHz TIM6 ticks between 1 kHz ADC/PID dispatches.
+pub const PID_LOOP_DIVIDER: u8 = 20;
+
 /// Default initial commutation interval in timer ticks (0.5µs each).
 /// 10000 ticks = 5ms between commutations = very slow startup.
 pub const INITIAL_COMMUTATION_INTERVAL: u32 = 10000;
@@ -49,12 +52,12 @@ pub const SERVO_CENTER: u16 = 1000;
 pub const BIDIR_MIDPOINT: u16 = 1048;
 
 /// Low voltage cutoff counter threshold (normal mode).
-/// At 10kHz main loop rate: 10000 counts = 1.0 second sustained low voltage.
+/// Counted at 1 kHz: 10000 counts = 10 seconds sustained low voltage.
 pub const LVC_NORMAL_THRESHOLD: u16 = 10000;
 
 /// Low voltage cutoff counter threshold during stepper_sine startup.
-/// Fast cutoff (0.1s) to protect batteries under heavy startup current draw.
-pub const LVC_STARTUP_THRESHOLD: u16 = 1000;
+/// Counted at 1 kHz: 100 counts = 0.1 second.
+pub const LVC_STARTUP_THRESHOLD: u16 = 100;
 
 /// Desync recovery: average_interval is reset to this value (5ms between commutations).
 /// Provides a safe slow-speed starting point after desync event.
