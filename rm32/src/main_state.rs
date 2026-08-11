@@ -811,6 +811,38 @@ mod tests {
     }
 
     #[test]
+    fn min_bemf_counts_follow_configured_target() {
+        use crate::shared_state::SharedState;
+
+        let board = crate::board::BoardConfig {
+            min_bemf_counts: 5,
+            ..crate::board::BoardConfig::DEFAULT
+        };
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = MainState::new(
+            &board,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+
+        main.config.bi_direction = 0;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 10);
+
+        main.config.bi_direction = 1;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 6);
+
+        shared.set_zero_crosses(5);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 5);
+    }
+
+    #[test]
     fn lvc_mode1_per_cell_triggers_disarm_and_all_off() {
         use crate::motor_mode::MotorMode;
         use crate::shared_comm::MainControl;
