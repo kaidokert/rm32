@@ -15,8 +15,6 @@ use embedded_hal::digital::OutputPin;
 
 use crate::shared_state::SharedState;
 
-const TARGET_MIN_BEMF_COUNTS: u8 = 3;
-
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
 pub(crate) fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
     let half = timer1_max_arr as i32 / 2;
@@ -111,6 +109,7 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub cell_count: u8,
     pub(crate) motor_kv: u16,
     pub(crate) minimum_duty: u16,
+    pub(crate) target_min_bemf_counts: u8,
     pub(crate) low_cell_volt_cutoff: u16,
     pub(crate) desync_check: bool,
     pub(crate) last_armed: bool,
@@ -158,6 +157,7 @@ impl MainState<NoLed> {
             cell_count: 0,
             motor_kv: 2000,
             minimum_duty: 0,
+            target_min_bemf_counts: board.min_bemf_counts,
             low_cell_volt_cutoff: 330,
             desync_check: false,
             last_armed: false,
@@ -513,13 +513,13 @@ impl<LED: OutputPin> MainState<LED> {
         // Require stronger BEMF confirmation during startup.
         if zc < 5 {
             let counts = if self.config.bi_direction != 0 {
-                TARGET_MIN_BEMF_COUNTS + 1
+                self.target_min_bemf_counts + 1
             } else {
-                TARGET_MIN_BEMF_COUNTS * 2
+                self.target_min_bemf_counts * 2
             };
             shared.set_min_bemf_counts(counts);
         } else {
-            shared.set_min_bemf_counts(TARGET_MIN_BEMF_COUNTS);
+            shared.set_min_bemf_counts(self.target_min_bemf_counts);
         }
 
         // Filter level — dynamic based on motor speed
@@ -760,7 +760,7 @@ mod tests {
         main.config.bi_direction = 0;
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
-        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS * 2);
+        assert_eq!(shared.min_bemf_counts(), 6);
     }
 
     #[test]
@@ -774,7 +774,7 @@ mod tests {
         main.config.bi_direction = 1;
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
-        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS + 1);
+        assert_eq!(shared.min_bemf_counts(), 4);
     }
 
     #[test]
@@ -787,7 +787,7 @@ mod tests {
         let mut main = make_test_main_state();
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
-        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS);
+        assert_eq!(shared.min_bemf_counts(), 3);
     }
 
     #[test]

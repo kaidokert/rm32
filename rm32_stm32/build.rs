@@ -102,7 +102,7 @@ fn default_stall() -> u16 {
     6500
 }
 fn default_bemf() -> u8 {
-    2
+    3
 }
 fn default_kv() -> u8 {
     1

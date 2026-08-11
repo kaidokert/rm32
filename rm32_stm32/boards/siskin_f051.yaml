@@ -7,7 +7,7 @@ current_offset: 0
 current_adc_channel: 6
 voltage_adc_channel: 3
 stall_protect_interval: 6500
-min_bemf_counts: 2
+min_bemf_counts: 3
 bemf_pins:
   phase_a: PA4
   phase_b: PA0

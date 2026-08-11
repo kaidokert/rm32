@@ -7,7 +7,7 @@ current_offset: 498
 current_adc_channel: 8
 voltage_adc_channel: 11
 stall_protect_interval: 6500
-min_bemf_counts: 2
+min_bemf_counts: 3
 bemf_pins:
   phase_a: PB7
   phase_b: PA5
