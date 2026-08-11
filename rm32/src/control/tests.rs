@@ -72,9 +72,23 @@ mod tests {
             self.count = v;
         }
     }
-    struct MockComTimer;
+    struct MockComTimer {
+        set_and_enable_count: u32,
+        last_delay: u16,
+    }
+    impl MockComTimer {
+        fn new() -> Self {
+            Self {
+                set_and_enable_count: 0,
+                last_delay: 0,
+            }
+        }
+    }
     impl hal::ComTimer for MockComTimer {
-        fn set_and_enable(&mut self, _: u16) {}
+        fn set_and_enable(&mut self, delay: u16) {
+            self.set_and_enable_count += 1;
+            self.last_delay = delay;
+        }
         fn disable_interrupt(&mut self) {}
         fn enable_interrupt(&mut self) {}
     }
@@ -121,7 +135,7 @@ mod tests {
                     all_off_called: false,
                 },
                 interval: MockInterval { count: 0 },
-                com_timer: MockComTimer,
+                com_timer: MockComTimer::new(),
             }
         }
     }
@@ -368,6 +382,71 @@ mod tests {
     }
 
     #[test]
+    fn isr_tick_commutate_kick_restarts_commutation_chain() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.commutation_interval.set(200);
+        hal.interval.count = 45001;
+        shared.request_isr_action(IsrAction::CommutateKick);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.commutation_interval.get(), (45001 + 3 * 200) / 4);
+        assert_eq!(hal.com_timer.set_and_enable_count, 1);
+        assert_eq!(hal.com_timer.last_delay, 1);
+        assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+    }
+
+    #[test]
+    fn isr_tick_commutate_kick_is_ignored_when_stopped() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.commutation_interval.set(5000);
+        hal.interval.count = 45001;
+        shared.request_isr_action(IsrAction::CommutateKick);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.commutation_interval.get(), 5000);
+        assert_eq!(hal.com_timer.set_and_enable_count, 0);
+        assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+    }
+
+    #[test]
     fn isr_tick_ramp_limits_large_step() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
@@ -411,7 +490,7 @@ mod tests {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
         let shared = TestShared::new();
-        let mut com_timer = MockComTimer;
+        let mut com_timer = MockComTimer::new();
         let mut comp = MockComp {
             level: false,
             mask_called: false,
@@ -444,7 +523,7 @@ mod tests {
             mask_called: false,
         };
         let mut interval = MockInterval { count: 500 };
-        let mut com_timer = MockComTimer;
+        let mut com_timer = MockComTimer::new();
 
         bemf.set_filter_level(2);
         bemf.set_wait_time(500);
@@ -465,7 +544,7 @@ mod tests {
             mask_called: false,
         };
         let mut interval = MockInterval { count: 0 };
-        let mut com_timer = MockComTimer;
+        let mut com_timer = MockComTimer::new();
 
         bemf.set_filter_level(2);
 

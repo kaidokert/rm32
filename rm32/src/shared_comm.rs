@@ -15,13 +15,15 @@ use crate::motor_mode::{MotorEvent, MotorMode};
 pub enum IsrAction {
     None = 0,
     ResetIntervalTimer = 1,
-    AllOff = 2,
+    CommutateKick = 2,
+    AllOff = 3,
 }
 
 impl IsrAction {
     pub const fn from_u8(value: u8) -> Self {
         match value {
             x if x == Self::ResetIntervalTimer as u8 => Self::ResetIntervalTimer,
+            x if x == Self::CommutateKick as u8 => Self::CommutateKick,
             x if x == Self::AllOff as u8 => Self::AllOff,
             _ => Self::None,
         }
