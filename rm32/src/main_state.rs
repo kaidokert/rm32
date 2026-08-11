@@ -15,6 +15,8 @@ use embedded_hal::digital::OutputPin;
 
 use crate::shared_state::SharedState;
 
+const TARGET_MIN_BEMF_COUNTS: u8 = 3;
+
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
 pub(crate) fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
     let half = timer1_max_arr as i32 / 2;
@@ -508,12 +510,16 @@ impl<LED: OutputPin> MainState<LED> {
             self.config.temperature_limit,
         ));
 
-        // Min BEMF counts adjustment — more lenient during startup
+        // Require stronger BEMF confirmation during startup.
         if zc < 5 {
-            let counts = if self.config.bi_direction != 0 { 3 } else { 4 };
+            let counts = if self.config.bi_direction != 0 {
+                TARGET_MIN_BEMF_COUNTS + 1
+            } else {
+                TARGET_MIN_BEMF_COUNTS * 2
+            };
             shared.set_min_bemf_counts(counts);
         } else {
-            shared.set_min_bemf_counts(2);
+            shared.set_min_bemf_counts(TARGET_MIN_BEMF_COUNTS);
         }
 
         // Filter level — dynamic based on motor speed
@@ -741,6 +747,47 @@ mod tests {
         }
 
         assert_eq!(shared.current_limit_adjust(), motor_cfg.minimum_duty);
+    }
+
+    #[test]
+    fn min_bemf_counts_are_stricter_during_unidirectional_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = make_test_main_state();
+        main.config.bi_direction = 0;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS * 2);
+    }
+
+    #[test]
+    fn min_bemf_counts_are_stricter_during_bidirectional_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = make_test_main_state();
+        main.config.bi_direction = 1;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS + 1);
+    }
+
+    #[test]
+    fn min_bemf_counts_use_target_after_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(5);
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), TARGET_MIN_BEMF_COUNTS);
     }
 
     #[test]
