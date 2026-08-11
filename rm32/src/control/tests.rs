@@ -376,7 +376,7 @@ mod tests {
         });
 
         assert_eq!(hal.interval.count, 0);
-        assert_eq!(shared.interval_timer_count(), 50000);
+        assert_eq!(shared.interval_timer_count(), 0);
         assert_eq!(shared.isr_action(), IsrAction::None);
         assert_eq!(shared.signal_timeout(), 1);
     }
@@ -411,7 +411,42 @@ mod tests {
         assert_eq!(hal.com_timer.set_and_enable_count, 1);
         assert_eq!(hal.com_timer.last_delay, 1);
         assert_eq!(hal.interval.count, 0);
-        assert_eq!(shared.interval_timer_count(), 45001);
+        assert_eq!(shared.interval_timer_count(), 0);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+    }
+
+    #[test]
+    fn isr_tick_commutate_kick_saturates_interval_sample() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.commutation_interval.set(200);
+        hal.interval.count = u16::MAX as u32 + 10;
+        shared.request_isr_action(IsrAction::CommutateKick);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(
+            shared.commutation_interval.get(),
+            (u16::MAX as u32 + 3 * 200) / 4
+        );
+        assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.interval_timer_count(), 0);
         assert_eq!(shared.isr_action(), IsrAction::None);
     }
 
@@ -444,7 +479,7 @@ mod tests {
         assert_eq!(shared.commutation_interval.get(), 5000);
         assert_eq!(hal.com_timer.set_and_enable_count, 0);
         assert_eq!(hal.interval.count, 0);
-        assert_eq!(shared.interval_timer_count(), 45001);
+        assert_eq!(shared.interval_timer_count(), 0);
         assert_eq!(shared.isr_action(), IsrAction::None);
     }
 
