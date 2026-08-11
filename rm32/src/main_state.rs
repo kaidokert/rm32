@@ -109,6 +109,7 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub cell_count: u8,
     pub(crate) motor_kv: u16,
     pub(crate) minimum_duty: u16,
+    pub(crate) target_min_bemf_counts: u8,
     pub(crate) low_cell_volt_cutoff: u16,
     pub(crate) desync_check: bool,
     pub(crate) last_armed: bool,
@@ -141,6 +142,10 @@ impl MainState<NoLed> {
     /// PID tuning, motor_kv, and other EEPROM-derived values are applied
     /// later via `apply_motor_config()`.
     pub fn new(board: &crate::board::BoardConfig, chip: ChipParams) -> Self {
+        assert!(
+            board.min_bemf_counts <= u8::MAX / 2,
+            "min_bemf_counts must fit derived startup thresholds"
+        );
         Self {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
@@ -156,6 +161,7 @@ impl MainState<NoLed> {
             cell_count: 0,
             motor_kv: 2000,
             minimum_duty: 0,
+            target_min_bemf_counts: board.min_bemf_counts,
             low_cell_volt_cutoff: 330,
             desync_check: false,
             last_armed: false,
@@ -508,12 +514,16 @@ impl<LED: OutputPin> MainState<LED> {
             self.config.temperature_limit,
         ));
 
-        // Min BEMF counts adjustment — more lenient during startup
+        // Require stronger BEMF confirmation during startup.
         if zc < 5 {
-            let counts = if self.config.bi_direction != 0 { 3 } else { 4 };
+            let counts = if self.config.bi_direction != 0 {
+                self.target_min_bemf_counts + 1
+            } else {
+                self.target_min_bemf_counts * 2
+            };
             shared.set_min_bemf_counts(counts);
         } else {
-            shared.set_min_bemf_counts(2);
+            shared.set_min_bemf_counts(self.target_min_bemf_counts);
         }
 
         // Filter level — dynamic based on motor speed
@@ -676,6 +686,22 @@ mod tests {
         )
     }
 
+    #[test]
+    #[should_panic(expected = "min_bemf_counts must fit derived startup thresholds")]
+    fn rejects_min_bemf_counts_that_overflow_startup_thresholds() {
+        let board = crate::board::BoardConfig {
+            min_bemf_counts: 128,
+            ..crate::board::BoardConfig::DEFAULT
+        };
+        let _ = MainState::new(
+            &board,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+    }
+
     fn trip_one_khz(shared: &SharedState) {
         for _ in 0..crate::constants::PID_LOOP_DIVIDER {
             shared.one_khz_counter_inc();
@@ -741,6 +767,79 @@ mod tests {
         }
 
         assert_eq!(shared.current_limit_adjust(), motor_cfg.minimum_duty);
+    }
+
+    #[test]
+    fn min_bemf_counts_are_stricter_during_unidirectional_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = make_test_main_state();
+        main.config.bi_direction = 0;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), 6);
+    }
+
+    #[test]
+    fn min_bemf_counts_are_stricter_during_bidirectional_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = make_test_main_state();
+        main.config.bi_direction = 1;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), 4);
+    }
+
+    #[test]
+    fn min_bemf_counts_use_target_after_startup() {
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_zero_crosses(5);
+
+        let mut main = make_test_main_state();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.min_bemf_counts(), 3);
+    }
+
+    #[test]
+    fn min_bemf_counts_follow_configured_target() {
+        use crate::shared_state::SharedState;
+
+        let board = crate::board::BoardConfig {
+            min_bemf_counts: 5,
+            ..crate::board::BoardConfig::DEFAULT
+        };
+        let shared = SharedState::new();
+        shared.set_zero_crosses(4);
+
+        let mut main = MainState::new(
+            &board,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+
+        main.config.bi_direction = 0;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 10);
+
+        main.config.bi_direction = 1;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 6);
+
+        shared.set_zero_crosses(5);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.min_bemf_counts(), 5);
     }
 
     #[test]

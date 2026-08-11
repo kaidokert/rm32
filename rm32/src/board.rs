@@ -84,7 +84,7 @@ impl BoardConfig {
         stall_protect_interval: 6500,
         has_led: false,
         led_pin: None,
-        min_bemf_counts: 2,
+        min_bemf_counts: 3,
         use_ntc: false,
         inverted_input: false,
         kv_divider: 1,

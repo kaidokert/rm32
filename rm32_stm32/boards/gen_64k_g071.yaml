@@ -7,7 +7,7 @@ current_offset: 0
 current_adc_channel: 4
 voltage_adc_channel: 6
 stall_protect_interval: 6500
-min_bemf_counts: 2
+min_bemf_counts: 3
 has_led: true
 led_pin: 8
 bemf_pins:
