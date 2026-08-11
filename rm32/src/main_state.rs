@@ -312,11 +312,13 @@ impl<LED: OutputPin> MainState<LED> {
                 self.protection.bemf_timeout_happened =
                     self.protection.bemf_timeout_happened.saturating_add(1);
             }
-            shared.request_isr_action(IsrAction::CommutateKick);
             shared.set_old_routine(true);
             if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
+                shared.request_isr_action(IsrAction::ResetIntervalTimer);
                 shared.transition(crate::motor_mode::MotorEvent::StopMotor);
                 shared.set_commutation_interval(DESYNC_RESET_INTERVAL);
+            } else {
+                shared.request_isr_action(IsrAction::CommutateKick);
             }
             shared.set_zero_crosses(0);
         }

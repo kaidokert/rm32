@@ -415,6 +415,38 @@ mod tests {
     }
 
     #[test]
+    fn isr_tick_commutate_kick_is_ignored_when_stopped() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.commutation_interval.set(5000);
+        hal.interval.count = 45001;
+        shared.request_isr_action(IsrAction::CommutateKick);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.commutation_interval.get(), 5000);
+        assert_eq!(hal.com_timer.set_and_enable_count, 0);
+        assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+    }
+
+    #[test]
     fn isr_tick_ramp_limits_large_step() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
