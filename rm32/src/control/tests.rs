@@ -376,7 +376,7 @@ mod tests {
         });
 
         assert_eq!(hal.interval.count, 0);
-        assert_eq!(shared.interval_timer_count(), 0);
+        assert_eq!(shared.interval_timer_count(), 50000);
         assert_eq!(shared.isr_action(), IsrAction::None);
         assert_eq!(shared.signal_timeout(), 1);
     }
@@ -411,6 +411,7 @@ mod tests {
         assert_eq!(hal.com_timer.set_and_enable_count, 1);
         assert_eq!(hal.com_timer.last_delay, 1);
         assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.interval_timer_count(), 45001);
         assert_eq!(shared.isr_action(), IsrAction::None);
     }
 
@@ -443,6 +444,7 @@ mod tests {
         assert_eq!(shared.commutation_interval.get(), 5000);
         assert_eq!(hal.com_timer.set_and_enable_count, 0);
         assert_eq!(hal.interval.count, 0);
+        assert_eq!(shared.interval_timer_count(), 45001);
         assert_eq!(shared.isr_action(), IsrAction::None);
     }
 

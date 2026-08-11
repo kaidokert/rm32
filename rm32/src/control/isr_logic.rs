@@ -28,17 +28,15 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         }
     }
 
-    match ctx.shared.isr_action() {
+    let action = ctx.shared.isr_action();
+    match action {
         IsrAction::AllOff => {
             ctx.hal.phase().all_off();
             ctx.hal.comp().mask_interrupts();
             ctx.shared.clear_isr_action(IsrAction::AllOff);
             return;
         }
-        IsrAction::ResetIntervalTimer => {
-            ctx.hal.interval().set_count(0);
-            ctx.shared.clear_isr_action(IsrAction::ResetIntervalTimer);
-        }
+        IsrAction::ResetIntervalTimer => {}
         IsrAction::CommutateKick => {
             if ctx.shared.running() {
                 let count = ctx.hal.interval().count().min(u16::MAX as u32) as u16;
@@ -49,8 +47,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                     .com_timer()
                     .set_and_enable(COMMUTATE_KICK_DELAY_TICKS);
             }
-            ctx.hal.interval().set_count(0);
-            ctx.shared.clear_isr_action(IsrAction::CommutateKick);
         }
         IsrAction::None => {}
     }
@@ -180,6 +176,14 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.shared.set_forward(ctx.commutation.forward);
     ctx.shared
         .set_interval_timer_count(ctx.hal.interval().count());
+
+    if matches!(
+        action,
+        IsrAction::ResetIntervalTimer | IsrAction::CommutateKick
+    ) {
+        ctx.hal.interval().set_count(0);
+    }
+    ctx.shared.clear_isr_action(action);
 }
 
 /// BEMF polling (old_routine path).
