@@ -49,13 +49,18 @@ pub(crate) fn duty_ceiling(
     } else {
         0
     };
-    let poles = motor_poles.max(2) as i32;
-    let low_rpm = motor_kv as i32 * poles / 3200;
-    let high_rpm = motor_kv as i32 * poles / 384;
-    let erpm_max = if k_erpm > 0 && high_rpm > low_rpm {
-        crate::functions::map(k_erpm, low_rpm, high_rpm, 600, 2000).clamp(1, 2000) as u16
-    } else {
+    let poles = (motor_poles as i32).max(1);
+    let erpm_max = if motor_kv < 300 {
         2000
+    } else {
+        let div = (32 / poles).max(1);
+        let low_rpm = motor_kv as i32 / 100 / div;
+        let high_rpm = motor_kv as i32 / 12 / div;
+        if k_erpm > 0 && high_rpm > low_rpm {
+            crate::functions::map(k_erpm, low_rpm, high_rpm, 400, 2000).clamp(1, 2000) as u16
+        } else {
+            2000
+        }
     };
 
     let temp_max = if degrees_celsius > temperature_limit as i16 {
@@ -619,6 +624,17 @@ mod tests {
     #[test]
     fn duty_ceiling_no_limits() {
         assert_eq!(duty_ceiling(0, 2000, 14, 25, 80), 2000);
+    }
+
+    #[test]
+    fn duty_ceiling_matches_am32_rpm_limit_shape() {
+        assert_eq!(duty_ceiling(1446, 2220, 14, 25, 141), 992);
+        assert_eq!(duty_ceiling(600, 2220, 14, 25, 141), 2000);
+    }
+
+    #[test]
+    fn duty_ceiling_skips_rpm_limit_for_low_kv_motors() {
+        assert_eq!(duty_ceiling(1446, 280, 14, 25, 141), 2000);
     }
 
     #[test]
