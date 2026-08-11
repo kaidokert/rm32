@@ -142,6 +142,10 @@ impl MainState<NoLed> {
     /// PID tuning, motor_kv, and other EEPROM-derived values are applied
     /// later via `apply_motor_config()`.
     pub fn new(board: &crate::board::BoardConfig, chip: ChipParams) -> Self {
+        assert!(
+            board.min_bemf_counts <= u8::MAX / 2,
+            "min_bemf_counts must fit derived startup thresholds"
+        );
         Self {
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
@@ -680,6 +684,22 @@ mod tests {
                 cpu_mhz: 64,
             },
         )
+    }
+
+    #[test]
+    #[should_panic(expected = "min_bemf_counts must fit derived startup thresholds")]
+    fn rejects_min_bemf_counts_that_overflow_startup_thresholds() {
+        let board = crate::board::BoardConfig {
+            min_bemf_counts: 128,
+            ..crate::board::BoardConfig::DEFAULT
+        };
+        let _ = MainState::new(
+            &board,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
     }
 
     fn trip_one_khz(shared: &SharedState) {

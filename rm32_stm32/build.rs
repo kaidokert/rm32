@@ -276,6 +276,12 @@ fn main() {
         .unwrap_or_else(|e| panic!("Failed to read board config '{}': {}", board_path, e));
     let board: BoardYaml = serde_yaml::from_str(&yaml)
         .unwrap_or_else(|e| panic!("Failed to parse board config '{}': {}", board_path, e));
+    if board.min_bemf_counts > u8::MAX / 2 {
+        panic!(
+            "Board config '{}' min_bemf_counts={} overflows startup thresholds",
+            board_path, board.min_bemf_counts
+        );
+    }
 
     let enabled_mcu = enabled_mcu();
     assert_eq!(
