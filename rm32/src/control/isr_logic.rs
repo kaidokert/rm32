@@ -28,7 +28,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         }
     }
 
-    match ctx.shared.isr_action() {
+    let action = ctx.shared.isr_action();
+    let action_interval_count = ctx.hal.interval().count();
+    match action {
         IsrAction::AllOff => {
             ctx.hal.phase().all_off();
             ctx.hal.comp().mask_interrupts();
@@ -41,7 +43,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         }
         IsrAction::CommutateKick => {
             if ctx.shared.running() {
-                let count = ctx.hal.interval().count().min(u16::MAX as u32) as u16;
+                let count = action_interval_count.min(u16::MAX as u32) as u16;
                 let ci = ctx.shared.commutation_interval();
                 let new_ci = ctx.bemf.record_zero_cross(count, ci);
                 ctx.shared.set_commutation_interval(new_ci);
