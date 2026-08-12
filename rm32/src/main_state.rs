@@ -659,30 +659,30 @@ mod tests {
 
     // --- Stall detection (BEMF timeout increment) ---
 
+    const ADC_FULL_SCALE: u16 = 4095;
+
     struct MockAdc {
         raw_voltage: u16,
         raw_current: u16,
     }
     impl MockAdc {
         fn new() -> Self {
+            Self::with_raw(0, 0)
+        }
+
+        fn with_raw(raw_voltage: u16, raw_current: u16) -> Self {
             Self {
-                raw_voltage: 0,
-                raw_current: 0,
+                raw_voltage,
+                raw_current,
             }
         }
 
         fn with_raw_voltage(raw_voltage: u16) -> Self {
-            Self {
-                raw_voltage,
-                raw_current: 0,
-            }
+            Self::with_raw(raw_voltage, 0)
         }
 
         fn with_raw_current(raw_current: u16) -> Self {
-            Self {
-                raw_voltage: 0,
-                raw_current,
-            }
+            Self::with_raw(0, raw_current)
         }
     }
     impl crate::hal::Adc for MockAdc {
@@ -950,7 +950,7 @@ mod tests {
         trip_one_khz(&shared);
         main.tick(
             &shared,
-            &mut MockAdc::with_raw_voltage(4095),
+            &mut MockAdc::with_raw_voltage(ADC_FULL_SCALE),
             &mut MockTelem,
         );
 
@@ -973,17 +973,19 @@ mod tests {
         trip_one_khz(&shared);
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
         assert!(!shared.armed());
-        assert!(main.protection.low_voltage_count() > 0);
+        let latched_count = main.protection.low_voltage_count();
+        assert!(latched_count > LVC_NORMAL_THRESHOLD);
 
         shared.set_motor_mode(MotorMode::OldRoutine);
         trip_one_khz(&shared);
         main.tick(
             &shared,
-            &mut MockAdc::with_raw_voltage(4095),
+            &mut MockAdc::with_raw_voltage(ADC_FULL_SCALE),
             &mut MockTelem,
         );
 
-        assert!(main.protection.low_voltage_count() > 0);
+        assert_eq!(main.protection.low_voltage_count(), latched_count);
+        assert!(!shared.armed());
     }
 
     #[test]
