@@ -86,6 +86,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             );
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
+                ctx.hal.phase().all_off();
                 ctx.shared.transition(MotorEvent::StartMotor);
                 ctx.duty.start_motor();
                 let step = ctx.commutation.advance();
