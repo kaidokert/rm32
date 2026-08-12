@@ -11,4 +11,4 @@ zero_crosses=0
 commutation_interval=0
 
 @sequence
-tick 1 | throttle=500 | running=1 alloff_count>0
+tick 1 | throttle=500 | running=1 alloff_count>0 commutation_interval=10000 interval_timer_count=5000
