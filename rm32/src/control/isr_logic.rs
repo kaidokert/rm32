@@ -225,6 +225,7 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 }
 
 /// Commutation timer expired (TIM14/TIM16 ISR body).
+#[allow(clippy::too_many_arguments)]
 pub fn commutation_timer_expired<S, C, Ph, T>(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
@@ -232,6 +233,8 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     com_timer: &mut T,
     comp: &mut C,
     phase: &mut Ph,
+    bidirectional: bool,
+    strict_changeover: bool,
 ) where
     S: SharedComm,
     C: hal::Comparator,
@@ -264,7 +267,17 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
 
     let zc = shared.zero_crosses();
     let ci = shared.commutation_interval();
-    if shared.old_routine() && zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
+    let exit_interval = if bidirectional {
+        OLD_ROUTINE_EXIT_INTERVAL / 2
+    } else {
+        OLD_ROUTINE_EXIT_INTERVAL
+    };
+    let changeover_met = if strict_changeover {
+        zc >= OLD_ROUTINE_EXIT_ZC && ci <= exit_interval
+    } else {
+        ci < exit_interval
+    };
+    if shared.old_routine() && changeover_met {
         shared.transition(MotorEvent::BemfLocked);
         comp.enable_interrupts();
     }
