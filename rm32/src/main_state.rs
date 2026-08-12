@@ -660,21 +660,35 @@ mod tests {
     // --- Stall detection (BEMF timeout increment) ---
 
     struct MockAdc {
+        raw_voltage: u16,
         raw_current: u16,
     }
     impl MockAdc {
         fn new() -> Self {
-            Self { raw_current: 0 }
+            Self {
+                raw_voltage: 0,
+                raw_current: 0,
+            }
+        }
+
+        fn with_raw_voltage(raw_voltage: u16) -> Self {
+            Self {
+                raw_voltage,
+                raw_current: 0,
+            }
         }
 
         fn with_raw_current(raw_current: u16) -> Self {
-            Self { raw_current }
+            Self {
+                raw_voltage: 0,
+                raw_current,
+            }
         }
     }
     impl crate::hal::Adc for MockAdc {
         fn start_conversion(&mut self) {}
         fn raw_voltage(&self) -> u16 {
-            0
+            self.raw_voltage
         }
         fn raw_current(&self) -> u16 {
             self.raw_current
@@ -918,6 +932,58 @@ mod tests {
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
         assert!(!shared.armed());
+    }
+
+    #[test]
+    fn lvc_mode2_above_threshold_does_not_disarm() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 2;
+        main.config.absolute_voltage_cutoff = 100;
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+
+        trip_one_khz(&shared);
+        main.tick(
+            &shared,
+            &mut MockAdc::with_raw_voltage(4095),
+            &mut MockTelem,
+        );
+
+        assert!(shared.armed());
+    }
+
+    #[test]
+    fn lvc_latch_inhibits_counter_recovery() {
+        use crate::motor_mode::MotorMode;
+        use crate::shared_state::SharedState;
+
+        let shared = SharedState::new();
+        shared.set_motor_mode(MotorMode::OldRoutine);
+
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 2;
+        main.config.absolute_voltage_cutoff = 100;
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(!shared.armed());
+        assert!(main.protection.low_voltage_count() > 0);
+
+        shared.set_motor_mode(MotorMode::OldRoutine);
+        trip_one_khz(&shared);
+        main.tick(
+            &shared,
+            &mut MockAdc::with_raw_voltage(4095),
+            &mut MockTelem,
+        );
+
+        assert!(main.protection.low_voltage_count() > 0);
     }
 
     #[test]
