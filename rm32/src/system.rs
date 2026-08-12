@@ -62,19 +62,31 @@ impl SystemTick {
     ///
     /// The host harness runs the ISR inline through `isr_tick`; firmware can
     /// pass a no-op because the ISR runs asynchronously on hardware. The
-    /// callback receives `main` so host-side ISR synchronization can happen
-    /// before `tick_main()`.
+    /// ISR-to-main handoff is synchronized before `tick_main()`.
     pub fn run_tick<LED: OutputPin>(
         &mut self,
         shared: &SharedState,
         main: &mut MainState<LED>,
         adc: &mut dyn Adc,
         telem: &mut dyn TelemetryUart,
-        isr_tick: impl FnOnce(&mut MainState<LED>),
+        isr_tick: impl FnOnce(),
     ) {
         self.tick_input(shared, main);
-        isr_tick(main);
+        isr_tick();
+        self.sync_isr_to_main(shared, main);
         self.tick_main(shared, main, adc, telem);
+    }
+
+    /// Consume ISR-published flags that affect main-loop state.
+    pub fn sync_isr_to_main<LED: OutputPin>(
+        &self,
+        shared: &SharedState,
+        main: &mut MainState<LED>,
+    ) {
+        if shared.desync_check_pending() {
+            shared.set_desync_check_pending(false);
+            main.set_desync_check(true);
+        }
     }
 
     /// Process sine mode stepping.
@@ -146,6 +158,7 @@ mod tests {
     use crate::main_state::{ChipParams, MainState};
     use crate::motor_mode::MotorEvent;
     use crate::sine::SineStepResult;
+    use crate::units::DegreesCelsius;
 
     use super::*;
 
@@ -157,6 +170,45 @@ mod tests {
                 cpu_mhz: 48,
             },
         )
+    }
+
+    struct MockAdc;
+
+    impl Adc for MockAdc {
+        fn start_conversion(&mut self) {}
+        fn raw_voltage(&self) -> u16 {
+            0
+        }
+        fn raw_current(&self) -> u16 {
+            0
+        }
+        fn raw_temperature(&self) -> u16 {
+            0
+        }
+        fn calc_temperature(&self, _: u16) -> DegreesCelsius {
+            DegreesCelsius(25)
+        }
+    }
+
+    struct MockTelem;
+
+    impl TelemetryUart for MockTelem {
+        fn send_dma(&mut self, _: &[u8]) {}
+    }
+
+    #[test]
+    fn run_tick_consumes_pending_desync_check() {
+        let shared = SharedState::new();
+        let mut main = main_state();
+        let mut system = SystemTick::new();
+        let mut adc = MockAdc;
+        let mut telem = MockTelem;
+
+        shared.set_desync_check_pending(true);
+        system.run_tick(&shared, &mut main, &mut adc, &mut telem, || {});
+
+        assert!(main.desync_check());
+        assert!(!shared.desync_check_pending());
     }
 
     #[test]

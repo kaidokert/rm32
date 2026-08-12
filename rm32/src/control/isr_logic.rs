@@ -240,6 +240,10 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
 {
     com_timer.disable_interrupt();
     let step = commutation.advance();
+    if commutation.desync_check() {
+        shared.set_desync_check_pending(true);
+        commutation.set_desync_check(false);
+    }
     let e_com = commutation.record_interval(shared.commutation_interval() as u16);
     shared.set_e_com_time(e_com);
     phase.com_step(step);

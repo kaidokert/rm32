@@ -32,6 +32,7 @@ pub struct TestShared {
     pub prop_brake_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
     pub changeover_step: Cell<u8>,
+    pub desync_check_pending: Cell<bool>,
 }
 
 impl Default for TestShared {
@@ -68,6 +69,7 @@ impl TestShared {
             prop_brake_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
             changeover_step: Cell::new(0),
+            desync_check_pending: Cell::new(false),
         }
     }
 }
@@ -225,6 +227,12 @@ impl MainControl for TestShared {
     fn set_changeover_step(&self, step: u8) {
         self.changeover_step.set(step);
     }
+    fn desync_check_pending(&self) -> bool {
+        self.desync_check_pending.get()
+    }
+    fn set_desync_check_pending(&self, v: bool) {
+        self.desync_check_pending.set(v);
+    }
 }
 
 impl SharedComm for TestShared {
@@ -270,5 +278,16 @@ mod tests {
         assert_eq!(shared.changeover_step(), 0);
         shared.set_changeover_step(5);
         assert_eq!(shared.changeover_step(), 5);
+    }
+
+    #[test]
+    fn desync_check_pending_roundtrips() {
+        let shared = TestShared::new();
+
+        assert!(!shared.desync_check_pending());
+        shared.set_desync_check_pending(true);
+        assert!(shared.desync_check_pending());
+        shared.set_desync_check_pending(false);
+        assert!(!shared.desync_check_pending());
     }
 }
