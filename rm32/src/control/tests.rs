@@ -37,6 +37,7 @@ mod tests {
     struct MockComp {
         level: bool,
         mask_called: bool,
+        enable_calls: u32,
     }
     impl hal::Comparator for MockComp {
         fn output_level(&self) -> bool {
@@ -44,7 +45,9 @@ mod tests {
         }
         fn set_step(&mut self, _: u8, _: bool) {}
         fn change_input(&mut self) {}
-        fn enable_interrupts(&mut self) {}
+        fn enable_interrupts(&mut self) {
+            self.enable_calls += 1;
+        }
         fn mask_interrupts(&mut self) {
             self.mask_called = true;
         }
@@ -130,6 +133,7 @@ mod tests {
                 comp: MockComp {
                     level: false,
                     mask_called: false,
+                    enable_calls: 0,
                 },
                 phase: MockPhase {
                     all_off_called: false,
@@ -531,6 +535,7 @@ mod tests {
         let mut comp = MockComp {
             level: false,
             mask_called: false,
+            enable_calls: 0,
         };
         let mut phase = MockPhase {
             all_off_called: false,
@@ -550,6 +555,7 @@ mod tests {
         assert_eq!(shared.zero_crosses(), 1);
         assert!(!bemf.zc_found());
         assert!(!shared.desync_check_pending());
+        assert_eq!(comp.enable_calls, 1);
     }
 
     #[test]
@@ -562,6 +568,7 @@ mod tests {
         let mut comp = MockComp {
             level: false,
             mask_called: false,
+            enable_calls: 0,
         };
         let mut phase = MockPhase {
             all_off_called: false,
@@ -582,12 +589,73 @@ mod tests {
     }
 
     #[test]
+    fn isr_commutation_timer_keeps_comp_masked_in_polling_mode() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::OldRoutine);
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+        };
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+        );
+
+        assert!(shared.old_routine());
+        assert_eq!(comp.enable_calls, 0);
+    }
+
+    #[test]
+    fn isr_commutation_timer_enables_comp_on_polling_exit() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::OldRoutine);
+        shared.set_zero_crosses(19);
+        shared.set_commutation_interval(1000);
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+        };
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+        );
+
+        assert!(!shared.old_routine());
+        assert_eq!(comp.enable_calls, 1);
+    }
+
+    #[test]
     fn isr_bemf_zero_cross_detected() {
         let comm = crate::commutation::Commutation::new(); // rising=true
         let mut bemf = crate::control::state::BemfState::default();
         let mut comp = MockComp {
             level: false,
             mask_called: false,
+            enable_calls: 0,
         };
         let mut interval = MockInterval { count: 500 };
         let mut com_timer = MockComTimer::new();
@@ -609,6 +677,7 @@ mod tests {
         let mut comp = MockComp {
             level: true,
             mask_called: false,
+            enable_calls: 0,
         };
         let mut interval = MockInterval { count: 0 };
         let mut com_timer = MockComTimer::new();
