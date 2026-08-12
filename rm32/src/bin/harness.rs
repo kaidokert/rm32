@@ -667,6 +667,8 @@ impl Harness {
                         &mut self.hal.com_timer,
                         &mut self.hal.comp,
                         &mut self.hal.phase,
+                        self.config.is_bidirectional(),
+                        self.config.use_strict_changeover(),
                     );
                 }
             }

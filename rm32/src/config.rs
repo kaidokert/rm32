@@ -138,6 +138,9 @@ impl EepromConfig {
     pub fn is_rc_car_reverse(&self) -> bool {
         self.rc_car_reverse != 0
     }
+    pub fn use_strict_changeover(&self) -> bool {
+        self.has_stall_protection() || self.is_rc_car_reverse()
+    }
 
     pub fn input_type(&self) -> InputType {
         match self.input_type {
@@ -485,6 +488,20 @@ mod tests {
         assert_eq!(cfg.use_sine_start, 1);
         assert_eq!(cfg.variable_pwm, 1);
         assert_eq!(cfg.comp_pwm, 1);
+    }
+
+    #[test]
+    fn strict_changeover_follows_stall_or_rc_car_config() {
+        let mut cfg = EepromConfig::default();
+
+        assert!(!cfg.use_strict_changeover());
+
+        cfg.stall_protection = 1;
+        assert!(cfg.use_strict_changeover());
+
+        cfg.stall_protection = 0;
+        cfg.rc_car_reverse = 1;
+        assert!(cfg.use_strict_changeover());
     }
 
     #[test]
