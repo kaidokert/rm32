@@ -171,10 +171,8 @@ pub trait MainControl {
     fn set_changeover_step(&self, step: u8);
 
     /// ISR-published request for main-loop desync checks.
-    fn desync_check_pending(&self) -> bool {
-        false
-    }
-    fn set_desync_check_pending(&self, _v: bool) {}
+    fn desync_check_pending(&self) -> bool;
+    fn set_desync_check_pending(&self, v: bool);
 
     /// TIM1 auto-reload value (variable PWM). Main publishes, ISR applies.
     fn tim1_arr(&self) -> u16 {

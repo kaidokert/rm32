@@ -505,6 +505,9 @@ impl SharedState {
     pub fn set_desync_check_pending(&self, v: bool) {
         self.desync_check_pending.store(v, REL);
     }
+    pub fn take_desync_check_pending(&self) -> bool {
+        self.desync_check_pending.swap(false, Ordering::AcqRel)
+    }
 }
 
 impl crate::shared_comm::MotorState for SharedState {
@@ -786,6 +789,16 @@ mod tests {
         assert!(MainControl::desync_check_pending(&shared));
         MainControl::set_desync_check_pending(&shared, false);
         assert!(!MainControl::desync_check_pending(&shared));
+    }
+
+    #[test]
+    fn take_desync_check_pending_clears_atomically() {
+        let shared = SharedState::new();
+
+        shared.set_desync_check_pending(true);
+
+        assert!(shared.take_desync_check_pending());
+        assert!(!shared.take_desync_check_pending());
     }
 
     #[test]
