@@ -256,7 +256,9 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
         shared.set_commutation_interval(new_ci);
     }
 
-    comp.enable_interrupts();
+    if !shared.old_routine() {
+        comp.enable_interrupts();
+    }
     bemf.reset_after_commutation();
     shared.increment_zero_crosses();
 
@@ -264,6 +266,7 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     let ci = shared.commutation_interval();
     if shared.old_routine() && zc >= OLD_ROUTINE_EXIT_ZC && ci <= OLD_ROUTINE_EXIT_INTERVAL {
         shared.transition(MotorEvent::BemfLocked);
+        comp.enable_interrupts();
     }
 }
 
