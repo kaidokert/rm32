@@ -87,7 +87,7 @@ pub fn handle_tim14() {
         &mut state.hal.comp,
         &mut state.hal.phase,
         state.config.is_bidirectional(),
-        state.config.has_stall_protection() || state.config.is_rc_car_reverse(),
+        state.config.use_strict_changeover(),
     );
 }
 

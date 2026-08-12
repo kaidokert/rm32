@@ -138,6 +138,9 @@ impl EepromConfig {
     pub fn is_rc_car_reverse(&self) -> bool {
         self.rc_car_reverse != 0
     }
+    pub fn use_strict_changeover(&self) -> bool {
+        self.has_stall_protection() || self.is_rc_car_reverse()
+    }
 
     pub fn input_type(&self) -> InputType {
         match self.input_type {
