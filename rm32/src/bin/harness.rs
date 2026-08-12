@@ -538,7 +538,7 @@ impl Harness {
             &mut self.main,
             &mut self.adc,
             &mut self.telem,
-            |main| {
+            || {
                 let mut ctx = MotorContext {
                     commutation,
                     bemf,
@@ -550,11 +550,6 @@ impl Harness {
                     hal,
                 };
                 isr_logic::ten_khz_tick(&mut ctx);
-
-                if commutation.desync_check() {
-                    main.set_desync_check(true);
-                    commutation.set_desync_check(false);
-                }
             },
         );
 

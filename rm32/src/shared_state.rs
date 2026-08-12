@@ -63,16 +63,17 @@ pub struct SharedState {
     interval_timer_count: AtomicU32,
 
     // Main→ISR published control (main computes, ISR applies)
-    tim1_arr: AtomicU16,           // variable PWM auto-reload
-    duty_maximum: AtomicU16,       // eRPM/temperature throttle restriction
-    filter_level: AtomicU8,        // BEMF comparator filter samples
-    min_bemf_counts: AtomicU8,     // min zero-cross detection threshold
-    auto_advance: AtomicU8,        // commutation timing advance level
-    prop_brake_active: AtomicBool, // proportional brake engaged (main sets, ISR reads)
-    isr_action: AtomicU8,          // main requests one-shot ISR-context work
-    changeover_step: AtomicU8,     // sine changeover step (0=none, 1-6=pending)
-    one_khz_counter: AtomicU8,     // incremented by TIM6 ISR, consumed by main
-    telem_counter: AtomicU16,      // incremented by TIM6 ISR for interval telemetry
+    tim1_arr: AtomicU16,              // variable PWM auto-reload
+    duty_maximum: AtomicU16,          // eRPM/temperature throttle restriction
+    filter_level: AtomicU8,           // BEMF comparator filter samples
+    min_bemf_counts: AtomicU8,        // min zero-cross detection threshold
+    auto_advance: AtomicU8,           // commutation timing advance level
+    prop_brake_active: AtomicBool,    // proportional brake engaged (main sets, ISR reads)
+    isr_action: AtomicU8,             // main requests one-shot ISR-context work
+    changeover_step: AtomicU8,        // sine changeover step (0=none, 1-6=pending)
+    desync_check_pending: AtomicBool, // ISR requests main-loop desync handling
+    one_khz_counter: AtomicU8,        // incremented by TIM6 ISR, consumed by main
+    telem_counter: AtomicU16,         // incremented by TIM6 ISR for interval telemetry
 }
 
 impl Default for SharedState {
@@ -119,6 +120,7 @@ impl SharedState {
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
             changeover_step: AtomicU8::new(0),
+            desync_check_pending: AtomicBool::new(false),
             one_khz_counter: AtomicU8::new(0),
             telem_counter: AtomicU16::new(0),
         }
@@ -497,6 +499,15 @@ impl SharedState {
     pub fn set_changeover_step(&self, step: u8) {
         self.changeover_step.store(step, REL);
     }
+    pub fn desync_check_pending(&self) -> bool {
+        self.desync_check_pending.load(ACQ)
+    }
+    pub fn set_desync_check_pending(&self, v: bool) {
+        self.desync_check_pending.store(v, REL);
+    }
+    pub fn take_desync_check_pending(&self) -> bool {
+        self.desync_check_pending.swap(false, Ordering::AcqRel)
+    }
 }
 
 impl crate::shared_comm::MotorState for SharedState {
@@ -627,6 +638,12 @@ impl crate::shared_comm::MainControl for SharedState {
     }
     fn set_changeover_step(&self, step: u8) {
         SharedState::set_changeover_step(self, step);
+    }
+    fn desync_check_pending(&self) -> bool {
+        SharedState::desync_check_pending(self)
+    }
+    fn set_desync_check_pending(&self, v: bool) {
+        SharedState::set_desync_check_pending(self, v);
     }
     fn tim1_arr(&self) -> u16 {
         SharedState::tim1_arr(self)
@@ -761,6 +778,27 @@ mod tests {
         assert_eq!(MainControl::changeover_step(&shared), 0);
         MainControl::set_changeover_step(&shared, 5);
         assert_eq!(MainControl::changeover_step(&shared), 5);
+    }
+
+    #[test]
+    fn desync_check_pending_roundtrips() {
+        let shared = SharedState::new();
+
+        assert!(!MainControl::desync_check_pending(&shared));
+        MainControl::set_desync_check_pending(&shared, true);
+        assert!(MainControl::desync_check_pending(&shared));
+        MainControl::set_desync_check_pending(&shared, false);
+        assert!(!MainControl::desync_check_pending(&shared));
+    }
+
+    #[test]
+    fn take_desync_check_pending_clears_atomically() {
+        let shared = SharedState::new();
+
+        shared.set_desync_check_pending(true);
+
+        assert!(shared.take_desync_check_pending());
+        assert!(!shared.take_desync_check_pending());
     }
 
     #[test]

@@ -62,19 +62,30 @@ impl SystemTick {
     ///
     /// The host harness runs the ISR inline through `isr_tick`; firmware can
     /// pass a no-op because the ISR runs asynchronously on hardware. The
-    /// callback receives `main` so host-side ISR synchronization can happen
-    /// before `tick_main()`.
+    /// ISR-to-main handoff is synchronized before `tick_main()`.
     pub fn run_tick<LED: OutputPin>(
         &mut self,
         shared: &SharedState,
         main: &mut MainState<LED>,
         adc: &mut dyn Adc,
         telem: &mut dyn TelemetryUart,
-        isr_tick: impl FnOnce(&mut MainState<LED>),
+        isr_tick: impl FnOnce(),
     ) {
         self.tick_input(shared, main);
-        isr_tick(main);
+        isr_tick();
+        self.sync_isr_to_main(shared, main);
         self.tick_main(shared, main, adc, telem);
+    }
+
+    /// Consume ISR-published flags that affect main-loop state.
+    pub fn sync_isr_to_main<LED: OutputPin>(
+        &self,
+        shared: &SharedState,
+        main: &mut MainState<LED>,
+    ) {
+        if shared.take_desync_check_pending() {
+            main.set_desync_check(true);
+        }
     }
 
     /// Process sine mode stepping.
@@ -157,6 +168,19 @@ mod tests {
                 cpu_mhz: 48,
             },
         )
+    }
+
+    #[test]
+    fn sync_isr_to_main_consumes_pending_desync_check() {
+        let shared = SharedState::new();
+        let mut main = main_state();
+        let system = SystemTick::new();
+
+        shared.set_desync_check_pending(true);
+        system.sync_isr_to_main(&shared, &mut main);
+
+        assert!(main.desync_check());
+        assert!(!shared.desync_check_pending());
     }
 
     #[test]

@@ -549,6 +549,36 @@ mod tests {
         assert_ne!(comm.step, step_before);
         assert_eq!(shared.zero_crosses(), 1);
         assert!(!bemf.zc_found());
+        assert!(!shared.desync_check_pending());
+    }
+
+    #[test]
+    fn isr_commutation_timer_publishes_desync_check_on_wrap() {
+        let mut comm = crate::commutation::Commutation::new();
+        comm.set_step(6);
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+        };
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+        );
+
+        assert_eq!(comm.step(), 1);
+        assert!(!comm.desync_check());
+        assert!(shared.desync_check_pending());
     }
 
     #[test]
