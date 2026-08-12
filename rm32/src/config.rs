@@ -491,6 +491,20 @@ mod tests {
     }
 
     #[test]
+    fn strict_changeover_follows_stall_or_rc_car_config() {
+        let mut cfg = EepromConfig::default();
+
+        assert!(!cfg.use_strict_changeover());
+
+        cfg.stall_protection = 1;
+        assert!(cfg.use_strict_changeover());
+
+        cfg.stall_protection = 0;
+        cfg.rc_car_reverse = 1;
+        assert!(cfg.use_strict_changeover());
+    }
+
+    #[test]
     fn comp_pwm_guard_disables_sine_start_without_complementary_pwm() {
         let mut cfg = EepromConfig::default();
         cfg.use_sine_start = 1;
