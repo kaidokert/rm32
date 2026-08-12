@@ -13,6 +13,8 @@ use crate::motor_mode::MotorEvent;
 use crate::shared_comm::{IsrAction, SharedComm};
 
 const COMMUTATE_KICK_DELAY_TICKS: u16 = 1;
+const STARTUP_COMMUTATION_INTERVAL: u32 = 10000;
+const STARTUP_INTERVAL_TIMER_COUNT: u32 = STARTUP_COMMUTATION_INTERVAL / 2;
 
 /// 20kHz control loop tick.
 ///
@@ -97,8 +99,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 ctx.hal.phase().com_step(step);
                 ctx.hal.comp().set_step(step, ctx.commutation.rising);
                 ctx.hal.comp().change_input();
-                ctx.shared.set_commutation_interval(10000);
-                ctx.hal.interval().set_count(5000);
+                ctx.shared
+                    .set_commutation_interval(STARTUP_COMMUTATION_INTERVAL);
+                ctx.hal.interval().set_count(STARTUP_INTERVAL_TIMER_COUNT);
                 ctx.hal.comp().enable_interrupts();
             }
         } else {
