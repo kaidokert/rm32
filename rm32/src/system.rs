@@ -157,7 +157,6 @@ mod tests {
     use crate::main_state::{ChipParams, MainState};
     use crate::motor_mode::MotorEvent;
     use crate::sine::SineStepResult;
-    use crate::units::DegreesCelsius;
 
     use super::*;
 
@@ -171,40 +170,14 @@ mod tests {
         )
     }
 
-    struct MockAdc;
-
-    impl Adc for MockAdc {
-        fn start_conversion(&mut self) {}
-        fn raw_voltage(&self) -> u16 {
-            0
-        }
-        fn raw_current(&self) -> u16 {
-            0
-        }
-        fn raw_temperature(&self) -> u16 {
-            0
-        }
-        fn calc_temperature(&self, _: u16) -> DegreesCelsius {
-            DegreesCelsius(25)
-        }
-    }
-
-    struct MockTelem;
-
-    impl TelemetryUart for MockTelem {
-        fn send_dma(&mut self, _: &[u8]) {}
-    }
-
     #[test]
-    fn run_tick_consumes_pending_desync_check() {
+    fn sync_isr_to_main_consumes_pending_desync_check() {
         let shared = SharedState::new();
         let mut main = main_state();
-        let mut system = SystemTick::new();
-        let mut adc = MockAdc;
-        let mut telem = MockTelem;
+        let system = SystemTick::new();
 
         shared.set_desync_check_pending(true);
-        system.run_tick(&shared, &mut main, &mut adc, &mut telem, || {});
+        system.sync_isr_to_main(&shared, &mut main);
 
         assert!(main.desync_check());
         assert!(!shared.desync_check_pending());
