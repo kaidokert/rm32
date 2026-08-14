@@ -179,6 +179,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             tim1_arr,
         ));
     } else {
+        ctx.hal.phase().all_off();
         ctx.hal.pwm().set_duty_all(0);
     }
     let final_duty = ctx.duty.finalize();
