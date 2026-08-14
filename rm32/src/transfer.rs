@@ -67,9 +67,11 @@ impl CaptureConfig {
         ndtr: 32,
         prescaler: None,
     };
+    /// DShot detection uses one full frame. Using 33 edges consumes the next
+    /// frame's first edge and can leave steady-state capture misaligned.
     pub fn dshot_detection(cpu_mhz: u8) -> Self {
         Self {
-            ndtr: 33,
+            ndtr: 32,
             prescaler: Some((cpu_mhz / 6) as u16),
         }
     }
@@ -442,6 +444,12 @@ mod tests {
     }
 
     #[test]
+    fn dshot_detection_uses_one_frame_capture_window() {
+        assert_eq!(CaptureConfig::dshot_detection(60).ndtr, 32);
+        assert_eq!(CaptureConfig::dshot_detection(60).prescaler, Some(10));
+    }
+
+    #[test]
     fn normal_dshot_with_high_pin_does_not_commit_bidir() {
         let mut state = TransferState::default();
         let mut zic = 0;
@@ -590,6 +598,7 @@ mod tests {
 
         assert!(matches!(actions.action, TransferAction::None));
         assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+        assert_eq!(actions.next_capture.ndtr, CaptureConfig::DSHOT.ndtr);
     }
 
     #[test]
