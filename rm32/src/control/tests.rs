@@ -14,9 +14,7 @@ mod tests {
 
     use crate::control::isr_logic;
     use crate::control::shared_impl::TestShared;
-    use crate::shared_comm::{
-        IsrAction, IsrTiming as _, MainControl as _, MotorState as _, SharedComm as _,
-    };
+    use crate::shared_comm::{IsrAction, IsrTiming as _, MainControl as _, MotorState as _};
 
     fn make_armed_timeout() -> u32 {
         0
@@ -259,55 +257,6 @@ mod tests {
     }
 
     #[test]
-    fn interval_telemetry_fires_every_30ms() {
-        let mut comm = crate::commutation::Commutation::new();
-        let mut bemf = crate::control::state::BemfState::default();
-        let mut duty = crate::control::state::DutyState::default();
-        let mut config = crate::config::EepromConfig::default();
-        let mut armed_timeout = make_armed_timeout();
-        let shared = TestShared::new();
-        let mut hal = MockMotorHal::new();
-
-        config.telemetry_on_interval = 1;
-        shared.mode.set(crate::motor_mode::MotorMode::Armed);
-
-        let mut fired_at = None;
-        for tick in 0..700u32 {
-            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-                commutation: &mut comm,
-                bemf: &mut bemf,
-                duty: &mut duty,
-                config: &config,
-                armed_timeout_count: &mut armed_timeout,
-                voltage_based_ramp: false,
-                shared: &shared,
-                hal: &mut hal,
-            });
-            if shared.send_telemetry() && fired_at.is_none() {
-                fired_at = Some(tick);
-            }
-        }
-        assert_eq!(fired_at, Some(599));
-
-        config.telemetry_on_interval = 0;
-        shared.send_telemetry.set(false);
-        for _ in 0..700u32 {
-            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-                commutation: &mut comm,
-                bemf: &mut bemf,
-                duty: &mut duty,
-                config: &config,
-                armed_timeout_count: &mut armed_timeout,
-                voltage_based_ramp: false,
-                shared: &shared,
-                hal: &mut hal,
-            });
-        }
-
-        assert!(!shared.send_telemetry());
-    }
-
-    #[test]
     fn isr_tick_throttle_maps_to_setpoint() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
@@ -441,6 +390,33 @@ mod tests {
         let mut hal = MockMotorHal::new();
         let interval_ticks =
             crate::constants::telemetry_interval_ticks(config.telemetry_on_interval);
+
+        for _ in 0..interval_ticks - 1 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+            assert!(!shared.send_telemetry.get());
+        }
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(shared.send_telemetry.get());
+        shared.send_telemetry.set(false);
 
         for _ in 0..interval_ticks - 1 {
             isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
