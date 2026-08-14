@@ -173,6 +173,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     if ctx.shared.armed() && ctx.shared.running() {
         ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
+        ctx.hal.phase().proportional_brake();
         ctx.hal.pwm().set_duty_all(DutyState::brake_compare(
             ctx.config.drag_brake_strength,
             tim1_arr,

@@ -54,6 +54,15 @@ mod tests {
     }
     struct MockPhase {
         all_off_called: bool,
+        prop_brake_calls: u32,
+    }
+    impl Default for MockPhase {
+        fn default() -> Self {
+            Self {
+                all_off_called: false,
+                prop_brake_calls: 0,
+            }
+        }
     }
     impl hal::PhaseOutput for MockPhase {
         fn com_step(&mut self, _: u8) {}
@@ -62,7 +71,9 @@ mod tests {
         }
         fn full_brake(&mut self) {}
         fn all_pwm(&mut self) {}
-        fn proportional_brake(&mut self) {}
+        fn proportional_brake(&mut self) {
+            self.prop_brake_calls += 1;
+        }
     }
     struct MockInterval {
         count: u32,
@@ -135,13 +146,39 @@ mod tests {
                     mask_called: false,
                     enable_calls: 0,
                 },
-                phase: MockPhase {
-                    all_off_called: false,
-                },
+                phase: MockPhase::default(),
                 interval: MockInterval { count: 0 },
                 com_timer: MockComTimer::new(),
             }
         }
+    }
+
+    #[test]
+    fn prop_brake_reconfigures_bridge_before_duty() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.prop_brake_active.set(true);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(hal.phase.prop_brake_calls, 1);
+        assert!(hal.pwm.last_duty > 0);
     }
 
     #[test]
@@ -539,6 +576,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         let step_before = comm.step;
@@ -574,6 +612,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
@@ -606,6 +645,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
@@ -639,6 +679,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
@@ -671,6 +712,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
@@ -703,6 +745,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
@@ -736,6 +779,7 @@ mod tests {
         };
         let mut phase = MockPhase {
             all_off_called: false,
+            ..Default::default()
         };
 
         isr_logic::commutation_timer_expired(
