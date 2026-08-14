@@ -416,6 +416,33 @@ mod tests {
             hal: &mut hal,
         });
         assert!(shared.send_telemetry.get());
+        shared.send_telemetry.set(false);
+
+        for _ in 0..interval_ticks - 1 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+            assert!(!shared.send_telemetry.get());
+        }
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(shared.send_telemetry.get());
 
         config.telemetry_on_interval = 0;
         shared.send_telemetry.set(false);
