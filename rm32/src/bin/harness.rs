@@ -805,6 +805,14 @@ impl Harness {
             "eeprom.current_D" => self.config.current_d = v as u8,
             "eeprom.sine_mode_power" => self.config.sine_mode_power = v as u8,
             "eeprom.driving_brake_strength" => self.config.driving_brake_strength = v as u8,
+            "isr_config.bi_direction" => self.shared.push_config_write(
+                core::mem::offset_of!(EepromConfig, bi_direction) as u8,
+                v as u8,
+            ),
+            "isr_config.dir_reversed" => self.shared.push_config_write(
+                core::mem::offset_of!(EepromConfig, dir_reversed) as u8,
+                v as u8,
+            ),
             _ => eprintln!("harness2: unknown key '{}'", key),
         }
     }
