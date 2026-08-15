@@ -83,6 +83,7 @@ mod tests {
     }
     struct MockPhase {
         all_off_called: bool,
+        com_step_calls: u32,
         prop_brake_calls: u32,
         order: *const MockOrder,
     }
@@ -90,13 +91,16 @@ mod tests {
         fn default() -> Self {
             Self {
                 all_off_called: false,
+                com_step_calls: 0,
                 prop_brake_calls: 0,
                 order: ptr::null(),
             }
         }
     }
     impl hal::PhaseOutput for MockPhase {
-        fn com_step(&mut self, _: u8) {}
+        fn com_step(&mut self, _: u8) {
+            self.com_step_calls += 1;
+        }
         fn all_off(&mut self) {
             self.all_off_called = true;
             record_order(self.order, |order| &order.all_off);
@@ -257,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn isr_tick_masks_comp_while_stopped() {
+    fn isr_tick_masks_comp_while_armed_not_running() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
         let mut duty = crate::control::state::DutyState::default();
@@ -267,6 +271,8 @@ mod tests {
         let mut hal = MockMotorHal::new();
 
         shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        assert!(shared.armed());
+        assert!(!shared.running());
 
         isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
             commutation: &mut comm,
@@ -730,6 +736,7 @@ mod tests {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
         let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
         let mut com_timer = MockComTimer::new();
         let mut comp = MockComp {
             level: false,
@@ -761,11 +768,51 @@ mod tests {
     }
 
     #[test]
+    fn isr_commutation_timer_does_not_rearm_comp_when_stopped() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        assert!(shared.armed());
+        assert!(!shared.running());
+
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+            ..Default::default()
+        };
+        let step_before = comm.step();
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+            false,
+            true,
+        );
+
+        assert_eq!(comm.step(), step_before);
+        assert_eq!(shared.zero_crosses(), 0);
+        assert_eq!(phase.com_step_calls, 0);
+        assert!(comp.mask_called);
+        assert_eq!(comp.enable_calls, 0);
+    }
+
+    #[test]
     fn isr_commutation_timer_publishes_desync_check_on_wrap() {
         let mut comm = crate::commutation::Commutation::new();
         comm.set_step(6);
         let mut bemf = crate::control::state::BemfState::default();
         let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
         let mut com_timer = MockComTimer::new();
         let mut comp = MockComp {
             level: false,

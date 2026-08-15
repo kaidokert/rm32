@@ -255,6 +255,11 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     T: hal::ComTimer,
 {
     com_timer.disable_interrupt();
+    if !shared.running() {
+        comp.mask_interrupts();
+        return;
+    }
+
     let step = commutation.advance();
     if commutation.desync_check() {
         shared.set_desync_check_pending(true);
