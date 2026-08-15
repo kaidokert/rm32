@@ -106,6 +106,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             }
         } else {
             ctx.shared.set_duty_cycle_setpoint(0);
+            if !ctx.shared.running() {
+                // Match AM32 idle housekeeping: stale run counters must not carry
+                // into the next startup attempt.
+                ctx.shared.set_zero_crosses(0);
+                ctx.bemf.reset_for_step();
+            }
             if ctx.config.brake_on_stop == 2 {
                 ctx.hal.phase().com_step(2);
                 let brake_duty = (ctx.config.active_brake_power as u32 * tim1_arr as u32
