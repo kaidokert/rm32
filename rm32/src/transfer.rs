@@ -350,6 +350,13 @@ impl TransferState {
 mod tests {
     use super::*;
 
+    #[test]
+    fn capture_config_ndtr_values() {
+        assert_eq!(CaptureConfig::DSHOT.ndtr, 32);
+        assert_eq!(CaptureConfig::SERVO.ndtr, 2);
+        assert_eq!(CaptureConfig::SERVO_REALIGN.ndtr, 3);
+    }
+
     fn dshot_dma_buffer(value: u16, telem: bool, inverted_crc: bool) -> [u32; 32] {
         let mut bits = [0u8; 16];
         for (i, bit) in bits[..11].iter_mut().enumerate() {
@@ -626,6 +633,65 @@ mod tests {
 
         assert!(matches!(actions.action, TransferAction::None));
         assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+    }
+
+    #[test]
+    fn bf_dshot300_disarm_frame_decodes() {
+        let highs = [
+            47, 47, 47, 46, 47, 47, 47, 46, 47, 46, 47, 47, 46, 47, 47, 47,
+        ];
+        let lows = [
+            87, 86, 87, 87, 86, 87, 87, 87, 86, 87, 87, 86, 87, 87, 87, 0,
+        ];
+        let mut buf = [0u32; 32];
+        let mut t = 5000u32;
+        for i in 0..16 {
+            buf[i * 2] = t;
+            buf[i * 2 + 1] = t + highs[i];
+            t += highs[i] + lows[i];
+        }
+        let mut state = TransferState::default();
+        let mut zic = 0u16;
+        let actions = state.process(
+            &buf, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 100, 60000,
+            80,
+        );
+
+        assert!(
+            matches!(
+                actions.action,
+                TransferAction::DshotThrottle { value: 0, .. }
+            ),
+            "expected DShot throttle 0, got {:?}",
+            actions.action
+        );
+    }
+
+    #[test]
+    fn gap_spanning_capture_rejected() {
+        let mut buf = [0u32; 32];
+        let mut t = 5000u32;
+        for slot in buf.iter_mut().take(9) {
+            *slot = t;
+            t += 67;
+        }
+        t += 78_400;
+        for slot in buf.iter_mut().skip(9) {
+            *slot = t;
+            t += 67;
+        }
+        let mut state = TransferState::default();
+        let mut zic = 0u16;
+        let actions = state.process(
+            &buf, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 100, 60000,
+            80,
+        );
+
+        assert!(
+            matches!(actions.action, TransferAction::None),
+            "gap-spanning capture decoded as {:?}",
+            actions.action
+        );
     }
 
     #[test]
