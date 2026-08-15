@@ -14,7 +14,8 @@ use portable_atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 const REL: Ordering = Ordering::Release;
 /// Load ordering — ensures we see all prior writes from other contexts.
 const ACQ: Ordering = Ordering::Acquire;
-const CONFIG_WRITE_QUEUE_LEN: u8 = 8;
+const CONFIG_WRITE_QUEUE_CAPACITY: u8 = 8;
+const CONFIG_WRITE_QUEUE_LEN: u8 = CONFIG_WRITE_QUEUE_CAPACITY + 1;
 
 /// Shared state accessed by both ISR and main loop contexts.
 /// All fields are atomic — no locks or critical sections needed.
@@ -310,13 +311,16 @@ impl SharedState {
         }
     }
 
-    pub fn push_config_write(&self, offset: u8, value: u8) {
+    pub fn push_config_write(&self, offset: u8, value: u8) -> bool {
         let head = self.config_write_head.load(ACQ);
         let next = (head + 1) % CONFIG_WRITE_QUEUE_LEN;
         if next != self.config_write_tail.load(ACQ) {
             self.config_write_queue[head as usize]
                 .store(((offset as u16) << 8) | value as u16, REL);
             self.config_write_head.store(next, REL);
+            true
+        } else {
+            false
         }
     }
 
@@ -806,6 +810,21 @@ mod tests {
         assert_eq!(MainControl::changeover_step(&shared), 0);
         MainControl::set_changeover_step(&shared, 5);
         assert_eq!(MainControl::changeover_step(&shared), 5);
+    }
+
+    #[test]
+    fn config_write_queue_retains_eight_writes() {
+        let shared = SharedState::new();
+
+        for offset in 0..CONFIG_WRITE_QUEUE_CAPACITY {
+            assert!(shared.push_config_write(offset, offset + 10));
+        }
+        assert!(!shared.push_config_write(99, 100));
+
+        for offset in 0..CONFIG_WRITE_QUEUE_CAPACITY {
+            assert_eq!(shared.pop_config_write(), Some((offset, offset + 10)));
+        }
+        assert_eq!(shared.pop_config_write(), None);
     }
 
     #[test]

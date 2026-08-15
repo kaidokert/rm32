@@ -259,6 +259,7 @@ fn main() -> ! {
 
         // Shared system tick: input processing + main loop pipeline.
         // Same function called by harness — eliminates divergence.
+        rm32::system::SystemTick::sync_config_writes(shared, &mut main_state);
         system.tick_input(shared, &mut main_state);
         system.sync_isr_to_main(shared, &mut main_state);
         system.tick_main(shared, &mut main_state, &mut adc, &mut telem);

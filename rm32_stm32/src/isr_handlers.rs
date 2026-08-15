@@ -195,6 +195,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
                 shared.set_send_telemetry(true);
             }
             shared.set_signal_timeout(0);
+            let old_config = state.config;
             let result = state.cmd.process(
                 cmd,
                 shared.armed(),
@@ -204,6 +205,16 @@ pub fn handle_exti_frame() -> CaptureConfig {
                 &mut state.edt_armed,
                 state.edt_arm_enable,
             );
+            for (offset, (old, new)) in old_config
+                .as_bytes()
+                .iter()
+                .zip(state.config.as_bytes().iter())
+                .enumerate()
+            {
+                if old != new {
+                    shared.push_config_write(offset as u8, *new);
+                }
+            }
             match result {
                 rm32::dshot_commands::CommandResult::SaveSettings => {
                     shared.set_save_settings_flag(true);
