@@ -107,7 +107,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 ctx.shared
                     .set_commutation_interval(STARTUP_COMMUTATION_INTERVAL);
                 ctx.hal.interval().set_count(STARTUP_INTERVAL_TIMER_COUNT);
-                ctx.hal.comp().enable_interrupts();
             }
         } else {
             ctx.shared.set_duty_cycle_setpoint(0);
