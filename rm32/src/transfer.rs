@@ -350,6 +350,22 @@ impl TransferState {
 mod tests {
     use super::*;
 
+    const DSHOT300_START_TICKS: u32 = 5000;
+    const DSHOT300_ZERO_HIGHS: [u32; 16] = [
+        47, 47, 47, 46, 47, 47, 47, 46, 47, 46, 47, 47, 46, 47, 47, 47,
+    ];
+    const DSHOT300_ZERO_LOWS: [u32; 16] = [
+        87, 86, 87, 87, 86, 87, 87, 87, 86, 87, 87, 86, 87, 87, 87, 0,
+    ];
+    const INTER_FRAME_GAP_TICKS: u32 = 78_400;
+
+    #[test]
+    fn capture_config_ndtr_values() {
+        assert_eq!(CaptureConfig::DSHOT.ndtr, 32);
+        assert_eq!(CaptureConfig::SERVO.ndtr, 2);
+        assert_eq!(CaptureConfig::SERVO_REALIGN.ndtr, 3);
+    }
+
     fn dshot_dma_buffer(value: u16, telem: bool, inverted_crc: bool) -> [u32; 32] {
         let mut bits = [0u8; 16];
         for (i, bit) in bits[..11].iter_mut().enumerate() {
@@ -375,6 +391,32 @@ mod tests {
             buf[i * 2] = base;
             buf[i * 2 + 1] = base + if *bit != 0 { 22 } else { 10 };
             base += 32;
+        }
+        buf
+    }
+
+    fn dshot300_disarm_capture() -> [u32; 32] {
+        let mut buf = [0u32; 32];
+        let mut t = DSHOT300_START_TICKS;
+        for i in 0..16 {
+            buf[i * 2] = t;
+            buf[i * 2 + 1] = t + DSHOT300_ZERO_HIGHS[i];
+            t += DSHOT300_ZERO_HIGHS[i] + DSHOT300_ZERO_LOWS[i];
+        }
+        buf
+    }
+
+    fn gap_spanning_capture() -> [u32; 32] {
+        let mut buf = [0u32; 32];
+        let mut t = DSHOT300_START_TICKS;
+        for slot in buf.iter_mut().take(9) {
+            *slot = t;
+            t += 67;
+        }
+        t += INTER_FRAME_GAP_TICKS;
+        for slot in buf.iter_mut().skip(9) {
+            *slot = t;
+            t += 67;
         }
         buf
     }
@@ -626,6 +668,38 @@ mod tests {
 
         assert!(matches!(actions.action, TransferAction::None));
         assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+    }
+
+    #[test]
+    fn bf_dshot300_disarm_frame_decodes() {
+        let buf = dshot300_disarm_capture();
+        let mut state = TransferState::default();
+        let mut zic = 0u16;
+        let actions = state.process(
+            &buf, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 100, 60000,
+            80,
+        );
+
+        assert!(
+            matches!(
+                actions.action,
+                TransferAction::DshotThrottle { value: 0, .. }
+            ),
+            "expected DShot throttle 0, got {:?}",
+            actions.action
+        );
+    }
+
+    #[test]
+    fn gap_spanning_capture_rejected() {
+        let buf = gap_spanning_capture();
+        let frame = dshot::decode_frame(&buf, 400, 600, false);
+
+        assert!(
+            matches!(frame, dshot::DshotFrame::InvalidTiming),
+            "gap-spanning capture decoded as {:?}",
+            frame
+        );
     }
 
     #[test]
