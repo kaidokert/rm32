@@ -313,6 +313,40 @@ mod tests {
     }
 
     #[test]
+    fn isr_tick_zero_throttle_not_running_clears_stale_bemf_state() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.adjusted_input.set(0);
+        shared.set_zero_crosses(42);
+        for _ in 0..3 {
+            bemf.update(false, false);
+        }
+        assert!(bemf.bad_count() > 0);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.duty_cycle_setpoint(), 0);
+        assert_eq!(shared.zero_crosses(), 0);
+        assert_eq!(bemf.bad_count(), 0);
+    }
+
+    #[test]
     fn isr_tick_arming_sequence() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
