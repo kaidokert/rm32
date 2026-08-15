@@ -30,6 +30,11 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         }
     }
 
+    if !ctx.shared.running() {
+        // Keep COMP masked while phases are not commutating.
+        ctx.hal.comp().mask_interrupts();
+    }
+
     let action = ctx.shared.isr_action();
     let action_interval_count = ctx.hal.interval().count();
     match action {
@@ -250,6 +255,11 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     T: hal::ComTimer,
 {
     com_timer.disable_interrupt();
+    if !shared.running() {
+        comp.mask_interrupts();
+        return;
+    }
+
     let step = commutation.advance();
     if commutation.desync_check() {
         shared.set_desync_check_pending(true);
