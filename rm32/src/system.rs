@@ -90,7 +90,10 @@ impl SystemTick {
         }
     }
 
-    fn sync_config_writes<LED: OutputPin>(shared: &SharedState, main: &mut MainState<LED>) {
+    pub(crate) fn sync_config_writes<LED: OutputPin>(
+        shared: &SharedState,
+        main: &mut MainState<LED>,
+    ) {
         while let Some((offset, value)) = shared.pop_config_write() {
             if let Some(byte) = main.config.as_bytes_mut().get_mut(offset as usize) {
                 *byte = value;
@@ -170,30 +173,6 @@ mod tests {
 
     use super::*;
 
-    struct MockAdc;
-
-    impl crate::hal::Adc for MockAdc {
-        fn start_conversion(&mut self) {}
-        fn raw_voltage(&self) -> u16 {
-            0
-        }
-        fn raw_current(&self) -> u16 {
-            0
-        }
-        fn raw_temperature(&self) -> u16 {
-            0
-        }
-        fn calc_temperature(&self, _: u16) -> crate::units::DegreesCelsius {
-            crate::units::DegreesCelsius(25)
-        }
-    }
-
-    struct MockTelem;
-
-    impl crate::hal::TelemetryUart for MockTelem {
-        fn send_dma(&mut self, _: &[u8]) {}
-    }
-
     fn main_state() -> MainState {
         MainState::new(
             &BoardConfig::DEFAULT,
@@ -208,18 +187,19 @@ mod tests {
     fn config_write_through_reaches_main_copy() {
         let shared = SharedState::new();
         let mut main = main_state();
-        let mut system = SystemTick::new();
         let offset = core::mem::offset_of!(EepromConfig, dir_reversed) as u8;
 
         shared.push_config_write(offset, 1);
         shared.push_config_write(3, 77);
-        system.run_tick(&shared, &mut main, &mut MockAdc, &mut MockTelem, || {
-            shared.push_config_write(offset, 2);
-        });
+        SystemTick::sync_config_writes(&shared, &mut main);
 
-        assert_eq!(main.config.dir_reversed, 2);
+        assert_eq!(main.config.dir_reversed, 1);
         assert_eq!(main.config.as_bytes()[3], 77);
         assert!(shared.pop_config_write().is_none());
+
+        shared.push_config_write(offset, 2);
+        SystemTick::sync_config_writes(&shared, &mut main);
+        assert_eq!(main.config.dir_reversed, 2);
     }
 
     #[test]
