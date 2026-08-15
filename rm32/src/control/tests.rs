@@ -902,6 +902,82 @@ mod tests {
     }
 
     #[test]
+    fn isr_commutation_timer_demotes_slow_interrupt_mode_to_polling() {
+        let mut comm = crate::commutation::Commutation::new();
+        for _ in 0..5 {
+            comm.record_interval(4000);
+            comm.advance();
+        }
+        let mut bemf = crate::control::state::BemfState::default();
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.set_commutation_interval(1000);
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+            ..Default::default()
+        };
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+            false,
+            true,
+        );
+
+        assert!(shared.old_routine());
+        assert_eq!(comp.enable_calls, 0);
+    }
+
+    #[test]
+    fn isr_commutation_timer_does_not_promote_same_step_after_demote() {
+        let mut comm = crate::commutation::Commutation::new();
+        for _ in 0..5 {
+            comm.record_interval(4000);
+            comm.advance();
+        }
+        let mut bemf = crate::control::state::BemfState::default();
+        bemf.record_zc_timing(500);
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.set_commutation_interval(1000);
+        let mut com_timer = MockComTimer::new();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+        };
+        let mut phase = MockPhase {
+            all_off_called: false,
+            ..Default::default()
+        };
+
+        isr_logic::commutation_timer_expired(
+            &mut comm,
+            &mut bemf,
+            &shared,
+            &mut com_timer,
+            &mut comp,
+            &mut phase,
+            false,
+            false,
+        );
+
+        assert!(shared.old_routine());
+        assert!(shared.commutation_interval() < crate::constants::OLD_ROUTINE_EXIT_INTERVAL);
+        assert_eq!(comp.enable_calls, 0);
+    }
+
+    #[test]
     fn isr_commutation_timer_enables_comp_on_polling_exit() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
