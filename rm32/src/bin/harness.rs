@@ -10,11 +10,13 @@ use rm32::control::context::MotorContext;
 use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
+use rm32::dshot_commands::CommandResult;
 use rm32::hal;
 use rm32::hal::PwmOutput;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 use rm32::system::SystemTick;
+use rm32::transfer::{DetectedProtocol, TransferAction};
 use std::cell::Cell;
 use std::io::{self, BufRead, Write};
 use std::rc::Rc;
@@ -339,7 +341,6 @@ impl Harness {
         );
 
         // Apply transfer actions
-        use rm32::transfer::{DetectedProtocol, TransferAction};
         match actions.action {
             TransferAction::InputDetected(proto) => {
                 self.shared.set_input_set(true);
@@ -377,7 +378,6 @@ impl Harness {
                     self.shared.set_send_telemetry(true);
                 }
                 self.shared.set_signal_timeout(0);
-                use rm32::dshot_commands::CommandResult;
                 let mut fwd = self.commutation.forward();
                 let result = self.cmd_proc.process(
                     cmd,
@@ -653,7 +653,7 @@ impl Harness {
             }
             "zc" => {
                 if v == 1 {
-                    isr_logic::bemf_zero_cross(
+                    let _ = isr_logic::bemf_zero_cross(
                         &self.commutation,
                         &mut self.bemf,
                         &mut self.hal.comp,
