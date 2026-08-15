@@ -14,6 +14,8 @@ use portable_atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, Ordering};
 const REL: Ordering = Ordering::Release;
 /// Load ordering — ensures we see all prior writes from other contexts.
 const ACQ: Ordering = Ordering::Acquire;
+const CONFIG_WRITE_QUEUE_CAPACITY: u8 = 8;
+const CONFIG_WRITE_QUEUE_LEN: u8 = CONFIG_WRITE_QUEUE_CAPACITY + 1;
 
 /// Shared state accessed by both ISR and main loop contexts.
 /// All fields are atomic — no locks or critical sections needed.
@@ -31,6 +33,9 @@ pub struct SharedState {
     pending_servo_calibration: AtomicBool,
     pending_servo_low_threshold: AtomicU8,
     pending_servo_high_threshold: AtomicU8,
+    config_write_queue: [AtomicU16; CONFIG_WRITE_QUEUE_LEN as usize],
+    config_write_head: AtomicU8,
+    config_write_tail: AtomicU8,
 
     // Timing (ISR writes, main reads)
     zero_crosses: AtomicU32,
@@ -96,6 +101,9 @@ impl SharedState {
             pending_servo_calibration: AtomicBool::new(false),
             pending_servo_low_threshold: AtomicU8::new(0),
             pending_servo_high_threshold: AtomicU8::new(0),
+            config_write_queue: [const { AtomicU16::new(0) }; CONFIG_WRITE_QUEUE_LEN as usize],
+            config_write_head: AtomicU8::new(0),
+            config_write_tail: AtomicU8::new(0),
             zero_crosses: AtomicU32::new(0),
             commutation_interval: AtomicU32::new(12500),
             newinput: AtomicU16::new(0),
@@ -301,6 +309,30 @@ impl SharedState {
         } else {
             None
         }
+    }
+
+    pub fn push_config_write(&self, offset: u8, value: u8) -> bool {
+        let head = self.config_write_head.load(ACQ);
+        let next = (head + 1) % CONFIG_WRITE_QUEUE_LEN;
+        if next != self.config_write_tail.load(ACQ) {
+            self.config_write_queue[head as usize]
+                .store(((offset as u16) << 8) | value as u16, REL);
+            self.config_write_head.store(next, REL);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn pop_config_write(&self) -> Option<(u8, u8)> {
+        let tail = self.config_write_tail.load(ACQ);
+        if tail == self.config_write_head.load(ACQ) {
+            return None;
+        }
+        let packed = self.config_write_queue[tail as usize].load(ACQ);
+        self.config_write_tail
+            .store((tail + 1) % CONFIG_WRITE_QUEUE_LEN, REL);
+        Some(((packed >> 8) as u8, packed as u8))
     }
 
     pub fn send_esc_info_flag(&self) -> bool {
@@ -778,6 +810,21 @@ mod tests {
         assert_eq!(MainControl::changeover_step(&shared), 0);
         MainControl::set_changeover_step(&shared, 5);
         assert_eq!(MainControl::changeover_step(&shared), 5);
+    }
+
+    #[test]
+    fn config_write_queue_retains_eight_writes() {
+        let shared = SharedState::new();
+
+        for offset in 0..CONFIG_WRITE_QUEUE_CAPACITY {
+            assert!(shared.push_config_write(offset, offset + 10));
+        }
+        assert!(!shared.push_config_write(99, 100));
+
+        for offset in 0..CONFIG_WRITE_QUEUE_CAPACITY {
+            assert_eq!(shared.pop_config_write(), Some((offset, offset + 10)));
+        }
+        assert_eq!(shared.pop_config_write(), None);
     }
 
     #[test]

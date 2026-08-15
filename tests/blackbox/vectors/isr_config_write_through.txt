@@ -1,0 +1,15 @@
+# ISR-originated config writes must reach the main-loop config copy.
+
+@config
+inputSet=1
+dshot=1
+
+@sequence
+# Before the queued write, DShot throttle is unidirectional passthrough.
+tick 1 | throttle=1200 | adjusted_input=1200
+
+# Queue an ISR-side EEPROM byte update without mutating the harness config copy.
+config isr_config.bi_direction=1
+
+# The next tick drains the queue before input mapping, enabling bidir mapping.
+tick 1 | throttle=1200 | adjusted_input=350
