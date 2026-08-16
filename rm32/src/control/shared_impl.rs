@@ -212,7 +212,7 @@ impl MainControl for TestShared {
         self.isr_action.get()
     }
     fn request_isr_action(&self, action: IsrAction) {
-        if action > self.isr_action.get() {
+        if action as u8 > self.isr_action.get() as u8 {
             self.isr_action.set(action);
         }
     }
