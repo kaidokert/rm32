@@ -2,6 +2,7 @@
 //!
 //! Decomposed into focused sub-structs that each own a coherent slice of state.
 
+use crate::constants::*;
 use crate::pid::Pid;
 
 const SLOW_RAMP_THRESHOLD: u8 = 10;
@@ -89,7 +90,6 @@ impl DutyState {
         average_interval: u32,
         voltage_based: bool,
     ) {
-        use crate::constants::*;
         if self.ramp_count > self.ramp_divider as u16 {
             self.ramp_count = 0;
             if voltage_based {
@@ -481,11 +481,13 @@ impl BemfState {
     }
 
     /// Interval-timer count at the most recent accepted zero-cross.
+    /// Read-only view for firmware-side diagnostics.
     pub fn this_zc_time(&self) -> u16 {
         self.this_zc_time
     }
 
     /// Commutation wait time computed from the last zero-cross.
+    /// Read-only view for firmware-side diagnostics.
     pub fn wait_time(&self) -> u16 {
         self.wait_time
     }
