@@ -271,7 +271,18 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     comp.set_step(step, commutation.rising);
     comp.change_input();
 
-    if !shared.old_routine() {
+    let exit_interval = if bidirectional {
+        OLD_ROUTINE_EXIT_INTERVAL / 2
+    } else {
+        OLD_ROUTINE_EXIT_INTERVAL
+    };
+    let was_interrupt_mode = !shared.old_routine();
+
+    if was_interrupt_mode && (e_com / 3) as u32 > exit_interval + 500 {
+        shared.set_old_routine(true);
+    }
+
+    if was_interrupt_mode {
         let new_ci = bemf.update_timing_from_timer(shared.commutation_interval());
         shared.set_commutation_interval(new_ci);
     }
@@ -294,7 +305,7 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     } else {
         ci < exit_interval
     };
-    if shared.old_routine() && changeover_met {
+    if !was_interrupt_mode && shared.old_routine() && changeover_met {
         shared.transition(MotorEvent::BemfLocked);
         comp.enable_interrupts();
     }
