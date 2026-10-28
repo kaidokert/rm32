@@ -186,7 +186,8 @@ impl EepromConfig {
         }
     }
 
-    /// Apply defaults for fields added in newer EEPROM versions.
+    /// Apply defaults for fields added in newer EEPROM versions and initialize
+    /// an unset servo calibration when migrating an older configuration.
     /// Uses VERSION_DEFAULTS as the reference — changing a default in one place
     /// automatically propagates to the migration logic.
     pub fn apply_version_defaults(&mut self) {
@@ -201,6 +202,19 @@ impl EepromConfig {
             self.current_d = d.current_d;
             self.active_brake_power = d.active_brake_power;
             self.reserved_eeprom_3 = d.reserved_eeprom_3;
+            // An all-zero calibration maps a 1000 us pulse above zero throttle.
+            // Initialize the unset tuple together; individual zero bytes can
+            // be part of a saved calibration and must be preserved.
+            if self.servo_low_threshold == 0
+                && self.servo_high_threshold == 0
+                && self.servo_neutral == 0
+                && self.servo_dead_band == 0
+            {
+                self.servo_low_threshold = d.servo_low_threshold;
+                self.servo_high_threshold = d.servo_high_threshold;
+                self.servo_neutral = d.servo_neutral;
+                self.servo_dead_band = d.servo_dead_band;
+            }
         }
         self.eeprom_version = EEPROM_VERSION;
     }
@@ -215,6 +229,11 @@ const VERSION_DEFAULTS: EepromConfig = {
     c.absolute_voltage_cutoff = 10;
     c.current_p = 100;
     c.current_d = 100;
+    // Encodes a 1006-2006 us servo window with a 1502 us neutral.
+    c.servo_low_threshold = 128;
+    c.servo_high_threshold = 128;
+    c.servo_neutral = 128;
+    c.servo_dead_band = 50;
     c
 };
 
@@ -429,6 +448,94 @@ mod tests {
         cfg.max_ramp = 42; // custom value
         cfg.apply_version_defaults();
         assert_eq!(cfg.max_ramp, 42); // should NOT be overwritten
+    }
+
+    #[test]
+    fn uninitialized_servo_calibration_accepts_zero_throttle_after_load() {
+        use crate::servo::{ServoResult, ServoState};
+
+        // Zero-initialized older configurations and erased flash follow the
+        // same validation, migration and normalization sequence as firmware.
+        for version in (0..EEPROM_VERSION).chain([u8::MAX]) {
+            let mut bytes = [0; EepromConfig::SIZE];
+            if version == u8::MAX {
+                bytes.fill(u8::MAX);
+            }
+            let mut cfg = EepromConfig::from_bytes(&bytes);
+            cfg.eeprom_version = version;
+            if !cfg.is_valid() {
+                cfg = EepromConfig::default();
+            }
+            cfg.apply_version_defaults();
+            cfg.normalize_after_load();
+
+            let mc = cfg.derive_motor_config(2999, 60, 1, false);
+            assert_eq!(
+                (
+                    mc.servo_low,
+                    mc.servo_high,
+                    mc.servo_neutral,
+                    cfg.servo_dead_band
+                ),
+                (1006, 2006, 1502, 50),
+                "source version {version}"
+            );
+            let mut servo = ServoState::default();
+            servo.set_calibration(
+                mc.servo_low,
+                mc.servo_high,
+                mc.servo_neutral,
+                cfg.servo_dead_band,
+            );
+            assert!(matches!(
+                servo.compute(1000, 0, false),
+                ServoResult::Throttle(0)
+            ));
+
+            let migrated = cfg;
+            cfg.apply_version_defaults();
+            assert_eq!(cfg.as_bytes(), migrated.as_bytes());
+        }
+    }
+
+    #[test]
+    fn version_migration_preserves_saved_servo_calibration() {
+        for version in 0..=EEPROM_VERSION {
+            // Zero is a valid encoding for individual calibration fields;
+            // migration must not replace fields independently.
+            for (low, high, neutral, dead_band) in [
+                (125, 100, 126, 20),
+                (0, 100, 126, 20),
+                (125, 0, 126, 20),
+                (125, 100, 0, 20),
+                (125, 100, 126, 0),
+            ] {
+                let mut cfg = EepromConfig::default();
+                cfg.eeprom_version = version;
+                cfg.servo_low_threshold = low;
+                cfg.servo_high_threshold = high;
+                cfg.servo_neutral = neutral;
+                cfg.servo_dead_band = dead_band;
+                cfg.apply_version_defaults();
+                cfg.normalize_after_load();
+
+                let mc = cfg.derive_motor_config(2999, 60, 1, false);
+                assert_eq!(mc.servo_low, u16::from(low) * 2 + 750);
+                assert_eq!(mc.servo_high, u16::from(high) * 2 + 1750);
+                assert_eq!(mc.servo_neutral, u16::from(neutral) + 1374);
+                assert_eq!(cfg.servo_dead_band, dead_band);
+                assert_eq!(cfg.eeprom_version, EEPROM_VERSION);
+            }
+        }
+    }
+
+    #[test]
+    fn current_version_zero_servo_calibration_is_not_migrated() {
+        let mut cfg = EepromConfig::default();
+        cfg.eeprom_version = EEPROM_VERSION;
+        let saved = cfg;
+        cfg.apply_version_defaults();
+        assert_eq!(cfg.as_bytes(), saved.as_bytes());
     }
 
     #[test]
