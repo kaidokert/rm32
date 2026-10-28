@@ -41,6 +41,9 @@ pub struct DutyState {
     max_ramp_startup: u8,
     max_ramp_low_rpm: u8,
     max_ramp_high_rpm: u8,
+    /// Sine outputs have been configured for the current active interval.
+    pub(crate) sine_outputs_on: bool,
+    pub(crate) active_brake_on: bool,
 }
 
 impl DutyState {
@@ -64,12 +67,23 @@ impl DutyState {
         input: u16,
         zero_crosses: u32,
         stall_protection: u8,
+        sine_start: bool,
     ) -> u16 {
+        let (input_min, duty_min) = if sine_start {
+            (
+                crate::constants::SINE_SLOW_STEP_THROTTLE,
+                self.minimum
+                    .saturating_add(40)
+                    .min(crate::constants::DUTY_SCALE_MAX),
+            )
+        } else {
+            (crate::constants::THROTTLE_MIN_SIGNAL, self.minimum)
+        };
         let setpoint = crate::functions::map(
-            input as i32,
-            crate::constants::THROTTLE_MIN_SIGNAL as i32,
+            input.clamp(input_min, crate::constants::DSHOT_MAX_THROTTLE) as i32,
+            input_min as i32,
             crate::constants::DSHOT_MAX_THROTTLE as i32,
-            self.minimum as i32,
+            duty_min as i32,
             crate::constants::DUTY_SCALE_MAX as i32,
         ) as u16;
         let safe_shift = stall_protection.min(5);
@@ -615,6 +629,8 @@ impl Default for DutyState {
             max_ramp_startup: 2,
             max_ramp_low_rpm: 6,
             max_ramp_high_rpm: 16,
+            sine_outputs_on: false,
+            active_brake_on: false,
         }
     }
 }

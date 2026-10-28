@@ -133,6 +133,9 @@ pub const SINE_BEMF_CLEAR_THROTTLE: u16 = 160;
 /// Sine mode: throttle below which slow stepping is used (vs changeover acceleration).
 pub const SINE_SLOW_STEP_THROTTLE: u16 = 137;
 
+/// Six-step drive yields to sine startup below this mapped throttle.
+pub const SINE_ENTRY_THROTTLE: u16 = THROTTLE_MIN_SIGNAL + 80;
+
 /// Sine mode: throttle above which changeover to BLDC may occur.
 pub const SINE_CHANGEOVER_THROTTLE: u16 = 200;
 

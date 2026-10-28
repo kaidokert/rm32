@@ -20,6 +20,64 @@ mod tests {
         0
     }
 
+    #[test]
+    fn sine_start_enters_without_manual_mode_injection() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.adjusted_input.set(80);
+        let config = crate::config::EepromConfig {
+            use_sine_start: 1,
+            ..Default::default()
+        };
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(shared.stepper_sine());
+        assert_eq!(hal.phase.com_step_calls, 0);
+    }
+
+    #[test]
+    fn sine_pwm_survives_control_ticks() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::StepperSine);
+        shared.adjusted_input.set(80);
+        let config = crate::config::EepromConfig::default();
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        hal.pwm.last_duty = 123;
+        hal.pwm.compares = [111, 222, 333];
+        for _ in 0..3 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+        }
+        assert_eq!(hal.pwm.last_duty, 123);
+        assert_eq!(hal.pwm.compares, [111, 222, 333]);
+        assert!(!hal.phase.all_off_called);
+    }
+
     #[derive(Default)]
     struct MockOrder {
         next: Cell<u8>,
@@ -47,19 +105,27 @@ mod tests {
     }
 
     struct MockPwm {
+        compares: [u16; 3],
         last_duty: u16,
         order: *const MockOrder,
     }
     impl hal::PwmOutput for MockPwm {
         fn set_duty_all(&mut self, d: u16) {
             self.last_duty = d;
+            self.compares = [d; 3];
             record_order(self.order, |order| &order.set_duty);
         }
         fn set_auto_reload(&mut self, _: u16) {}
         fn set_prescaler(&mut self, _: u16) {}
-        fn set_compare1(&mut self, _: u16) {}
-        fn set_compare2(&mut self, _: u16) {}
-        fn set_compare3(&mut self, _: u16) {}
+        fn set_compare1(&mut self, v: u16) {
+            self.compares[0] = v;
+        }
+        fn set_compare2(&mut self, v: u16) {
+            self.compares[1] = v;
+        }
+        fn set_compare3(&mut self, v: u16) {
+            self.compares[2] = v;
+        }
         fn generate_update_event(&mut self) {}
         fn set_dead_time_override(&mut self, _dtg: u16) {}
     }
@@ -179,6 +245,7 @@ mod tests {
             Self {
                 pwm: MockPwm {
                     last_duty: 0,
+                    compares: [0; 3],
                     order: ptr::null(),
                 },
                 comp: MockComp {
@@ -1172,8 +1239,16 @@ mod tests {
         bemf.set_filter_level(2);
         bemf.set_wait_time(500);
 
-        let accepted =
-            isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        let accepted = isr_logic::bemf_zero_cross(
+            &shared,
+            &comm,
+            &mut bemf,
+            &mut comp,
+            &mut interval,
+            &mut com_timer,
+        );
 
         assert!(accepted);
         assert!(comp.mask_called);
@@ -1193,8 +1268,16 @@ mod tests {
 
         bemf.set_filter_level(2);
 
-        let accepted =
-            isr_logic::bemf_zero_cross(&comm, &mut bemf, &mut comp, &mut interval, &mut com_timer);
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        let accepted = isr_logic::bemf_zero_cross(
+            &shared,
+            &comm,
+            &mut bemf,
+            &mut comp,
+            &mut interval,
+            &mut com_timer,
+        );
 
         assert!(!accepted);
         assert!(!comp.mask_called);

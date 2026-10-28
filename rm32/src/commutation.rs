@@ -64,6 +64,11 @@ impl Commutation {
     /// Set current step.
     pub fn set_step(&mut self, v: u8) {
         self.step = v;
+        self.rising = if self.forward {
+            !v.is_multiple_of(2)
+        } else {
+            v.is_multiple_of(2)
+        };
     }
 
     /// Read forward direction flag.

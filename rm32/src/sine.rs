@@ -126,7 +126,7 @@ pub fn sine_step(
                 false,
             );
             let step_delay = crate::functions::map(
-                input as i32,
+                input.min(120) as i32,
                 48,
                 120,
                 7000i32 / poles as i32,
@@ -216,6 +216,16 @@ pub struct PhasePositions {
 }
 
 impl PhasePositions {
+    /// Align sine entry to the last six-step sector and the startup table offsets.
+    pub fn from_step(step: u8) -> Self {
+        let a = ((step.clamp(1, 6) as i16 - 1) * 60 + 180) % 360;
+        Self {
+            a,
+            b: (a + 119) % 360,
+            c: (a + 239) % 360,
+        }
+    }
+
     /// Create the standard three-phase position set (0°, 120°, 240°).
     pub fn new() -> Self {
         Self {
@@ -261,6 +271,18 @@ impl PhasePositions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slow_step_delay_never_wraps_above_calibrated_range() {
+        for input in 48..137 {
+            let mut p = PhasePositions::new();
+            let (result, _) = sine_step(&mut p, input, true, true, 14, 5, 60, 1999, 5);
+            let SineStepResult::Continue(delay) = result else {
+                panic!("expected slow step");
+            };
+            assert!((57..=500).contains(&delay), "input {input}: delay {delay}");
+        }
+    }
 
     #[test]
     fn forward_decrements() {

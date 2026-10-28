@@ -16,10 +16,7 @@ fn TIM6_DACUNDER() {
 
 #[interrupt]
 fn TIM1_UP_TIM16() {
-    let tim16 = unsafe { &*pac::TIM16::PTR };
-    unsafe {
-        tim16.sr().write(|w| w.bits(0));
-    }
+    // The shared handler checks/acknowledges TIM16's source before commutating.
     isr_handlers::handle_tim14();
 }
 

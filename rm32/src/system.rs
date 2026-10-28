@@ -6,7 +6,7 @@
 //! that caused bugs across multiple review rounds.
 
 use crate::control::input::{self, InputState};
-use crate::hal::{Adc, TelemetryUart};
+use crate::hal::{Adc, ComTimer, Comparator, MotorHal, PhaseOutput, PwmOutput, TelemetryUart};
 use crate::main_state::MainState;
 use crate::shared_state::SharedState;
 use crate::sine::PhasePositions;
@@ -98,8 +98,9 @@ impl SystemTick {
         }
     }
 
-    /// Process sine mode stepping.
-    pub fn tick_sine(
+    /// Calculate one step using mapped/protected input. Hardware writes are
+    /// performed only by `service_sine` while interrupt access is excluded.
+    fn tick_sine(
         &mut self,
         shared: &SharedState,
         config: &crate::config::EepromConfig,
@@ -111,7 +112,7 @@ impl SystemTick {
         }
         Some(crate::sine::sine_step(
             &mut self.sine_positions,
-            shared.newinput(),
+            shared.adjusted_input(),
             shared.armed(),
             shared.forward(),
             config.motor_poles,
@@ -122,8 +123,67 @@ impl SystemTick {
         ))
     }
 
+    /// Service sine output with exclusive access to the motor peripherals.
+    /// Firmware must exclude motor interrupts for this entire call. The returned
+    /// delay is performed AFTER leaving that critical section.
+    #[allow(clippy::too_many_arguments)]
+    pub fn service_sine<LED: OutputPin, H: MotorHal>(
+        &mut self,
+        shared: &SharedState,
+        main: &mut MainState<LED>,
+        hal: &mut H,
+        duty: &mut crate::control::state::DutyState,
+        commutation_step: u8,
+        dead_time: i16,
+    ) -> Option<u16> {
+        if !shared.stepper_sine() || shared.isr_action() == crate::shared_comm::IsrAction::AllOff {
+            duty.sine_outputs_on = false;
+            return None;
+        }
+        if shared.changeover_step() != 0 {
+            // Wait for the ISR to accept or cancel the published handoff.
+            return None;
+        }
+        if shared.adjusted_input() <= crate::constants::THROTTLE_MIN_SIGNAL {
+            duty.sine_outputs_on = false;
+            let brake = Self::handle_sine_idle(&main.config, shared.tim1_arr());
+            self.input_state.set_prop_brake_active(brake);
+            shared.set_prop_brake_active(brake);
+            return None;
+        }
+        if !duty.sine_outputs_on {
+            self.sine_positions = PhasePositions::from_step(commutation_step);
+            hal.com_timer().disable_interrupt();
+            hal.comp().mask_interrupts();
+            hal.pwm().set_duty_all(0);
+            hal.pwm().generate_update_event();
+            hal.phase().all_pwm();
+            duty.active_brake_on = false;
+            duty.sine_outputs_on = true;
+        }
+        self.input_state.set_prop_brake_active(false);
+        shared.set_prop_brake_active(false);
+        let (result, (a, b, c)) =
+            self.tick_sine(shared, &main.config, dead_time, shared.tim1_arr())?;
+        hal.pwm().set_compare1(a);
+        hal.pwm().set_compare2(b);
+        hal.pwm().set_compare3(c);
+        match result {
+            crate::sine::SineStepResult::Continue(delay) => Some(delay),
+            crate::sine::SineStepResult::Changeover {
+                commutation_interval,
+                step,
+            } => {
+                self.apply_sine_changeover(shared, main, commutation_interval, step);
+                duty.sine_outputs_on = false;
+                None
+            }
+            crate::sine::SineStepResult::Idle => unreachable!(),
+        }
+    }
+
     /// Apply sine changeover state transitions after `tick_sine` returns Changeover.
-    pub fn apply_sine_changeover<LED: OutputPin>(
+    fn apply_sine_changeover<LED: OutputPin>(
         &mut self,
         shared: &SharedState,
         main: &mut MainState<LED>,
@@ -137,7 +197,7 @@ impl SystemTick {
         main.timing_mut()
             .set_last_average_interval(commutation_interval);
         shared.set_changeover_step(step);
-        shared.transition(crate::motor_mode::MotorEvent::ExitSine);
+        // ISR consumes the request, establishes hardware state, then exits sine.
     }
 
     /// Handle sine-mode idle brake-on-stop policy.
@@ -205,6 +265,20 @@ mod tests {
     }
 
     #[test]
+    fn sine_uses_protected_mapped_input() {
+        let shared = SharedState::new();
+        shared.transition(MotorEvent::Arm);
+        shared.transition(MotorEvent::EnterSine);
+        shared.set_newinput(1000);
+        shared.set_adjusted_input(0);
+        let mut system = SystemTick::new();
+        let (result, _) = system
+            .tick_sine(&shared, &EepromConfig::default(), 60, 1999)
+            .unwrap();
+        assert!(matches!(result, SineStepResult::Idle));
+    }
+
+    #[test]
     fn config_write_through_reaches_main_copy() {
         let shared = SharedState::new();
         let mut main = main_state();
@@ -267,6 +341,7 @@ mod tests {
         shared.transition(MotorEvent::Arm);
         shared.transition(MotorEvent::EnterSine);
         shared.set_newinput(crate::constants::SINE_CHANGEOVER_THROTTLE + 1);
+        shared.set_adjusted_input(crate::constants::SINE_CHANGEOVER_THROTTLE + 1);
 
         let Some((
             SineStepResult::Changeover {
@@ -296,7 +371,7 @@ mod tests {
 
         system.apply_sine_changeover(&shared, &mut main, 9000, 5);
 
-        assert!(shared.old_routine());
+        assert!(shared.stepper_sine());
         assert_eq!(shared.commutation_interval(), 9000);
         assert_eq!(shared.zero_crosses(), 20);
         assert_eq!(shared.changeover_step(), 5);

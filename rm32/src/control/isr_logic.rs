@@ -40,7 +40,13 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     let action_interval_count = ctx.hal.interval().count();
     match action {
         IsrAction::AllOff => {
+            ctx.duty.sine_outputs_on = false;
+            ctx.duty.active_brake_on = false;
+            ctx.shared.set_changeover_step(0);
+            ctx.hal.com_timer().disable_interrupt();
             ctx.hal.phase().all_off();
+            ctx.hal.pwm().set_duty_all(0);
+            ctx.hal.pwm().generate_update_event();
             ctx.hal.comp().mask_interrupts();
             ctx.shared.clear_isr_action(IsrAction::AllOff);
             return;
@@ -65,18 +71,30 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         IsrAction::None => {}
     }
 
+    // Direction must be current before deriving the handoff comparator edge.
+    ctx.commutation.forward = ctx.shared.forward();
+    let input = ctx.shared.adjusted_input();
     let changeover = ctx.shared.changeover_step();
-    if changeover > 0 {
+    let handoff = (1..=6).contains(&changeover)
+        && ctx.shared.stepper_sine()
+        && input > SINE_CHANGEOVER_THROTTLE;
+    if handoff {
+        ctx.hal.com_timer().disable_interrupt();
+        ctx.hal.comp().mask_interrupts();
+        ctx.hal.pwm().set_duty_all(0);
+        ctx.hal.pwm().generate_update_event();
         ctx.commutation.set_step(changeover);
         ctx.hal.phase().com_step(changeover);
-        ctx.hal.pwm().generate_update_event();
         let ci = ctx.shared.commutation_interval();
-        ctx.hal.com_timer().set_and_enable(ci as u16);
+        ctx.hal.interval().set_count(ci);
+        ctx.bemf.reset_for_step();
         ctx.hal.comp().set_step(changeover, ctx.commutation.rising);
         ctx.hal.comp().change_input();
-        ctx.hal.comp().enable_interrupts();
-        ctx.shared.set_changeover_step(0);
+        ctx.shared.transition(MotorEvent::ExitSine);
+        ctx.hal.com_timer().set_and_enable(ci as u16);
     }
+    // A disarm or throttle release cancels a queued handoff.
+    ctx.shared.set_changeover_step(0);
 
     // Sync direction from shared (main loop may flip for bidirectional)
     ctx.commutation.forward = ctx.shared.forward();
@@ -84,17 +102,45 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
     // Throttle → setpoint
     // Read adjusted_input (set by process_input: bidir-mapped or raw passthrough)
-    let input = ctx.shared.adjusted_input();
+    let sine_start = ctx.config.use_sine_start != 0;
+    let start_threshold = if sine_start {
+        SINE_ENTRY_THROTTLE
+    } else {
+        THROTTLE_MIN_SIGNAL
+    };
+    if ctx.shared.armed() && sine_start && input < start_threshold {
+        if !ctx.shared.stepper_sine() {
+            // Do not hold a driven six-step sector while main has yet to enter sine.
+            ctx.hal.phase().all_off();
+            ctx.hal.pwm().set_duty_all(0);
+            ctx.hal.pwm().generate_update_event();
+            ctx.duty.sine_outputs_on = false;
+        }
+        ctx.shared.transition(MotorEvent::StopMotor);
+        ctx.shared.transition(MotorEvent::EnterSine);
+        ctx.shared.set_duty_cycle_setpoint(0);
+        ctx.shared.set_zero_crosses(0);
+        ctx.bemf.reset_for_step();
+        ctx.hal.com_timer().disable_interrupt();
+        ctx.hal.comp().mask_interrupts();
+    }
     if ctx.shared.armed() && !ctx.shared.stepper_sine() {
-        if input >= THROTTLE_MIN_SIGNAL {
+        if input >= start_threshold {
             let setpoint = ctx.duty.compute_setpoint(
                 input,
                 ctx.shared.zero_crosses(),
                 ctx.config.stall_protection,
+                sine_start,
             );
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
                 ctx.hal.phase().all_off();
+                if ctx.duty.active_brake_on {
+                    // Do not apply the old brake compare to the restart sector.
+                    ctx.hal.pwm().set_duty_all(0);
+                    ctx.hal.pwm().generate_update_event();
+                    ctx.duty.active_brake_on = false;
+                }
                 ctx.shared.transition(MotorEvent::StartMotor);
                 ctx.duty.start_motor();
                 let step = ctx.commutation.advance();
@@ -116,13 +162,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 // into the next startup attempt.
                 ctx.shared.set_zero_crosses(0);
                 ctx.bemf.reset_for_step();
-            }
-            if ctx.config.brake_on_stop == 2 {
-                ctx.hal.phase().com_step(2);
-                let brake_duty = (ctx.config.active_brake_power as u32 * tim1_arr as u32
-                    / DUTY_SCALE_MAX as u32)
-                    * 10;
-                ctx.hal.pwm().set_duty_all(brake_duty as u16);
             }
         }
     }
@@ -147,7 +186,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 
     // Old routine BEMF polling
-    if ctx.shared.old_routine() && ctx.shared.running() && !ctx.shared.stepper_sine() {
+    if !handoff && ctx.shared.old_routine() && ctx.shared.running() && !ctx.shared.stepper_sine() {
         bemf_polling(ctx);
     }
 
@@ -181,7 +220,35 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     );
 
     // PWM output
-    if ctx.shared.armed() && ctx.shared.running() {
+    let sine_drive = ctx.shared.stepper_sine() && input > THROTTLE_MIN_SIGNAL;
+    if !sine_drive {
+        ctx.duty.sine_outputs_on = false;
+    }
+    let active_brake = ctx.shared.armed()
+        && !ctx.shared.running()
+        && input < start_threshold
+        && !sine_drive
+        && ctx.config.brake_on_stop == 2;
+    if !active_brake {
+        ctx.duty.active_brake_on = false;
+    }
+    if sine_drive {
+        // Main owns the individual phase compares until the handoff is consumed.
+    } else if active_brake {
+        if !ctx.duty.active_brake_on {
+            ctx.hal.com_timer().disable_interrupt();
+            ctx.hal.comp().mask_interrupts();
+            ctx.hal.pwm().set_duty_all(0);
+            ctx.hal.pwm().generate_update_event();
+            ctx.hal.phase().com_step(2);
+            ctx.duty.active_brake_on = true;
+        }
+        let brake_duty =
+            (ctx.config.active_brake_power as u32 * tim1_arr as u32 / DUTY_SCALE_MAX as u32) * 10;
+        ctx.hal
+            .pwm()
+            .set_duty_all(brake_duty.min(tim1_arr as u32) as u16);
+    } else if ctx.shared.armed() && ctx.shared.running() {
         ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
         ctx.hal.phase().proportional_brake();
@@ -313,13 +380,25 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
 }
 
 /// BEMF zero-cross detected (COMP ISR body).
-pub fn bemf_zero_cross<C: hal::Comparator, I: hal::IntervalTimer, T: hal::ComTimer>(
+pub fn bemf_zero_cross<
+    S: SharedComm,
+    C: hal::Comparator,
+    I: hal::IntervalTimer,
+    T: hal::ComTimer,
+>(
+    shared: &S,
     commutation: &Commutation,
     bemf: &mut BemfState,
     comp: &mut C,
     interval: &mut I,
     com_timer: &mut T,
 ) -> bool {
+    // An IRQ already pending when sine/polling masks the comparator must not
+    // restart the commutation timer or consume a polling-mode zero crossing.
+    if !shared.running() || shared.old_routine() {
+        comp.mask_interrupts();
+        return false;
+    }
     for _ in 0..bemf.filter_level() {
         if comp.output_level() == commutation.rising() {
             return false;
