@@ -82,13 +82,14 @@ pub fn init(
     let telem = super::telemetry_uart::L431TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
 
+    const CONTROL_RELOAD: u16 = (80_000_000 / rm32::constants::CONTROL_TICK_HZ - 1) as u16;
     // TIM6: 80MHz / 4000 = 20kHz
     unsafe {
         // Enable TIM6 (APB1ENR1 bit 4)
         rcc_pac.apb1enr1.modify(|_, w| w.tim6en().set_bit());
         let tim6 = &*pac::TIM6::ptr();
         tim6.psc.write(|w| w.bits(0));
-        tim6.arr.write(|w| w.bits(3999));
+        tim6.arr.write(|w| w.bits(CONTROL_RELOAD as u32));
         tim6.egr.write(|w| w.ug().set_bit());
         tim6.sr.write(|w| w.uif().clear_bit());
         tim6.dier.write(|w| w.uie().set_bit());

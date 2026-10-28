@@ -21,6 +21,7 @@ const STARTUP_INTERVAL_TIMER_COUNT: u32 = STARTUP_COMMUTATION_INTERVAL / 2;
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
 pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
+    ctx.shared.increment_control_ticks();
     ctx.shared.one_khz_counter_inc();
 
     if ctx.config.telemetry_on_interval != 0 {

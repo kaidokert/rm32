@@ -102,10 +102,11 @@ pub fn init(
     let telem = super::telemetry_uart::G431TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::G431TelemUart::post_init());
 
+    const CONTROL_RELOAD: u16 = (170_000_000 / rm32::constants::CONTROL_TICK_HZ - 1) as u16;
     // TIM6: 170MHz / 8500 = 20kHz
     unsafe {
         tim6.psc().write(|w| w.psc().bits(0));
-        tim6.arr().write(|w| w.arr().bits(8499));
+        tim6.arr().write(|w| w.arr().bits(CONTROL_RELOAD as u32));
         tim6.egr().write(|w| w.ug().set_bit());
         tim6.sr().write(|w| w.bits(0));
         tim6.dier().write(|w| w.uie().set_bit());

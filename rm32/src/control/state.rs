@@ -325,7 +325,7 @@ pub struct Measurements {
     pub(crate) battery_voltage: crate::units::CentiVolts,
     pub(crate) actual_current: crate::units::CentiAmps,
     pub(crate) degrees_celsius: crate::units::DegreesCelsius,
-    pub(crate) consumed_current: i32,
+    pub(crate) consumed_charge: crate::current::ConsumedCharge,
     /// EWMA filter for ADC voltage readings.
     pub(crate) voltage_filter: crate::filter::EwmaPow2<3>,
     /// Multi-stage filter for ADC current readings.
@@ -333,6 +333,10 @@ pub struct Measurements {
 }
 
 impl Measurements {
+    /// Consumed charge in whole mAh, saturated to the KISS telemetry range.
+    pub fn consumed_milliamp_hours(&self) -> u16 {
+        self.consumed_charge.milliamp_hours()
+    }
     /// Read battery voltage.
     pub fn battery_voltage(&self) -> crate::units::CentiVolts {
         self.battery_voltage

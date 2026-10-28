@@ -6,6 +6,7 @@ use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
 pub struct TestShared {
+    pub control_ticks: Cell<u32>,
     pub mode: Cell<MotorMode>,
     pub input_set: Cell<bool>,
     pub dshot_telemetry: Cell<bool>,
@@ -44,6 +45,7 @@ impl Default for TestShared {
 impl TestShared {
     pub fn new() -> Self {
         Self {
+            control_ticks: Cell::new(0),
             mode: Cell::new(MotorMode::Disarmed),
             input_set: Cell::new(false),
             dshot_telemetry: Cell::new(false),
@@ -84,6 +86,13 @@ impl MotorState for TestShared {
 }
 
 impl IsrTiming for TestShared {
+    fn control_ticks(&self) -> u32 {
+        self.control_ticks.get()
+    }
+    fn increment_control_ticks(&self) {
+        self.control_ticks
+            .set(self.control_ticks.get().wrapping_add(1));
+    }
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses.get()
     }

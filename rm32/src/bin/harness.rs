@@ -173,9 +173,16 @@ impl hal::Adc for MockAdc {
     }
 }
 
-struct MockTelem;
+#[derive(Default)]
+struct MockTelem {
+    kiss_packet: [u8; 10],
+}
 impl hal::TelemetryUart for MockTelem {
-    fn send_dma(&mut self, _data: &[u8]) {}
+    fn send_dma(&mut self, data: &[u8]) {
+        if data.len() == 10 {
+            self.kiss_packet.copy_from_slice(data);
+        }
+    }
 }
 
 // --- Harness state ---
@@ -271,7 +278,7 @@ impl Harness {
                 current: 0,
                 temperature: 25,
             },
-            telem: MockTelem,
+            telem: MockTelem::default(),
             main: rm32::main_state::MainState::new(
                 &rm32::board::BoardConfig::DEFAULT,
                 rm32::main_state::ChipParams {
@@ -579,7 +586,7 @@ impl Harness {
              dshot_telemetry={} \
              edt_armed={} edt_arm_enable={} \
              alloff_count={} fullbrake_count={} mask_interrupts_count={} \
-             dshot_output_prescaler={} needs_reset={}",
+             dshot_output_prescaler={} needs_reset={} control_ticks={} consumed_mah={} kiss_consumed_mah={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -629,6 +636,9 @@ impl Harness {
             self.hal_counts.mask_interrupts.get(),
             self.dshot_output_prescaler,
             self.main.needs_reset as i32,
+            self.shared.control_ticks(),
+            self.main.measurements().consumed_milliamp_hours(),
+            u16::from_be_bytes([self.telem.kiss_packet[5], self.telem.kiss_packet[6]]),
         );
         io::stdout().flush().unwrap();
     }

@@ -95,6 +95,10 @@ pub trait MotorState {
 /// main loop reads them for RPM calculation, stall detection,
 /// speed gating, and desync detection.
 pub trait IsrTiming {
+    /// Free-running control ISR count, wrapping at u32::MAX. Never reset by main.
+    fn control_ticks(&self) -> u32;
+    /// Called exactly once per control ISR, including stopped/early-return paths.
+    fn increment_control_ticks(&self);
     fn zero_crosses(&self) -> u32;
     fn set_zero_crosses(&self, v: u32);
     fn increment_zero_crosses(&self);
