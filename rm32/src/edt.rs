@@ -9,6 +9,8 @@
 //!   0b0110 = Current
 //!   0b1110 = EDT init/deinit special frames
 
+use crate::units::{CentiAmps, CentiVolts};
+
 /// EDT data type nibbles
 pub const EDT_TEMPERATURE: u16 = 0x2;
 pub const EDT_VOLTAGE: u16 = 0x4;
@@ -59,10 +61,14 @@ pub enum EdtFrame {
 impl EdtScheduler {
     /// Decide what to send for this telemetry response.
     ///
-    /// `current_ma`: actual current in milliamps
-    /// `voltage_mv`: battery voltage in millivolts
+    /// Current and voltage use the shared centiamp/centivolt measurement units.
     /// `temperature`: degrees celsius
-    pub fn next_frame(&mut self, current_ma: i16, voltage_mv: u16, temperature: i16) -> EdtFrame {
+    pub fn next_frame(
+        &mut self,
+        current: CentiAmps,
+        voltage: CentiVolts,
+        temperature: i16,
+    ) -> EdtFrame {
         // Handle pending init/deinit special frames
         if self.send_init {
             self.send_init = false;
@@ -99,11 +105,11 @@ impl EdtScheduler {
         // Temperature: every 200 frames, offset from voltage
         let frame = if self.counter.is_multiple_of(40) {
             // Current: 1A per LSB
-            let payload = ((current_ma as i32).max(0) / 1000).min(255) as u8;
+            let payload = (current.to_centiamps() / 100).min(255) as u8;
             (EDT_CURRENT << 8) | payload as u16
         } else if self.counter % 200 == 100 {
             // Voltage: 0.25V per LSB
-            let payload = (voltage_mv / 250).min(255) as u8;
+            let payload = (voltage.0 / 25).min(255) as u8;
             (EDT_VOLTAGE << 8) | payload as u16
         } else if self.counter % 200 == 150 {
             // Temperature: direct degrees C
@@ -123,16 +129,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn voltage_wire_boundaries() {
+        for (cv, payload) in [
+            (0, 0),
+            (24, 0),
+            (25, 1),
+            (49, 1),
+            (50, 2),
+            (6374, 254),
+            (6375, 255),
+            (6376, 255),
+            (u16::MAX, 255),
+        ] {
+            let mut s = EdtScheduler {
+                active: true,
+                counter: 99,
+                ..Default::default()
+            };
+            assert!(matches!(s.next_frame(CentiAmps::ZERO, CentiVolts(cv), 25),
+                EdtFrame::Extended(frame) if frame == 0x400 | payload));
+        }
+    }
+
+    #[test]
+    fn current_wire_boundaries() {
+        for (ca, payload) in [
+            (i16::MIN, 0),
+            (-1, 0),
+            (0, 0),
+            (99, 0),
+            (100, 1),
+            (199, 1),
+            (25500, 255),
+            (25600, 255),
+            (i16::MAX, 255),
+        ] {
+            let mut s = EdtScheduler {
+                active: true,
+                counter: 39,
+                ..Default::default()
+            };
+            assert!(matches!(s.next_frame(CentiAmps(ca), CentiVolts::ZERO, 25),
+                EdtFrame::Extended(frame) if frame == 0x600 | payload));
+        }
+    }
+
+    #[test]
     fn init_frame_sent_once() {
         let mut s = EdtScheduler::default();
         s.request_init();
-        match s.next_frame(0, 0, 0) {
+        match s.next_frame(CentiAmps(0), CentiVolts(0), 0) {
             EdtFrame::Extended(v) => assert_eq!(v, EDT_INIT_FRAME),
             _ => panic!("expected init frame"),
         }
         assert!(s.active);
         // Verify init was consumed — next call should NOT produce another init
-        match s.next_frame(0, 0, 0) {
+        match s.next_frame(CentiAmps(0), CentiVolts(0), 0) {
             EdtFrame::Extended(v) if v == EDT_INIT_FRAME => panic!("init should be one-shot"),
             _ => {} // any non-init frame is correct
         }
@@ -143,15 +195,15 @@ mod tests {
         let mut s = EdtScheduler::default();
         s.request_init();
         assert!(matches!(
-            s.next_frame(0, 0, 0),
+            s.next_frame(CentiAmps(0), CentiVolts(0), 0),
             EdtFrame::Extended(EDT_INIT_FRAME)
         ));
 
         for _ in 0..255 {
-            let _ = s.next_frame(1000, 12000, 25);
+            let _ = s.next_frame(CentiAmps(100), CentiVolts(1200), 25);
         }
 
-        match s.next_frame(1000, 12000, 25) {
+        match s.next_frame(CentiAmps(100), CentiVolts(1200), 25) {
             EdtFrame::Extended(v) => assert_eq!(v, EDT_INIT_FRAME),
             _ => panic!("expected periodic init frame"),
         }
@@ -161,9 +213,9 @@ mod tests {
     fn deinit_frame_deactivates() {
         let mut s = EdtScheduler::default();
         s.request_init(); // activate first
-        s.next_frame(0, 0, 0); // consume init
+        s.next_frame(CentiAmps(0), CentiVolts(0), 0); // consume init
         s.request_deinit();
-        match s.next_frame(0, 0, 0) {
+        match s.next_frame(CentiAmps(0), CentiVolts(0), 0) {
             EdtFrame::Extended(v) => assert_eq!(v, EDT_DEINIT_FRAME),
             _ => panic!("expected deinit frame"),
         }
@@ -174,7 +226,10 @@ mod tests {
     fn inactive_always_erpm() {
         let mut s = EdtScheduler::default();
         for _ in 0..300 {
-            assert!(matches!(s.next_frame(500, 16800, 25), EdtFrame::Erpm));
+            assert!(matches!(
+                s.next_frame(CentiAmps(50), CentiVolts(1680), 25),
+                EdtFrame::Erpm
+            ));
         }
     }
 
@@ -184,7 +239,7 @@ mod tests {
         s.active = true;
         s.counter = u16::MAX; // next increment wraps to 0
 
-        let frame = s.next_frame(3500, 16800, 30);
+        let frame = s.next_frame(CentiAmps(350), CentiVolts(1680), 30);
         match frame {
             EdtFrame::Extended(v) => {
                 assert_eq!(v >> 8, EDT_CURRENT);
@@ -202,11 +257,14 @@ mod tests {
 
         // First: extended (current at counter=0)
         assert!(matches!(
-            s.next_frame(1000, 16800, 25),
+            s.next_frame(CentiAmps(100), CentiVolts(1680), 25),
             EdtFrame::Extended(_)
         ));
         // Next: forced eRPM
-        assert!(matches!(s.next_frame(1000, 16800, 25), EdtFrame::Erpm));
+        assert!(matches!(
+            s.next_frame(CentiAmps(100), CentiVolts(1680), 25),
+            EdtFrame::Erpm
+        ));
     }
 
     #[test]
@@ -215,7 +273,7 @@ mod tests {
         s.active = true;
         s.counter = 99; // next will be 100
 
-        match s.next_frame(0, 12300, 25) {
+        match s.next_frame(CentiAmps(0), CentiVolts(1230), 25) {
             EdtFrame::Extended(v) => {
                 assert_eq!(v >> 8, EDT_VOLTAGE);
                 assert_eq!(v & 0xFF, 49);
@@ -230,7 +288,7 @@ mod tests {
         s.active = true;
         s.counter = 149; // next will be 150
 
-        match s.next_frame(0, 0, 45) {
+        match s.next_frame(CentiAmps(0), CentiVolts(0), 45) {
             EdtFrame::Extended(v) => {
                 assert_eq!(v >> 8, EDT_TEMPERATURE);
                 assert_eq!(v & 0xFF, 45);

@@ -163,9 +163,9 @@ pub const CALIBRATION_MAX_JITTER: u32 = 50;
 // --- Ramp rate limiting ---
 
 /// Voltage ramp: minimum battery voltage for mapping (8.0V).
-pub const RAMP_VOLTAGE_LOW_MV: i32 = 800;
+pub const RAMP_VOLTAGE_LOW_CV: i32 = 800;
 /// Voltage ramp: maximum battery voltage for mapping (22.0V).
-pub const RAMP_VOLTAGE_HIGH_MV: i32 = 2200;
+pub const RAMP_VOLTAGE_HIGH_CV: i32 = 2200;
 /// Voltage ramp: max duty change at low voltage.
 pub const RAMP_VOLTAGE_CHANGE_MAX: i32 = 10;
 /// Voltage ramp: min duty change at high voltage.

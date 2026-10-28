@@ -60,8 +60,8 @@ pub struct SharedState {
     current_limit_adjust: AtomicU16, // main PID publishes, ISR clamps duty
 
     // Measurements (main writes, ISR reads for EDT)
-    actual_current: AtomicU16,  // mA, stored as u16
-    battery_voltage: AtomicU16, // mV
+    actual_current: AtomicU16,  // signed centiamps, stored as u16
+    battery_voltage: AtomicU16, // centivolts
     degrees_celsius: AtomicU16, // stored as u16, interpreted as i16
 
     // ISR→main: interval timer count for stall detection
@@ -443,18 +443,18 @@ impl SharedState {
         self.current_limit_adjust.store(v, REL);
     }
 
-    pub fn actual_current(&self) -> i16 {
-        self.actual_current.load(ACQ) as i16
+    pub fn actual_current(&self) -> crate::units::CentiAmps {
+        crate::units::CentiAmps(self.actual_current.load(ACQ) as i16)
     }
-    pub fn set_actual_current(&self, v: i16) {
-        self.actual_current.store(v as u16, REL);
+    pub fn set_actual_current(&self, v: crate::units::CentiAmps) {
+        self.actual_current.store(v.0 as u16, REL);
     }
 
-    pub fn battery_voltage(&self) -> u16 {
-        self.battery_voltage.load(ACQ)
+    pub fn battery_voltage(&self) -> crate::units::CentiVolts {
+        crate::units::CentiVolts(self.battery_voltage.load(ACQ))
     }
-    pub fn set_battery_voltage(&self, v: u16) {
-        self.battery_voltage.store(v, REL);
+    pub fn set_battery_voltage(&self, v: crate::units::CentiVolts) {
+        self.battery_voltage.store(v.0, REL);
     }
 
     pub fn degrees_celsius(&self) -> i16 {
@@ -707,16 +707,16 @@ impl crate::shared_comm::MainControl for SharedState {
     fn set_auto_advance(&self, v: u8) {
         SharedState::set_auto_advance(self, v);
     }
-    fn set_actual_current(&self, v: i16) {
+    fn set_actual_current(&self, v: crate::units::CentiAmps) {
         SharedState::set_actual_current(self, v);
     }
-    fn set_battery_voltage(&self, v: u16) {
+    fn set_battery_voltage(&self, v: crate::units::CentiVolts) {
         SharedState::set_battery_voltage(self, v);
     }
     fn set_degrees_celsius(&self, v: i16) {
         SharedState::set_degrees_celsius(self, v);
     }
-    fn battery_voltage(&self) -> u16 {
+    fn battery_voltage(&self) -> crate::units::CentiVolts {
         SharedState::battery_voltage(self)
     }
 }

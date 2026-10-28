@@ -205,11 +205,11 @@ pub trait MainControl {
     fn set_auto_advance(&self, _v: u8) {}
 
     /// Measurement publish for EDT telemetry (main writes, ISR reads).
-    fn battery_voltage(&self) -> u16 {
-        0
+    fn battery_voltage(&self) -> crate::units::CentiVolts {
+        crate::units::CentiVolts::ZERO
     }
-    fn set_actual_current(&self, _v: i16) {}
-    fn set_battery_voltage(&self, _v: u16) {}
+    fn set_actual_current(&self, _v: crate::units::CentiAmps) {}
+    fn set_battery_voltage(&self, _v: crate::units::CentiVolts) {}
     fn set_degrees_celsius(&self, _v: i16) {}
 }
 

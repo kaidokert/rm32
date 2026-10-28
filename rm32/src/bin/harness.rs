@@ -431,7 +431,11 @@ impl Harness {
     }
 
     fn edt_next_frame(&mut self, current: i16, voltage: u16, temperature: i16) -> i32 {
-        match self.edt.next_frame(current, voltage, temperature) {
+        match self.edt.next_frame(
+            rm32::units::CentiAmps(current),
+            rm32::units::CentiVolts(voltage),
+            temperature,
+        ) {
             rm32::edt::EdtFrame::Erpm => -1,
             rm32::edt::EdtFrame::Extended(v) => v as i32,
         }
@@ -727,20 +731,20 @@ impl Harness {
             "cell_count" => self.main.cell_count = v as u8, // pub field
             "battery_voltage" => {
                 self.main
-                    .set_battery_voltage(rm32::units::MilliVolts(v as u16));
+                    .set_battery_voltage(rm32::units::CentiVolts(v as u16));
                 // Also set ADC raw so main.tick() doesn't overwrite on next cycle
-                // Approximate: raw = mV * 100 / (3300 * divider / 4095)
-                // For divider=110: raw ≈ mV * 4095 / 3630
-                self.adc.voltage = ((v as u32) * 4095 / 3630).min(4095) as u16;
+                // Centivolts with the default 11:1 divider.
+                self.adc.voltage = (v.clamp(0, 3630) * 4095 / 3630) as u16;
             }
             "degrees_celsius" => {
                 self.adc.temperature = v as i16;
             }
             "actual_current" => {
                 self.main
-                    .set_actual_current(rm32::units::MilliAmps(v as i16));
+                    .set_actual_current(rm32::units::CentiAmps(v as i16));
+                // Centiamps, default 20 mV/A sensitivity and zero mV offset.
                 // Route through ADC mock for persistence
-                self.adc.current = ((v as i32 * 20 + 498 * 100) * 41 / 3300).max(0) as u16;
+                self.adc.current = (v.clamp(0, 16500) * 20 * 4095 / 330000) as u16;
             }
             "bemf_timeout_happened" => self.main.protection.set_bemf_timeout_happened(v as u8),
             "bemf_timeout" => self.main.protection.set_bemf_timeout(v as u8),
@@ -789,6 +793,7 @@ impl Harness {
             "eeprom.input_type" => self.config.input_type = v as u8,
             "eeprom.telemetry_on_interval" => self.config.telemetry_on_interval = v as u8,
             "eeprom.low_voltage_cut_off" => self.config.low_voltage_cut_off = v as u8,
+            "eeprom.absolute_voltage_cutoff" => self.config.absolute_voltage_cutoff = v as u8,
             "eeprom.limits.temperature" => self.config.temperature_limit = v as u8,
             "eeprom.limits.current" => self.config.current_limit = v as u8,
             "eeprom.beep_volume" => self.config.beep_volume = v as u8,
@@ -936,19 +941,19 @@ mod tests {
 
         assert_eq!(harness.run_edt_next_command("init=1"), 0xE00);
         assert_eq!(
-            harness.run_edt_next_command("count=40 current=3500 voltage=12300 temperature=45"),
+            harness.run_edt_next_command("count=40 current=350 voltage=1230 temperature=45"),
             0x603
         );
         assert_eq!(
-            harness.run_edt_next_command("count=60 current=3500 voltage=12300 temperature=45"),
+            harness.run_edt_next_command("count=60 current=350 voltage=1230 temperature=45"),
             0x431
         );
         assert_eq!(
-            harness.run_edt_next_command("count=50 current=3500 voltage=12300 temperature=45"),
+            harness.run_edt_next_command("count=50 current=350 voltage=1230 temperature=45"),
             0x22D
         );
         assert_eq!(
-            harness.run_edt_next_command("count=106 current=3500 voltage=12300 temperature=45"),
+            harness.run_edt_next_command("count=106 current=350 voltage=1230 temperature=45"),
             0xE00
         );
         assert_eq!(harness.run_edt_next_command("deinit=1"), 0xEFF);
