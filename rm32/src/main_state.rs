@@ -124,11 +124,12 @@ pub struct MainState<LED: OutputPin = NoLed> {
     pub needs_reset: bool,
     /// Custom LED pin (NoLed if board has no custom LED)
     pub(crate) led: LED,
-    pub(crate) led_counter: u16,
+    /// Position within the 200 ms LED period, in control ticks.
+    pub(crate) led_phase: u32,
     /// TIM1 max auto-reload (from PWM frequency config, overwritten by apply_motor_config)
     pub(crate) timer1_max_arr: u16,
-    /// Main-loop tick counter for consumed current accumulation
-    pub(crate) ten_khz_counter: u32,
+    /// Last observed control clock; None anchors the first main service.
+    last_control_tick: Option<u32>,
 }
 
 /// MCU-specific constants — properties of the silicon, not the board PCB.
@@ -147,6 +148,13 @@ impl MainState<NoLed> {
     /// PID tuning, motor_kv, and other EEPROM-derived values are applied
     /// later via `apply_motor_config()`.
     pub fn new(board: &crate::board::BoardConfig, chip: ChipParams) -> Self {
+        Self::new_with_led(board, chip, NoLed)
+    }
+}
+
+impl<LED: OutputPin> MainState<LED> {
+    /// Construct main-loop state with an optional custom status LED output.
+    pub fn new_with_led(board: &crate::board::BoardConfig, chip: ChipParams, led: LED) -> Self {
         assert!(
             board.min_bemf_counts <= u8::MAX / 2,
             "min_bemf_counts must fit derived startup thresholds"
@@ -172,9 +180,9 @@ impl MainState<NoLed> {
             last_armed: false,
             just_armed: false,
             needs_reset: false,
-            led: NoLed,
-            led_counter: 0,
-            ten_khz_counter: 0,
+            led,
+            led_phase: 0,
+            last_control_tick: None,
         }
     }
 }
@@ -279,6 +287,28 @@ impl<LED: OutputPin> MainState<LED> {
         adc: &mut dyn Adc,
         telem: &mut dyn TelemetryUart,
     ) {
+        // One clock snapshot for all periodic work. Hold the previous observed
+        // current through this interval BEFORE the ADC path replaces it below.
+        // Delayed servicing retains elapsed time but cannot recover unobserved
+        // current changes. Service at least once per full u32 clock wrap.
+        let now = shared.control_ticks();
+        let elapsed = self
+            .last_control_tick
+            .map_or(0, |last| now.wrapping_sub(last));
+        self.last_control_tick = Some(now);
+        self.measurements
+            .consumed_charge
+            .accumulate(self.measurements.actual_current, elapsed);
+        let led_period = LED_BLINK_HALF_PERIOD as u32 * 2;
+        if elapsed != 0 {
+            let phase = self.led_phase + elapsed % led_period;
+            self.led_phase = if phase >= led_period {
+                phase - led_period
+            } else {
+                phase
+            };
+        }
+
         // e_com_time: read from SharedComm (ISR computes from per-step intervals)
         let e_com_time = shared.e_com_time();
 
@@ -481,20 +511,11 @@ impl<LED: OutputPin> MainState<LED> {
                 self.measurements.degrees_celsius.to_i8(),
                 voltage_cv,
                 current_ca,
-                (self.measurements.consumed_current / 1000) as u16, // legacy loop-count accumulator
+                self.measurements.consumed_milliamp_hours(),
                 self.timing.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
             );
             telem.send_dma(&pkt);
             shared.set_send_telemetry(false);
-        }
-
-        // Consumed current accumulation (1s interval at ~20kHz)
-        // TODO: counter incremented in main loop (variable rate), not ISR.
-        // Matches C firmware behavior but integration is approximate.
-        self.ten_khz_counter += 1;
-        if self.ten_khz_counter > 20000 {
-            self.measurements.consumed_current += self.measurements.actual_current.0 as i32;
-            self.ten_khz_counter = 0;
         }
 
         // Variable PWM — adjust tim1_arr based on commutation speed
@@ -557,18 +578,15 @@ impl<LED: OutputPin> MainState<LED> {
         // Note: send_esc_info_flag is checked and cleared by firmware main.rs
         // after sending the actual packet. MainState does not own this flag.
 
-        // Custom LED: blink with throttle, solid when high
+        // Custom LED: exact 100 ms low/high phases, continuing while off or
+        // solid. Modulo phase retains missed periods without service-time drift.
         {
             let input = shared.adjusted_input();
-            self.led_counter = self.led_counter.wrapping_add(1);
             if (47..1947).contains(&input) {
-                if self.led_counter > crate::constants::LED_BLINK_HALF_PERIOD {
+                if self.led_phase >= LED_BLINK_HALF_PERIOD as u32 {
                     let _ = self.led.set_high();
                 } else {
                     let _ = self.led.set_low();
-                }
-                if self.led_counter > crate::constants::LED_BLINK_HALF_PERIOD * 2 {
-                    self.led_counter = 0;
                 }
             } else if input > crate::constants::LED_HIGH_THROTTLE {
                 let _ = self.led.set_high();
@@ -748,6 +766,206 @@ mod tests {
         fn send_dma(&mut self, packet: &[u8]) {
             self.0.copy_from_slice(packet);
         }
+    }
+
+    #[derive(Default)]
+    struct TestLed(bool);
+
+    impl embedded_hal::digital::ErrorType for TestLed {
+        type Error = core::convert::Infallible;
+    }
+    impl OutputPin for TestLed {
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            self.0 = false;
+            Ok(())
+        }
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            self.0 = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn accounting_regression_main_calls_without_time_do_not_consume_charge() {
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        main.set_actual_current(crate::units::CentiAmps(1000)); // 10 A
+        let mut telem = CapturedTelemetry::default();
+        for _ in 0..20001 {
+            main.tick(&shared, &mut MockAdc::new(), &mut telem);
+        }
+        shared.set_send_telemetry(true);
+        main.tick(&shared, &mut MockAdc::new(), &mut telem);
+        assert_eq!(u16::from_be_bytes([telem.0[5], telem.0[6]]), 0);
+    }
+
+    #[test]
+    fn accounting_regression_main_calls_without_time_do_not_blink() {
+        let shared = SharedState::new();
+        shared.set_adjusted_input(100);
+        let mut main = MainState::new_with_led(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+            TestLed::default(),
+        );
+        for _ in 0..2001 {
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        }
+        assert!(
+            !main.led.0,
+            "LED phase must not advance without control ticks"
+        );
+    }
+
+    fn advance_control_clock(shared: &SharedState, ticks: u32) {
+        for _ in 0..ticks {
+            shared.increment_control_ticks();
+        }
+    }
+
+    fn send_charge(main: &mut MainState, shared: &SharedState) -> u16 {
+        let mut telem = CapturedTelemetry::default();
+        shared.set_send_telemetry(true);
+        main.tick(shared, &mut MockAdc::new(), &mut telem);
+        u16::from_be_bytes([telem.0[5], telem.0[6]])
+    }
+
+    #[test]
+    fn charge_first_service_anchors_without_backfilling_startup_time() {
+        let shared = SharedState::new();
+        advance_control_clock(&shared, 72000);
+        let mut main = make_test_main_state();
+        main.set_actual_current(crate::units::CentiAmps(100));
+        assert_eq!(send_charge(&mut main, &shared), 0);
+        advance_control_clock(&shared, 72000);
+        assert_eq!(send_charge(&mut main, &shared), 1); // 1 A * 3.6 s
+        assert_eq!(send_charge(&mut main, &shared), 1);
+    }
+
+    #[test]
+    fn charge_and_kiss_are_independent_of_main_service_cadence() {
+        for interval in [1, 20, 2000, 72000] {
+            let shared = SharedState::new();
+            let mut main = make_test_main_state();
+            main.set_actual_current(crate::units::CentiAmps(100));
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+            for _ in 0..72000 / interval {
+                advance_control_clock(&shared, interval);
+                main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+            }
+            assert_eq!(send_charge(&mut main, &shared), 1, "interval={interval}");
+        }
+    }
+
+    #[test]
+    fn charge_holds_previous_sample_until_adc_observation() {
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        main.set_actual_current(crate::units::CentiAmps(100)); // 1 A held
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        // Make the next ADC observation exactly 165 A after current filtering.
+        for _ in 0..50 {
+            main.measurements.current_filter.update(4095);
+        }
+        advance_control_clock(&shared, 72000); // 3.6 s at the prior 1 A
+        trip_one_khz(&shared);
+        shared.set_send_telemetry(true);
+        let mut telem = CapturedTelemetry::default();
+        main.tick(&shared, &mut MockAdc::with_raw_current(4095), &mut telem);
+        assert_eq!(u16::from_be_bytes([telem.0[5], telem.0[6]]), 1);
+        assert_eq!(main.measurements.actual_current.0, 16500);
+        advance_control_clock(&shared, 72000); // next 3.6 s at 165 A
+        assert_eq!(send_charge(&mut main, &shared), 166);
+    }
+
+    #[test]
+    fn charge_wrap_negative_current_and_wire_saturation() {
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        // 72000 elapsed ticks across a wrap: 1 A * 3.6 s = 1 mAh.
+        main.last_control_tick = Some(0u32.wrapping_sub(72000));
+        main.set_actual_current(crate::units::CentiAmps(100));
+        assert_eq!(send_charge(&mut main, &shared), 1);
+        main.set_actual_current(crate::units::CentiAmps(-100));
+        advance_control_clock(&shared, 72000);
+        assert_eq!(send_charge(&mut main, &shared), 1);
+        main.set_actual_current(crate::units::CentiAmps(i16::MAX));
+        main.last_control_tick = Some(shared.control_ticks().wrapping_add(1));
+        assert_eq!(send_charge(&mut main, &shared), u16::MAX); // largest valid gap
+        advance_control_clock(&shared, 20);
+        assert_eq!(send_charge(&mut main, &shared), u16::MAX);
+    }
+
+    fn make_led_main() -> MainState<TestLed> {
+        MainState::new_with_led(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+            TestLed::default(),
+        )
+    }
+
+    #[test]
+    fn led_exact_phase_boundaries_and_delayed_service() {
+        let shared = SharedState::new();
+        shared.set_adjusted_input(100);
+        let mut main = make_led_main();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        let mut previous = 0;
+        for (ticks, high) in [
+            (1999, false),
+            (2000, true),
+            (3999, true),
+            (4000, false),
+            (402001, true),
+            (404000, false),
+        ] {
+            advance_control_clock(&shared, ticks - previous);
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+            assert_eq!(main.led.0, high, "tick={ticks}");
+            previous = ticks;
+        }
+    }
+
+    #[test]
+    fn led_wrap_and_throttle_gates_preserve_continuous_phase() {
+        let shared = SharedState::new();
+        let mut main = make_led_main();
+        main.led_phase = 1999;
+        main.last_control_tick = Some(u32::MAX - 1999);
+        shared.set_adjusted_input(100);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(main.led.0); // 3999 ticks into the period after clock wrap
+        shared.increment_control_ticks();
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(!main.led.0); // exact period boundary
+        // Phase advances even while throttle selects solid/off output.
+        shared.set_adjusted_input(2000);
+        advance_control_clock(&shared, 2000);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        for (input, high) in [
+            (0, false),
+            (46, false),
+            (47, true),
+            (1946, true),
+            (1947, false),
+            (1948, true),
+        ] {
+            shared.set_adjusted_input(input);
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+            assert_eq!(main.led.0, high, "input={input}");
+        }
+        shared.set_adjusted_input(0);
+        advance_control_clock(&shared, 6000);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        shared.set_adjusted_input(100);
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert!(!main.led.0);
     }
 
     #[test]

@@ -202,6 +202,42 @@ mod tests {
     }
 
     #[test]
+    fn control_clock_advances_through_stopped_and_all_off_paths() {
+        let shared = TestShared::new();
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        shared.control_ticks.set(u32::MAX);
+        for (mode, action, expected) in [
+            (crate::motor_mode::MotorMode::Disarmed, IsrAction::None, 0),
+            (crate::motor_mode::MotorMode::Armed, IsrAction::AllOff, 1),
+            (
+                crate::motor_mode::MotorMode::OldRoutine,
+                IsrAction::AllOff,
+                2,
+            ),
+        ] {
+            shared.mode.set(mode);
+            shared.isr_action.set(action);
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+            assert_eq!(shared.control_ticks(), expected);
+        }
+        assert_eq!(shared.one_khz_counter.get(), 3);
+    }
+
+    #[test]
     fn prop_brake_reconfigures_bridge_before_duty() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();

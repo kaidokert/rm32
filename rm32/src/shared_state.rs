@@ -38,6 +38,7 @@ pub struct SharedState {
     config_write_tail: AtomicU8,
 
     // Timing (ISR writes, main reads)
+    control_ticks: AtomicU32,
     zero_crosses: AtomicU32,
     commutation_interval: AtomicU32,
 
@@ -104,6 +105,7 @@ impl SharedState {
             config_write_queue: [const { AtomicU16::new(0) }; CONFIG_WRITE_QUEUE_LEN as usize],
             config_write_head: AtomicU8::new(0),
             config_write_tail: AtomicU8::new(0),
+            control_ticks: AtomicU32::new(0),
             zero_crosses: AtomicU32::new(0),
             commutation_interval: AtomicU32::new(12500),
             newinput: AtomicU16::new(0),
@@ -132,6 +134,16 @@ impl SharedState {
             one_khz_counter: AtomicU8::new(0),
             telem_counter: AtomicU16::new(0),
         }
+    }
+
+    /// Free-running 20 kHz control clock. Main must observe it at least once
+    /// per full u32 wrap (about 59.65 hours) to recover elapsed time.
+    pub fn control_ticks(&self) -> u32 {
+        self.control_ticks.load(ACQ)
+    }
+
+    pub fn increment_control_ticks(&self) {
+        self.control_ticks.fetch_add(1, REL);
     }
 
     pub fn one_khz_counter_inc(&self) {
@@ -569,6 +581,12 @@ impl crate::shared_comm::MotorState for SharedState {
 }
 
 impl crate::shared_comm::IsrTiming for SharedState {
+    fn control_ticks(&self) -> u32 {
+        SharedState::control_ticks(self)
+    }
+    fn increment_control_ticks(&self) {
+        SharedState::increment_control_ticks(self);
+    }
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses()
     }
@@ -846,6 +864,20 @@ mod tests {
 
         assert!(shared.take_desync_check_pending());
         assert!(!shared.take_desync_check_pending());
+    }
+
+    #[test]
+    fn control_clock_wraps_without_resetting_dispatch_counters() {
+        let shared = SharedState::new();
+        assert_eq!(shared.control_ticks(), 0);
+        shared.control_ticks.store(u32::MAX, REL);
+        shared.one_khz_counter_inc();
+        shared.increment_control_ticks();
+        assert_eq!(shared.control_ticks(), 0);
+        shared.increment_control_ticks();
+        assert_eq!(shared.control_ticks(), 1);
+        assert!(shared.one_khz_counter_check_and_reset(1));
+        assert_eq!(shared.control_ticks(), 1);
     }
 
     #[test]

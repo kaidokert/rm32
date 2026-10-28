@@ -25,6 +25,9 @@ pub const TIM1_DEFAULT_ARR: u16 = 1999;
 /// ESC arms after receiving zero throttle for this duration.
 pub const ARMING_TIMEOUT_TICKS: u32 = 20000;
 
+/// Frequency of the control ISR, shared with STM32 TIM6 initialization.
+pub const CONTROL_TICK_HZ: u32 = 20_000;
+
 /// Number of 20 kHz TIM6 ticks between 1 kHz ADC/PID dispatches.
 pub const PID_LOOP_DIVIDER: u8 = 20;
 
@@ -142,8 +145,8 @@ pub const SINE_FAST_STEP_DELAY: u16 = 80;
 /// Sine mode step delay at medium throttle (µs).
 pub const SINE_MEDIUM_STEP_DELAY: u16 = 120;
 
-/// Custom LED blink half-period (main loop ticks).
-pub const LED_BLINK_HALF_PERIOD: u16 = 2000;
+/// Custom LED blink half-period: 100 ms in control ISR ticks.
+pub const LED_BLINK_HALF_PERIOD: u16 = (CONTROL_TICK_HZ / 10) as u16;
 
 /// Custom LED high-throttle threshold (above this = solid on).
 pub const LED_HIGH_THROTTLE: u16 = 1947;

@@ -1,0 +1,11 @@
+# The default 20 mV/A sensor at ADC full scale measures 165 A.
+# After the 50-sample current-filter startup, one second consumes about
+# 45 mAh (165000 mA / 3600); the first second loses roughly 1 mAh to startup.
+# 50 ms telemetry slots align the last packet with each assertion below.
+@config
+eeprom.telemetry_on_interval=21
+actual_current=16500
+
+@sequence
+ticks 20000 | throttle=0 | control_ticks=20000 actual_current=16500 consumed_mah>=44 consumed_mah<=45 kiss_consumed_mah>=44 kiss_consumed_mah<=45
+ticks 20000 | throttle=0 | control_ticks=40000 actual_current=16500 consumed_mah>=90 consumed_mah<=91 kiss_consumed_mah>=90 kiss_consumed_mah<=91
