@@ -17,9 +17,9 @@ commutation_interval=1000
 # EDT voltage frame at count%200==100, temp at count%200==150
 ticks 250 | throttle=1000 | running=1
 
-# Direct EDT scheduler coverage for encoded frame payloads.
+# Direct EDT scheduler coverage: current in centiamps, voltage in centivolts.
 edt_next | init=1 | edt_frame=3584
-edt_next | count=40 current=3500 voltage=12300 temperature=45 | edt_frame=1539
-edt_next | count=60 current=3500 voltage=12300 temperature=45 | edt_frame=1073
-edt_next | count=50 current=3500 voltage=12300 temperature=45 | edt_frame=557
-edt_next | count=106 current=3500 voltage=12300 temperature=45 | edt_frame=3584
+edt_next | count=40 current=350 voltage=1230 temperature=45 | edt_frame=1539
+edt_next | count=60 current=350 voltage=1230 temperature=45 | edt_frame=1073
+edt_next | count=50 current=350 voltage=1230 temperature=45 | edt_frame=557
+edt_next | count=106 current=350 voltage=1230 temperature=45 | edt_frame=3584

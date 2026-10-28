@@ -132,6 +132,7 @@ pub trait InputCapture {
 }
 
 /// ADC readings (voltage, current, temperature)
+/// Voltage/current samples are 12-bit counts (0..=4095) at a nominal 3.3 V reference.
 pub trait Adc {
     fn start_conversion(&mut self);
     fn raw_voltage(&self) -> u16;

@@ -27,6 +27,7 @@ pub struct EepromConfig {
     pub max_ramp: u8,
     pub minimum_duty_cycle: u8,
     pub disable_stick_calibration: u8,
+    /// Absolute cutoff in 0.5 V increments (zero disables the threshold).
     pub absolute_voltage_cutoff: u8,
     pub current_p: u8,
     pub current_i: u8,
@@ -53,6 +54,7 @@ pub struct EepromConfig {
     pub servo_neutral: u8,
     pub servo_dead_band: u8,
     pub low_voltage_cut_off: u8,
+    /// Per-cell cutoff in centivolts above 250 cV.
     pub low_cell_volt_cutoff: u8,
     pub rc_car_reverse: u8,
     /// Reserved — hall sensor commutation is not implemented in C or Rust firmware.
@@ -61,6 +63,7 @@ pub struct EepromConfig {
     pub drag_brake_strength: u8,
     pub driving_brake_strength: u8,
     pub temperature_limit: u8,
+    /// Current limit in 2 A increments.
     pub current_limit: u8,
     pub sine_mode_power: u8,
     pub input_type: u8,
@@ -86,6 +89,11 @@ const _: () = {
 };
 
 impl EepromConfig {
+    /// Decode the stored half-volt setting without changing the EEPROM layout.
+    pub fn absolute_cutoff_centivolts(&self) -> crate::units::CentiVolts {
+        crate::units::CentiVolts(self.absolute_voltage_cutoff as u16 * 50)
+    }
+
     pub const SIZE: usize = 192;
 
     /// View config as raw bytes. Safe via bytemuck::Pod — no unsafe needed.
@@ -264,7 +272,7 @@ pub struct MotorConfig {
     pub current_kd: u32,
     /// Motor KV (scaled from EEPROM, adjusted by board KV divider)
     pub motor_kv: u16,
-    /// Low cell voltage cutoff in millivolts
+    /// Low cell voltage cutoff in centivolts
     pub low_cell_volt_cutoff: u16,
     /// Servo calibration
     pub servo_low: u16,
@@ -398,6 +406,20 @@ impl Default for EepromConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absolute_cutoff_keeps_eeprom_byte_and_decodes_half_volts() {
+        for (stored, cv) in [(0, 0), (1, 50), (10, 500), (22, 1100), (255, 12750)] {
+            let mut bytes = [0u8; EepromConfig::SIZE];
+            bytes[8] = stored;
+            let cfg = EepromConfig::from_bytes(&bytes);
+            assert_eq!(
+                cfg.absolute_cutoff_centivolts(),
+                crate::units::CentiVolts(cv)
+            );
+            assert_eq!(cfg.as_bytes(), &bytes);
+        }
+    }
 
     #[test]
     fn blank_flash_is_invalid() {

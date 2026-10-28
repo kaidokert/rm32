@@ -44,11 +44,14 @@ enum BemfPinsYaml {
 
 #[derive(Deserialize)]
 struct BoardYaml {
+    /// Reject the legacy x10 key instead of silently selecting a default.
+    #[serde(default)]
+    voltage_divider: Option<u16>,
     name: String,
     mcu: String,
     dead_time: u8,
-    #[serde(default = "default_voltage_divider")]
-    voltage_divider: u16,
+    #[serde(default = "default_voltage_divider_x100")]
+    voltage_divider_x100: u16,
     #[serde(default = "default_mv_per_amp")]
     millivolt_per_amp: u16,
     #[serde(default)]
@@ -86,8 +89,8 @@ struct BoardYaml {
     bemf_pins: BemfPinsYaml,
 }
 
-fn default_voltage_divider() -> u16 {
-    110
+fn default_voltage_divider_x100() -> u16 {
+    1100
 }
 fn default_mv_per_amp() -> u16 {
     20
@@ -250,9 +253,10 @@ fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("board_config.rs");
 
+    println!("cargo:rerun-if-env-changed=BOARD");
+
     // Determine board YAML path
     let board_path = if let Ok(path) = env::var("BOARD") {
-        println!("cargo:rerun-if-env-changed=BOARD");
         path
     } else {
         // Default based on active feature
@@ -276,6 +280,14 @@ fn main() {
         .unwrap_or_else(|e| panic!("Failed to read board config '{}': {}", board_path, e));
     let board: BoardYaml = serde_yaml::from_str(&yaml)
         .unwrap_or_else(|e| panic!("Failed to parse board config '{}': {}", board_path, e));
+    assert!(
+        board.voltage_divider.is_none(),
+        "voltage_divider was replaced by voltage_divider_x100; multiply the old x10 value by 10"
+    );
+    assert!(
+        board.voltage_divider_x100 > 0,
+        "voltage_divider_x100 must be positive"
+    );
     if board.min_bemf_counts > u8::MAX / 2 {
         panic!(
             "Board config '{}' min_bemf_counts={} overflows startup thresholds",
@@ -310,7 +322,7 @@ fn main() {
 pub const BOARD: rm32::board::BoardConfig = rm32::board::BoardConfig {{
     name: "{name}",
     dead_time: {dead_time},
-    voltage_divider: {voltage_divider},
+    voltage_divider_x100: {voltage_divider_x100},
     millivolt_per_amp: {millivolt_per_amp},
     current_offset: {current_offset},
     current_adc_channel: {current_adc_channel},
@@ -338,7 +350,7 @@ pub const BOARD: rm32::board::BoardConfig = rm32::board::BoardConfig {{
         board_path = board_path,
         name = board.name,
         dead_time = board.dead_time,
-        voltage_divider = board.voltage_divider,
+        voltage_divider_x100 = board.voltage_divider_x100,
         millivolt_per_amp = board.millivolt_per_amp,
         current_offset = board.current_offset,
         current_adc_channel = board.current_adc_channel,

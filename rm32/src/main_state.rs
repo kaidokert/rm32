@@ -105,7 +105,7 @@ pub struct MainState<LED: OutputPin = NoLed> {
     // Timing (main-loop side — ISR timing is in SharedComm)
     pub(crate) timing: TimingState,
     // Board-level hardware constants (set once from BoardConfig, never change)
-    pub(crate) voltage_divider: u16,
+    pub(crate) voltage_divider_x100: u16,
     pub(crate) millivolt_per_amp: u16,
     pub(crate) current_offset: i16,
     pub(crate) use_ntc: bool,
@@ -158,7 +158,7 @@ impl MainState<NoLed> {
             pid: PidState::with_stall_target(board.stall_protect_interval),
             timing: TimingState::default(),
             timer1_max_arr: chip.timer1_max_arr,
-            voltage_divider: board.voltage_divider,
+            voltage_divider_x100: board.voltage_divider_x100,
             millivolt_per_amp: board.millivolt_per_amp,
             current_offset: board.current_offset,
             use_ntc: board.use_ntc,
@@ -223,12 +223,12 @@ impl<LED: OutputPin> MainState<LED> {
     }
 
     /// Set battery_voltage measurement.
-    pub fn set_battery_voltage(&mut self, v: crate::units::MilliVolts) {
+    pub fn set_battery_voltage(&mut self, v: crate::units::CentiVolts) {
         self.measurements.set_battery_voltage(v);
     }
 
     /// Set actual_current measurement.
-    pub fn set_actual_current(&mut self, v: crate::units::MilliAmps) {
+    pub fn set_actual_current(&mut self, v: crate::units::CentiAmps) {
         self.measurements.set_actual_current(v);
     }
 
@@ -401,9 +401,9 @@ impl<LED: OutputPin> MainState<LED> {
             // ADC measurements — typed conversions via AdcCount
             let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
             let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
-            self.measurements.battery_voltage = smoothed_v.to_millivolts(self.voltage_divider);
+            self.measurements.battery_voltage = smoothed_v.to_centivolts(self.voltage_divider_x100);
             self.measurements.actual_current =
-                smoothed_c.to_milliamps(self.current_offset, self.millivolt_per_amp);
+                smoothed_c.to_centiamps(self.current_offset, self.millivolt_per_amp);
             self.measurements.degrees_celsius = if self.use_ntc {
                 crate::ntc::ntc_degrees(adc.raw_temperature())
             } else {
@@ -412,18 +412,21 @@ impl<LED: OutputPin> MainState<LED> {
             adc.start_conversion();
 
             // Publish measurements to shared state (ISR reads for EDT)
-            shared.set_actual_current(self.measurements.actual_current.0);
-            shared.set_battery_voltage(self.measurements.battery_voltage.0);
+            shared.set_actual_current(self.measurements.actual_current);
+            shared.set_battery_voltage(self.measurements.battery_voltage);
             shared.set_degrees_celsius(self.measurements.degrees_celsius.0);
 
             // Low voltage cutoff
             if self.config.low_voltage_cut_off != 0 {
-                let threshold = if self.config.low_voltage_cut_off == 2 {
-                    self.config.absolute_voltage_cutoff as u16
+                let below_cutoff = if self.config.low_voltage_cut_off == 2 {
+                    let threshold = self.config.absolute_cutoff_centivolts();
+                    threshold.0 > 0 && self.measurements.battery_voltage < threshold
                 } else {
-                    self.cell_count as u16 * self.low_cell_volt_cutoff
+                    self.measurements
+                        .battery_voltage
+                        .below_cell_threshold(self.cell_count, self.low_cell_volt_cutoff)
                 };
-                if self.measurements.battery_voltage.0 < threshold && threshold > 0 {
+                if below_cutoff {
                     self.protection.low_voltage_count += 1;
                 } else if !self.protection.low_voltage_cutoff {
                     self.protection.low_voltage_count = 0;
@@ -478,7 +481,7 @@ impl<LED: OutputPin> MainState<LED> {
                 self.measurements.degrees_celsius.to_i8(),
                 voltage_cv,
                 current_ca,
-                (self.measurements.consumed_current / 1000) as u16, // µAh → mAh
+                (self.measurements.consumed_current / 1000) as u16, // legacy loop-count accumulator
                 self.timing.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
             );
             telem.send_dma(&pkt);
@@ -738,6 +741,153 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CapturedTelemetry([u8; 10]);
+
+    impl crate::hal::TelemetryUart for CapturedTelemetry {
+        fn send_dma(&mut self, packet: &[u8]) {
+            self.0.copy_from_slice(packet);
+        }
+    }
+
+    #[test]
+    fn measurement_regression_adc_to_kiss_voltage() {
+        // A 3.3 V ADC pin behind the default 11:1 divider means 36.30 V.
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        let mut telem = CapturedTelemetry::default();
+        shared.set_send_telemetry(true);
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut MockAdc::with_raw_voltage(4095), &mut telem);
+        assert_eq!(u16::from_be_bytes([telem.0[1], telem.0[2]]), 3630);
+    }
+
+    #[test]
+    fn measurement_regression_adc_to_edt_voltage() {
+        // EDT carries quarter-volts: 36.30 V truncates to 145 * 0.25 V.
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        trip_one_khz(&shared);
+        main.tick(
+            &shared,
+            &mut MockAdc::with_raw_voltage(4095),
+            &mut MockTelem,
+        );
+        let mut edt = crate::edt::EdtScheduler::default();
+        edt.request_init();
+        edt.next_frame(
+            crate::units::CentiAmps::ZERO,
+            crate::units::CentiVolts::ZERO,
+            0,
+        );
+        let mut frame = crate::edt::EdtFrame::Erpm;
+        for _ in 0..100 {
+            frame = edt.next_frame(crate::units::CentiAmps::ZERO, shared.battery_voltage(), 25);
+        }
+        assert!(matches!(frame, crate::edt::EdtFrame::Extended(0x491)));
+    }
+
+    #[test]
+    fn measurement_regression_adc_to_kiss_current() {
+        // 3.3 V / (20 mV/A) = 165 A, or 16500 centiamps on KISS.
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        for _ in 0..50 {
+            main.measurements.current_filter.update(4095);
+        }
+        let mut telem = CapturedTelemetry::default();
+        shared.set_send_telemetry(true);
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut MockAdc::with_raw_current(4095), &mut telem);
+        assert_eq!(u16::from_be_bytes([telem.0[3], telem.0[4]]), 16500);
+    }
+
+    #[test]
+    fn measurement_regression_adc_to_edt_current() {
+        let shared = SharedState::new();
+        let mut main = make_test_main_state();
+        for _ in 0..50 {
+            main.measurements.current_filter.update(4095);
+        }
+        trip_one_khz(&shared);
+        main.tick(
+            &shared,
+            &mut MockAdc::with_raw_current(4095),
+            &mut MockTelem,
+        );
+        let mut edt = crate::edt::EdtScheduler::default();
+        edt.request_init();
+        edt.next_frame(
+            crate::units::CentiAmps::ZERO,
+            crate::units::CentiVolts::ZERO,
+            0,
+        );
+        let mut frame = crate::edt::EdtFrame::Erpm;
+        for _ in 0..40 {
+            frame = edt.next_frame(shared.actual_current(), crate::units::CentiVolts::ZERO, 25);
+        }
+        assert!(matches!(frame, crate::edt::EdtFrame::Extended(0x6A5)));
+    }
+
+    #[test]
+    fn measurement_regression_absolute_cutoff_half_volt_setting() {
+        let shared = SharedState::new();
+        shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
+        let mut main = make_test_main_state();
+        main.config.low_voltage_cut_off = 2;
+        main.config.absolute_voltage_cutoff = 25; // 12.5 V
+        main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+        trip_one_khz(&shared);
+        // One third of ADC full-scale: 1.1 V * 11 = 12.1 V, below cutoff.
+        main.tick(
+            &shared,
+            &mut MockAdc::with_raw_voltage(1365),
+            &mut MockTelem,
+        );
+        assert!(!shared.armed());
+    }
+
+    #[test]
+    fn adc_cutoff_boundaries_preserve_strict_comparison_and_disabled_threshold() {
+        // A 10:1 divider makes ADC=1365 exactly 11 V; 1229 truncates to 9.90 V.
+        for (mode, absolute, raw, should_trip) in [
+            (2, 22, 1364, true),
+            (2, 22, 1365, false),
+            (2, 22, 1367, false),
+            (2, 0, 0, false),
+            (0, 22, 0, false),
+            (1, 0, 1228, true),
+            (1, 0, 1229, false),
+            (1, 0, 1230, false),
+        ] {
+            let shared = SharedState::new();
+            shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
+            let mut main = make_test_main_state();
+            main.voltage_divider_x100 = 1000;
+            main.config.low_voltage_cut_off = mode;
+            main.config.absolute_voltage_cutoff = absolute;
+            main.cell_count = 3;
+            main.low_cell_volt_cutoff = 330;
+            main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
+            trip_one_khz(&shared);
+            main.tick(&shared, &mut MockAdc::with_raw_voltage(raw), &mut MockTelem);
+            assert_eq!(!shared.armed(), should_trip, "mode={mode}, raw={raw}");
+        }
+    }
+
+    #[test]
+    fn cell_count_uses_nominal_cell_centivolts() {
+        for (cv, cells) in [(369, 0), (370, 1), (1109, 2), (1110, 3), (1680, 4)] {
+            let shared = SharedState::new();
+            shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
+            let mut main = make_test_main_state();
+            main.config.low_voltage_cut_off = 1;
+            main.set_battery_voltage(crate::units::CentiVolts(cv));
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+            assert_eq!(main.cell_count, cells);
+        }
+    }
+
     #[test]
     fn stall_detection_increments_timeout() {
         use crate::motor_mode::MotorMode;
@@ -925,7 +1075,7 @@ mod tests {
 
         let mut main = make_test_main_state();
         main.config.low_voltage_cut_off = 2;
-        main.config.absolute_voltage_cutoff = 100;
+        main.config.absolute_voltage_cutoff = 20; // 10 V
         main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
 
         trip_one_khz(&shared);
@@ -944,7 +1094,7 @@ mod tests {
 
         let mut main = make_test_main_state();
         main.config.low_voltage_cut_off = 2;
-        main.config.absolute_voltage_cutoff = 100;
+        main.config.absolute_voltage_cutoff = 20; // 10 V
         main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
 
         trip_one_khz(&shared);
@@ -967,7 +1117,7 @@ mod tests {
 
         let mut main = make_test_main_state();
         main.config.low_voltage_cut_off = 2;
-        main.config.absolute_voltage_cutoff = 100;
+        main.config.absolute_voltage_cutoff = 20; // 10 V
         main.protection.set_low_voltage_count(LVC_NORMAL_THRESHOLD);
 
         trip_one_khz(&shared);
@@ -976,6 +1126,10 @@ mod tests {
         let latched_count = main.protection.low_voltage_count();
         assert!(latched_count > LVC_NORMAL_THRESHOLD);
 
+        // Let the voltage filter settle above the physical 10 V threshold.
+        for _ in 0..50 {
+            main.measurements.voltage_filter.update(ADC_FULL_SCALE);
+        }
         shared.set_motor_mode(MotorMode::OldRoutine);
         trip_one_khz(&shared);
         main.tick(
