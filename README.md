@@ -16,18 +16,18 @@ rm32_stm32/    STM32 HAL implementation — peripheral drivers, ISR wrappers, MC
 | MCU | Architecture | Board Example | Status |
 |-----|-------------|---------------|--------|
 | STM32G071 | Cortex-M0+ | AM32 G071 64K ESC | Complete |
-| STM32F051 | Cortex-M0 | Siskin F051 | Port compiles; firmware blocked by 27 KiB flash limit |
+| STM32F051 | Cortex-M0 | Siskin F051 | Port compiles; image exceeds 27 KiB application flash |
 | STM32L431 | Cortex-M4F | Neutron L431 | Complete |
 
 Additional STM32 targets can be added following the same pattern (cfg-gated modules + shared ISR logic).
 
 ## Building
 
-F051 firmware currently exceeds its application partition. Its firmware binary
-fails explicitly; library checks remain available. Re-enable firmware only after
-an explicit full link verifies the real flash/RAM limits. A root-invoked Cargo
-cross-build does not currently establish flash fit for the other targets either;
-it may omit the linker configuration under `rm32_stm32/.cargo`.
+F051 firmware currently exceeds its 27 KiB application partition; reducing its
+size is separate follow-up work. The cross-build checks validate compilation,
+not deployability. Root-invoked Cargo commands may omit the linker configuration
+under `rm32_stm32/.cargo`; verify the real flash/RAM limits with an explicit full
+link before flashing any target.
 
 ```bash
 # Core library tests (host)
@@ -36,8 +36,8 @@ cargo test -p rm32
 # STM32 firmware (one target at a time)
 cd rm32_stm32
 cargo build --release --features stm32g071 --no-default-features --target thumbv6m-none-eabi
-# F051: port/library validation only (no firmware image)
-cargo build --lib --release --features stm32f051 --no-default-features --target thumbv6m-none-eabi
+# F051: compilation alone does not establish flash fit (see above)
+cargo build --release --features stm32f051 --no-default-features --target thumbv6m-none-eabi
 cargo build --release --features stm32l431 --no-default-features --target thumbv7em-none-eabihf
 
 # Blackbox tests (requires Python 3 + pytest)

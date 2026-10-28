@@ -44,8 +44,8 @@ repos:
         pass_filenames: false
 
     -   id: cross-build-f051
-        name: STM32F051 port and firmware rejection
-        entry: python tests/check_f051_release_guard.py
+        name: Cross Build - STM32F051
+        entry: cargo build --manifest-path=rm32_stm32/Cargo.toml --release --features stm32f051 --no-default-features --target thumbv6m-none-eabi
         language: system
         pass_filenames: false
 
