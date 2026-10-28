@@ -61,6 +61,7 @@ jobs:
         with:
           key: ${{ matrix.mcu }}
       - name: Build firmware
+        if: matrix.mcu != 'stm32f051'
         run: >
           cargo build
           --manifest-path=rm32_stm32/Cargo.toml
@@ -68,6 +69,13 @@ jobs:
           --features ${{ matrix.mcu }}
           --no-default-features
           --target ${{ matrix.target }}
+      - uses: actions/setup-python@v5
+        if: matrix.mcu == 'stm32f051'
+        with:
+          python-version: '3.12'
+      - name: Check F051 port and rejected firmware build
+        if: matrix.mcu == 'stm32f051'
+        run: python tests/check_f051_release_guard.py
 
   # ── Blackbox tests (Rust harness + test vectors) ────────────────
   blackbox:

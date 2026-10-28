@@ -46,6 +46,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.hal.com_timer().disable_interrupt();
             ctx.hal.phase().all_off();
             ctx.hal.pwm().set_duty_all(0);
+            ctx.hal.pwm().generate_update_event();
             ctx.hal.comp().mask_interrupts();
             ctx.shared.clear_isr_action(IsrAction::AllOff);
             return;
@@ -134,6 +135,12 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
                 ctx.hal.phase().all_off();
+                if ctx.duty.active_brake_on {
+                    // Do not apply the old brake compare to the restart sector.
+                    ctx.hal.pwm().set_duty_all(0);
+                    ctx.hal.pwm().generate_update_event();
+                    ctx.duty.active_brake_on = false;
+                }
                 ctx.shared.transition(MotorEvent::StartMotor);
                 ctx.duty.start_motor();
                 let step = ctx.commutation.advance();
@@ -218,6 +225,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.duty.sine_outputs_on = false;
     }
     let active_brake = ctx.shared.armed()
+        && !ctx.shared.running()
         && input < start_threshold
         && !sine_drive
         && ctx.config.brake_on_stop == 2;
@@ -228,6 +236,8 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         // Main owns the individual phase compares until the handoff is consumed.
     } else if active_brake {
         if !ctx.duty.active_brake_on {
+            ctx.hal.com_timer().disable_interrupt();
+            ctx.hal.comp().mask_interrupts();
             ctx.hal.pwm().set_duty_all(0);
             ctx.hal.pwm().generate_update_event();
             ctx.hal.phase().com_step(2);

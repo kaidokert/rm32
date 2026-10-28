@@ -371,6 +371,8 @@ fn stale_handoff_cannot_restart_after_disarm_release_or_all_off() {
         r.tick(0);
         r.shared.set_adjusted_input(201);
         r.sine();
+        r.hal.pwm.generate_update_event();
+        assert_ne!(r.hal.pwm.active.get(), [0; 3]);
         if cancel == 0 {
             r.shared.transition(MotorEvent::Disarm);
         }
@@ -384,6 +386,9 @@ fn stale_handoff_cannot_restart_after_disarm_release_or_all_off() {
         assert!(!r.hal.com.enabled);
         assert!(!r.log.borrow().contains(&"sector"));
         assert_eq!(r.hal.pwm.values, [0; 3]);
+        if cancel == 2 {
+            assert_eq!(r.hal.pwm.active.get(), [0; 3]);
+        }
     }
 }
 
@@ -417,6 +422,11 @@ fn sine_idle_preserves_configured_brake_output() {
         r.main.config.active_brake_power = 50;
         r.tick(0);
         r.sine();
+        // Active braking installs its topology only on entry; the other idle
+        // paths must reassert their output on this particular tick.
+        if mode != 2 {
+            r.log.borrow_mut().clear();
+        }
         r.tick(0);
         let (phase, duty) = match mode {
             1 => ("prop_brake", 1000),
@@ -429,6 +439,60 @@ fn sine_idle_preserves_configured_brake_output() {
             log.iter().position(|v| *v == phase).unwrap()
                 < log.iter().rposition(|v| *v == "duty").unwrap()
         );
+    }
+}
+
+#[test]
+fn active_braking_waits_for_stop_and_restarts_consistently() {
+    for interrupt_driven in [false, true] {
+        let mut r = Rig::new();
+        r.main.config.use_sine_start = 0;
+        r.main.config.brake_on_stop = 2;
+        r.main.config.active_brake_power = 50;
+        r.tick(500);
+        if interrupt_driven {
+            r.shared.transition(MotorEvent::BemfLocked);
+        }
+        r.hal.com.enabled = true;
+        r.hal.comp.enabled = true;
+        r.log.borrow_mut().clear();
+        r.tick(0);
+        // Preserve the existing ramp/coast-to-stop policy. Brake topology is only
+        // installed after main's stop event, never while commutation owns outputs.
+        assert!(r.shared.running());
+        assert!(!r.log.borrow().contains(&"sector"));
+        assert_ne!(r.hal.pwm.values, [490; 3]);
+        r.shared.transition(MotorEvent::StopMotor);
+        r.tick(0);
+        assert!(!r.shared.running());
+        assert!(!r.hal.com.enabled);
+        assert!(!r.hal.comp.enabled);
+        assert_eq!(r.hal.phase.step, 2);
+        r.hal.pwm.generate_update_event();
+        assert_eq!(r.hal.pwm.active.get(), [490; 3]);
+        r.log.borrow_mut().clear();
+        // Even a callback already pending at the stop cannot replace the brake.
+        isr_logic::commutation_timer_expired(
+            &mut r.comm,
+            &mut r.bemf,
+            &r.shared,
+            &mut r.hal.com,
+            &mut r.hal.comp,
+            &mut r.hal.phase,
+            false,
+            false,
+        );
+        assert!(!r.log.borrow().contains(&"sector"));
+        r.tick(0);
+        assert_eq!(r.hal.phase.step, 2);
+        assert_eq!(r.hal.pwm.active.get(), [490; 3]);
+        r.tick(500);
+        assert!(r.shared.old_routine());
+        assert_eq!(r.hal.phase.step, r.comm.step());
+        assert_eq!(r.hal.comp.step, r.comm.step());
+        assert_eq!(r.hal.phase.sector_active, [0; 3]);
+        assert_eq!(r.hal.interval.count, 5000);
+        assert_eq!(r.shared.commutation_interval(), 10000);
     }
 }
 

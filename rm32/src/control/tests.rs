@@ -60,6 +60,7 @@ mod tests {
         let mut armed_timeout = 0;
         let mut hal = MockMotorHal::new();
         hal.pwm.last_duty = 123;
+        hal.pwm.compares = [111, 222, 333];
         for _ in 0..3 {
             isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
                 commutation: &mut comm,
@@ -73,6 +74,7 @@ mod tests {
             });
         }
         assert_eq!(hal.pwm.last_duty, 123);
+        assert_eq!(hal.pwm.compares, [111, 222, 333]);
         assert!(!hal.phase.all_off_called);
     }
 
@@ -103,19 +105,27 @@ mod tests {
     }
 
     struct MockPwm {
+        compares: [u16; 3],
         last_duty: u16,
         order: *const MockOrder,
     }
     impl hal::PwmOutput for MockPwm {
         fn set_duty_all(&mut self, d: u16) {
             self.last_duty = d;
+            self.compares = [d; 3];
             record_order(self.order, |order| &order.set_duty);
         }
         fn set_auto_reload(&mut self, _: u16) {}
         fn set_prescaler(&mut self, _: u16) {}
-        fn set_compare1(&mut self, _: u16) {}
-        fn set_compare2(&mut self, _: u16) {}
-        fn set_compare3(&mut self, _: u16) {}
+        fn set_compare1(&mut self, v: u16) {
+            self.compares[0] = v;
+        }
+        fn set_compare2(&mut self, v: u16) {
+            self.compares[1] = v;
+        }
+        fn set_compare3(&mut self, v: u16) {
+            self.compares[2] = v;
+        }
         fn generate_update_event(&mut self) {}
         fn set_dead_time_override(&mut self, _dtg: u16) {}
     }
@@ -235,6 +245,7 @@ mod tests {
             Self {
                 pwm: MockPwm {
                     last_duty: 0,
+                    compares: [0; 3],
                     order: ptr::null(),
                 },
                 comp: MockComp {

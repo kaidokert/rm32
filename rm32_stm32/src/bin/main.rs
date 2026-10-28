@@ -6,6 +6,13 @@
 #![no_std]
 #![no_main]
 
+// Keep port/library checks available, but do not produce an unusable release
+// image until the firmware fits the F051 application partition again.
+#[cfg(feature = "stm32f051")]
+compile_error!(
+    "STM32F051 firmware is unavailable: the image exceeds the 27 KiB application flash partition. Only library/port checks are supported; restore and verify flash fit before enabling firmware builds."
+);
+
 use cortex_m_rt::entry;
 
 use rm32::commutation::Commutation;
