@@ -1,8 +1,8 @@
 //! DShot protocol decode/encode.
 //!
-//! - Frame decoding from DMA buffer (computeDshotDMA equivalent)
-//! - GCR telemetry response encoding (make_dshot_package equivalent)
-//! - Command processing
+//! Packet decoding and telemetry GCR encoding are independent of capture timers.
+//! DMA capture decoding and telemetry waveform generation adapt these operations
+//! to timestamp and output buffers.
 
 /// GCR encode table for DShot telemetry
 const GCR_ENCODE_TABLE: [u8; 16] = [
@@ -28,7 +28,7 @@ pub mod commands {
 }
 
 /// Result of decoding a DShot frame
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DshotFrame {
     /// Valid throttle value (0-2047) with telemetry request flag
     Throttle { value: u16, telemetry: bool },
@@ -40,55 +40,22 @@ pub enum DshotFrame {
     InvalidTiming,
 }
 
-/// Decode a DShot frame from a DMA capture buffer.
-/// `dma_buffer` contains 32 entries (16 pulse pairs).
-/// `frametime_low`/`frametime_high` define the valid window.
-pub fn decode_frame(
-    dma_buffer: &[u32; 32],
-    frametime_low: u16,
-    frametime_high: u16,
-    bidirectional: bool,
-) -> DshotFrame {
-    let frametime = (dma_buffer[31].wrapping_sub(dma_buffer[0])) as u16;
-    let halfpulsetime = frametime >> 5;
-
-    if frametime <= frametime_low || frametime >= frametime_high {
-        return DshotFrame::InvalidTiming;
-    }
-
-    let mut dpulse = [0u8; 16];
-    for i in 0..16 {
-        let pdiff = (dma_buffer[i * 2 + 1].wrapping_sub(dma_buffer[i * 2])) as u16;
-        dpulse[i] = if pdiff > halfpulsetime { 1 } else { 0 };
-    }
-
-    let calc_crc = (dpulse[0] ^ dpulse[4] ^ dpulse[8]) << 3
-        | (dpulse[1] ^ dpulse[5] ^ dpulse[9]) << 2
-        | (dpulse[2] ^ dpulse[6] ^ dpulse[10]) << 1
-        | (dpulse[3] ^ dpulse[7] ^ dpulse[11]);
-
-    let mut check_crc = dpulse[12] << 3 | dpulse[13] << 2 | dpulse[14] << 1 | dpulse[15];
+/// Decode a 16-bit DShot packet: 11-bit value, telemetry bit, then 4-bit CRC.
+/// `bidirectional` selects the inverted CRC used by bidirectional DShot.
+/// This operates on packet bits only and never returns [`DshotFrame::InvalidTiming`].
+pub fn unpack(packet: u16, bidirectional: bool) -> DshotFrame {
+    let calc_crc = (packet >> 4 ^ packet >> 8 ^ packet >> 12) & 0xF;
+    let mut check_crc = packet & 0xF;
     if bidirectional {
-        check_crc = (!check_crc).wrapping_add(16);
+        check_crc = !check_crc & 0xF;
     }
 
     if calc_crc != check_crc {
         return DshotFrame::BadCrc;
     }
 
-    let value = (dpulse[0] as u16) << 10
-        | (dpulse[1] as u16) << 9
-        | (dpulse[2] as u16) << 8
-        | (dpulse[3] as u16) << 7
-        | (dpulse[4] as u16) << 6
-        | (dpulse[5] as u16) << 5
-        | (dpulse[6] as u16) << 4
-        | (dpulse[7] as u16) << 3
-        | (dpulse[8] as u16) << 2
-        | (dpulse[9] as u16) << 1
-        | (dpulse[10] as u16);
-
-    let telemetry = dpulse[11] == 1;
+    let value = packet >> 5;
+    let telemetry = packet & 0x10 != 0;
 
     if value > 47 {
         DshotFrame::Throttle { value, telemetry }
@@ -105,15 +72,41 @@ pub fn decode_frame(
     }
 }
 
+/// Decode a DShot frame from a DMA capture buffer using [`unpack`].
+/// `dma_buffer` contains 32 entries (16 pulse pairs).
+/// `frametime_low`/`frametime_high` define the exclusive valid window.
+pub fn decode_frame(
+    dma_buffer: &[u32; 32],
+    frametime_low: u16,
+    frametime_high: u16,
+    bidirectional: bool,
+) -> DshotFrame {
+    let frametime = (dma_buffer[31].wrapping_sub(dma_buffer[0])) as u16;
+    let halfpulsetime = frametime >> 5;
+
+    if frametime <= frametime_low || frametime >= frametime_high {
+        return DshotFrame::InvalidTiming;
+    }
+
+    let mut packet = 0u16;
+    for i in 0..16 {
+        let pdiff = (dma_buffer[i * 2 + 1].wrapping_sub(dma_buffer[i * 2])) as u16;
+        packet = (packet << 1) | u16::from(pdiff > halfpulsetime);
+    }
+    unpack(packet, bidirectional)
+}
+
 /// GCR output bit shift — MCU-dependent.
 /// F051/F031/CH32V203: 6 (multiply by 64)
 /// All others (G071, G431, L431, F421, etc.): 7 (multiply by 128)
 pub const GCR_SHIFT_F0: u8 = 6;
 pub const GCR_SHIFT_G0: u8 = 7;
 
-/// Encode a raw 12-bit value into GCR buffer for bidir DShot response.
-/// Used for both eRPM and EDT frames.
-pub fn encode_gcr_frame(value_12bit: u16, gcr_out: &mut [u32], padding: usize, gcr_shift: u8) {
+/// Encode a 12-bit telemetry value and its inverted CRC as a 20-bit GCR word.
+/// The result occupies the low 20 bits, sent most significant bit first,
+/// before transition encoding or timer scaling. Used for both eRPM and EDT.
+#[inline(always)]
+pub fn gcr_bits(value_12bit: u16) -> u32 {
     // Calculate checksum (XOR of nibbles, inverted)
     let mut csum = 0u16;
     let mut csum_data = value_12bit;
@@ -126,10 +119,17 @@ pub fn encode_gcr_frame(value_12bit: u16, gcr_out: &mut [u32], padding: usize, g
     let full_number = (value_12bit << 4) | csum;
 
     // GCR RLL encode 16 to 20 bit
-    let gcr_number: u32 = (GCR_ENCODE_TABLE[(full_number >> 12) as usize] as u32) << 15
+    (GCR_ENCODE_TABLE[(full_number >> 12) as usize] as u32) << 15
         | (GCR_ENCODE_TABLE[((full_number >> 8) & 0xF) as usize] as u32) << 10
         | (GCR_ENCODE_TABLE[((full_number >> 4) & 0xF) as usize] as u32) << 5
-        | (GCR_ENCODE_TABLE[(full_number & 0xF) as usize] as u32);
+        | (GCR_ENCODE_TABLE[(full_number & 0xF) as usize] as u32)
+}
+
+/// Encode a raw 12-bit value into GCR buffer for bidir DShot response.
+/// Used for both eRPM and EDT frames. Applies transition encoding and timer
+/// scaling to the word returned by [`gcr_bits`].
+pub fn encode_gcr_frame(value_12bit: u16, gcr_out: &mut [u32], padding: usize, gcr_shift: u8) {
+    let gcr_number = gcr_bits(value_12bit);
 
     // GCR RLL encode 20 to 21 bit
     let multiplier = 1u32 << gcr_shift;
@@ -177,6 +177,172 @@ pub fn encode_telemetry(com_time: u16, running: bool, gcr_out: &mut [u32], paddi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Independent bit-column parity reference, shared by the input and
+    // telemetry checks. Does not call the production checksum or GCR encoder.
+    fn reference_checksum(data: u16, inverted: bool) -> u16 {
+        let mut checksum = 0;
+        for column in 0..4 {
+            let mut parity = u16::from(inverted);
+            for row in 0..3 {
+                parity ^= (data >> (column + row * 4)) & 1;
+            }
+            checksum |= parity << column;
+        }
+        checksum
+    }
+
+    fn reference_packet(packet: u16, bidirectional: bool) -> DshotFrame {
+        if packet & 0xF != reference_checksum(packet >> 4, bidirectional) {
+            return DshotFrame::BadCrc;
+        }
+        let value = packet >> 5;
+        let telemetry = packet & 0x10 != 0;
+        match value {
+            1..=47 => DshotFrame::Command {
+                cmd: value,
+                telemetry,
+            },
+            _ => DshotFrame::Throttle { value, telemetry },
+        }
+    }
+
+    fn capture_packet(packet: u16, start: u32) -> [u32; 32] {
+        let mut capture = [0; 32];
+        for bit in 0..16 {
+            let rising = start.wrapping_add(bit as u32 * 32);
+            let width = if packet & (1 << (15 - bit)) != 0 {
+                22
+            } else {
+                10
+            };
+            // Model a 16-bit capture timer, including wrap within a frame.
+            capture[2 * bit] = rising & 0xFFFF;
+            capture[2 * bit + 1] = rising.wrapping_add(width) & 0xFFFF;
+        }
+        capture
+    }
+
+    #[test]
+    fn all_packets_match_independent_reference() {
+        for packet in 0..=u16::MAX {
+            for bidirectional in [false, true] {
+                let expected = reference_packet(packet, bidirectional);
+                assert_eq!(
+                    unpack(packet, bidirectional),
+                    expected,
+                    "packet {packet:#06x}, bidirectional {bidirectional}"
+                );
+                for start in [1000, 65520] {
+                    let capture = capture_packet(packet, start);
+                    assert_eq!(
+                        decode_frame(&capture, 400, 600, bidirectional),
+                        expected,
+                        "packet {packet:#06x}, bidirectional {bidirectional}, start {start}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capture_timing_window_remains_strict() {
+        for packet in [0, 1, u16::MAX] {
+            for start in [1000, 65520] {
+                let capture = capture_packet(packet, start);
+                let duration = capture[31].wrapping_sub(capture[0]) as u16;
+                for bidirectional in [false, true] {
+                    for (low, high) in [(duration, duration + 1), (duration - 1, duration)] {
+                        assert_eq!(
+                            decode_frame(&capture, low, high, bidirectional),
+                            DshotFrame::InvalidTiming
+                        );
+                    }
+                    assert_eq!(
+                        decode_frame(&capture, duration - 1, duration + 1, bidirectional),
+                        reference_packet(packet, bidirectional)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capture_bit_threshold_remains_strict() {
+        for bidirectional in [false, true] {
+            let mut capture = build_frame(0, false, bidirectional);
+            let threshold = (capture[31].wrapping_sub(capture[0]) as u16) >> 5;
+            capture[1] = capture[0] + u32::from(threshold);
+            assert_eq!(
+                decode_frame(&capture, 400, 600, bidirectional),
+                DshotFrame::Throttle {
+                    value: 0,
+                    telemetry: false
+                }
+            );
+            capture[1] += 1; // Flip the most significant data bit, not its CRC.
+            assert_eq!(
+                decode_frame(&capture, 400, 600, bidirectional),
+                DshotFrame::BadCrc
+            );
+        }
+    }
+
+    // Inverse 5b/4b codebook, deliberately independent of GCR_ENCODE_TABLE.
+    fn decode_gcr_word(word: u32) -> u16 {
+        let mut packet = 0;
+        for shift in [15, 10, 5, 0] {
+            let nibble = match (word >> shift) & 0x1F {
+                0x19 => 0x0,
+                0x1B => 0x1,
+                0x12 => 0x2,
+                0x13 => 0x3,
+                0x1D => 0x4,
+                0x15 => 0x5,
+                0x16 => 0x6,
+                0x17 => 0x7,
+                0x1A => 0x8,
+                0x09 => 0x9,
+                0x0A => 0xA,
+                0x0B => 0xB,
+                0x1E => 0xC,
+                0x0D => 0xD,
+                0x0E => 0xE,
+                0x0F => 0xF,
+                symbol => panic!("invalid GCR symbol {symbol:#04x}"),
+            };
+            packet = (packet << 4) | nibble;
+        }
+        packet
+    }
+
+    #[test]
+    fn all_telemetry_values_match_independent_reference() {
+        const UNTOUCHED: u32 = 0xDEAD_BEEF;
+        for value in 0..4096 {
+            let expected = (value << 4) | reference_checksum(value, true);
+            let word = gcr_bits(value);
+            assert!(word < (1 << 20));
+            assert_eq!(decode_gcr_word(word), expected, "value {value:#05x}");
+            for shift in [GCR_SHIFT_F0, GCR_SHIFT_G0] {
+                for padding in [0, 7] {
+                    let mut samples = [UNTOUCHED; 37];
+                    encode_gcr_frame(value, &mut samples, padding, shift);
+                    assert!(samples[..padding].iter().all(|&v| v == UNTOUCHED));
+                    assert!(samples[padding + 22..].iter().all(|&v| v == UNTOUCHED));
+                    assert_eq!(samples[padding], 0);
+                    assert_eq!(samples[padding + 1], 1 << shift);
+
+                    let mut word = 0;
+                    for pair in samples[padding + 1..padding + 22].windows(2) {
+                        assert!(pair[1] == 0 || pair[1] == 1 << shift);
+                        word = (word << 1) | ((pair[0] ^ pair[1]) >> shift);
+                    }
+                    assert_eq!(decode_gcr_word(word), expected, "value {value:#05x}");
+                }
+            }
+        }
+    }
 
     /// Build a DShot DMA buffer from an 11-bit value.
     fn build_frame(value: u16, telem: bool, inverted_crc: bool) -> [u32; 32] {
