@@ -13,4 +13,4 @@ eeprom.brake_on_stop=2
 eeprom.active_brake_power=50
 
 @sequence
-ticks 3 | throttle=0 | stepper_sine=1
+ticks 3 | throttle=0 | stepper_sine=1 phase_mode=1 pwm_a=490 pwm_b=490 pwm_c=490

@@ -12,7 +12,6 @@ use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::dshot_commands::CommandResult;
 use rm32::hal;
-use rm32::hal::PwmOutput;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 use rm32::system::SystemTick;
@@ -24,6 +23,7 @@ use std::rc::Rc;
 // --- Mock HAL (same as harness.rs) ---
 
 struct MockPwm {
+    phases: [u16; 3],
     duty: u16,
     arr: u16,
     duty_count: u32,
@@ -31,15 +31,22 @@ struct MockPwm {
 impl hal::PwmOutput for MockPwm {
     fn set_duty_all(&mut self, d: u16) {
         self.duty = d;
+        self.phases = [d; 3];
         self.duty_count += 1;
     }
     fn set_auto_reload(&mut self, arr: u16) {
         self.arr = arr;
     }
     fn set_prescaler(&mut self, _: u16) {}
-    fn set_compare1(&mut self, _: u16) {}
-    fn set_compare2(&mut self, _: u16) {}
-    fn set_compare3(&mut self, _: u16) {}
+    fn set_compare1(&mut self, v: u16) {
+        self.phases[0] = v;
+    }
+    fn set_compare2(&mut self, v: u16) {
+        self.phases[1] = v;
+    }
+    fn set_compare3(&mut self, v: u16) {
+        self.phases[2] = v;
+    }
     fn generate_update_event(&mut self) {}
     fn set_dead_time_override(&mut self, _: u16) {}
 }
@@ -84,19 +91,28 @@ impl HalCounts {
 }
 
 struct MockPhase {
+    mode: u8,
     all_off: HalCounter,
     full_brake: HalCounter,
 }
 impl hal::PhaseOutput for MockPhase {
-    fn com_step(&mut self, _: u8) {}
+    fn com_step(&mut self, _: u8) {
+        self.mode = 1;
+    }
     fn all_off(&mut self) {
+        self.mode = 0;
         self.all_off.set(self.all_off.get() + 1);
     }
     fn full_brake(&mut self) {
+        self.mode = 4;
         self.full_brake.set(self.full_brake.get() + 1);
     }
-    fn all_pwm(&mut self) {}
-    fn proportional_brake(&mut self) {}
+    fn all_pwm(&mut self) {
+        self.mode = 2;
+    }
+    fn proportional_brake(&mut self) {
+        self.mode = 3;
+    }
 }
 
 struct MockInterval {
@@ -238,6 +254,7 @@ impl Harness {
             armed_timeout_count: 0,
             hal: MockMotorHal {
                 pwm: MockPwm {
+                    phases: [0; 3],
                     duty: 0,
                     arr: 0,
                     duty_count: 0,
@@ -247,6 +264,7 @@ impl Harness {
                     mask_interrupts: counts.mask_interrupts.clone(),
                 },
                 phase: MockPhase {
+                    mode: 0,
                     all_off: counts.all_off.clone(),
                     full_brake: counts.full_brake.clone(),
                 },
@@ -497,32 +515,15 @@ impl Harness {
             self.shared.set_signal_timeout(0);
         }
 
-        if let Some((result, (ch1, ch2, ch3))) =
-            self.system.tick_sine(&self.shared, &self.config, 60, 1999)
-        {
-            self.hal.pwm.set_compare1(ch1);
-            self.hal.pwm.set_compare2(ch2);
-            self.hal.pwm.set_compare3(ch3);
-            match result {
-                rm32::sine::SineStepResult::Continue(_) => {}
-                rm32::sine::SineStepResult::Changeover {
-                    commutation_interval,
-                    step,
-                } => {
-                    self.system.apply_sine_changeover(
-                        &self.shared,
-                        &mut self.main,
-                        commutation_interval,
-                        step,
-                    );
-                }
-                rm32::sine::SineStepResult::Idle => {
-                    let brake = rm32::system::SystemTick::handle_sine_idle(&self.config, 1999);
-                    self.system.input_state.set_prop_brake_active(brake);
-                    self.shared.set_prop_brake_active(brake);
-                }
-            }
-        }
+        self.main.config = self.config;
+        self.system.service_sine(
+            &self.shared,
+            &mut self.main,
+            &mut self.hal,
+            &mut self.duty,
+            self.commutation.step(),
+            60,
+        );
 
         // Advance interval timer
         self.hal.interval.count += 1;
@@ -580,7 +581,7 @@ impl Harness {
              battery_voltage={} actual_current={} degrees_celsius={} \
              last_duty_cycle={} prop_brake_active={} \
              inputSet={} dshot={} servoPwm={} \
-             pwm_duty={} pwm_arr={} pwm_duty_count={} \
+             pwm_a={} pwm_b={} pwm_c={} phase_mode={} pwm_duty={} pwm_arr={} pwm_duty_count={} \
              duty_cycle_maximum={} filter_level={} temp_advance={} \
              send_telemetry={} send_esc_info_flag={} play_tone_flag={} \
              dshot_telemetry={} \
@@ -619,6 +620,10 @@ impl Harness {
             self.shared.input_set() as i32,
             self.dshot as i32,
             self.servo_pwm as i32,
+            self.hal.pwm.phases[0],
+            self.hal.pwm.phases[1],
+            self.hal.pwm.phases[2],
+            self.hal.phase.mode,
             self.hal.pwm.duty,
             self.hal.pwm.arr,
             self.hal.pwm.duty_count,
@@ -668,6 +673,7 @@ impl Harness {
             "zc" => {
                 if v == 1 {
                     let _ = isr_logic::bemf_zero_cross(
+                        &self.shared,
                         &self.commutation,
                         &mut self.bemf,
                         &mut self.hal.comp,
@@ -792,6 +798,7 @@ impl Harness {
             "eeprom.comp_pwm" => self.config.comp_pwm = v as u8,
             "eeprom.variable_pwm" => self.config.variable_pwm = v as u8,
             "eeprom.brake_on_stop" => self.config.brake_on_stop = v as u8,
+            "eeprom.active_brake_power" => self.config.active_brake_power = v as u8,
             "eeprom.stall_protection" => self.config.stall_protection = v as u8,
             "eeprom.stuck_rotor_protection" => self.config.stuck_rotor_protection = v as u8,
             "eeprom.sine_mode_changeover_thottle_level"

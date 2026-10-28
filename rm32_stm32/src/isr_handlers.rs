@@ -23,11 +23,12 @@ use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
 /// 2. **Single core**: All STM32 targets (G071/F051/L431/G431) are
 ///    single-core. No other hart can access this cell.
 ///
-/// 3. **No main-loop access**: The main loop communicates via `SharedState`
-///    atomics, never touching `ISR_LOCAL`.
+/// 3. **Serialized main-loop access**: The fixed `service_sine` entry point
+///    masks interrupts for its entire borrow. It does not call ISR handlers,
+///    expose the reference, or delay while holding it.
 ///
 /// 4. **Init-once**: `get()` lazily initializes from `take_isr_state()`
-///    exactly once (first ISR invocation). Subsequent calls return the
+///    exactly once (first ISR or sine service invocation). Subsequent calls return the
 ///    same `&mut`. The `Option` transitions None→Some exactly once.
 ///
 /// If any of these invariants change (e.g., adding a higher-priority ISR
@@ -49,14 +50,35 @@ impl IsrCell {
     #[inline]
     #[allow(clippy::mut_from_ref)]
     fn get(&self) -> &mut TargetIsrState {
-        // SAFETY: Called only from ISR context at a single priority level.
-        // No concurrent access possible (see struct-level safety doc).
+        // SAFETY: Called from same-priority ISRs or service_sine with interrupts
+        // masked. No concurrent/reentrant access (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };
         opt.get_or_insert_with(|| isr::take_isr_state().expect("ISR state not initialized"))
     }
 }
 
 static ISR_LOCAL: IsrCell = IsrCell::new();
+
+/// Run the main-loop sine operation against the live motor state, including
+/// after the first ISR has taken it from the initialization cell. Keep the
+/// returned delay outside interrupt exclusion.
+pub fn service_sine(
+    system: &mut rm32::system::SystemTick,
+    main: &mut rm32::main_state::MainState,
+    dead_time: i16,
+) -> Option<u16> {
+    cortex_m::interrupt::free(|_| {
+        let state = ISR_LOCAL.get();
+        system.service_sine(
+            isr::shared(),
+            main,
+            &mut state.hal,
+            &mut state.duty,
+            state.commutation.step(),
+            dead_time,
+        )
+    })
+}
 
 /// 20kHz control loop tick (TIM6 ISR body).
 pub fn handle_tim6() {
@@ -77,6 +99,9 @@ pub fn handle_tim6() {
 
 /// Commutation timer expired (TIM14 ISR body).
 pub fn handle_tim14() {
+    if !crate::timer::take_commutation_interrupt() {
+        return;
+    }
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
     rm32::control::isr_logic::commutation_timer_expired(
@@ -95,6 +120,7 @@ pub fn handle_tim14() {
 pub fn handle_comp() {
     let state = ISR_LOCAL.get();
     let _accepted = rm32::control::isr_logic::bemf_zero_cross(
+        isr::shared(),
         &state.commutation,
         &mut state.bemf,
         &mut state.hal.comp,

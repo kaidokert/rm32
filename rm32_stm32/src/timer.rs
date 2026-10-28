@@ -23,6 +23,7 @@ pub trait RawTimer {
     fn write_psc(&self, v: u32);
     fn write_arr(&self, v: u32);
     fn write_egr(&self, v: u32);
+    fn read_sr(&self) -> u32;
     fn write_sr(&self, v: u32);
     fn read_dier(&self) -> u32;
     fn write_dier(&self, v: u32);
@@ -90,6 +91,10 @@ macro_rules! define_raw_timer {
                 }
             }
             #[inline]
+            fn read_sr(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.sr().read().bits()
+            }
+            #[inline]
             fn write_sr(&self, v: u32) {
                 unsafe {
                     (&*<$pac_periph>::PTR).sr().write(|w| w.bits(v));
@@ -140,6 +145,10 @@ macro_rules! define_raw_timer {
                 unsafe { (&*<$pac_periph>::PTR).egr.write(|w| w.bits(v)) }
             }
             #[inline]
+            fn read_sr(&self) -> u32 {
+                unsafe { &*<$pac_periph>::PTR }.sr.read().bits()
+            }
+            #[inline]
             fn write_sr(&self, v: u32) {
                 unsafe { (&*<$pac_periph>::PTR).sr.write(|w| w.bits(v)) }
             }
@@ -157,6 +166,17 @@ macro_rules! define_raw_timer {
 
 // Raw timer types defined in mcu_xxx/chip.rs, re-exported via mcu::*.
 use crate::mcu::{ComTimerRaw, Tim2Raw};
+
+/// Reject a stale NVIC invocation after commutation was cancelled or rearmed.
+/// TIM14/TIM16 uses UIF/UIE (bit zero); other status flags are left intact.
+pub fn take_commutation_interrupt() -> bool {
+    let raw = ComTimerRaw;
+    if raw.read_sr() & raw.read_dier() & 1 == 0 {
+        return false;
+    }
+    raw.write_sr(!1);
+    true
+}
 
 /// TIM2 as free-running interval timer (2MHz, 0.5us/tick).
 pub struct Tim2Interval {

@@ -220,41 +220,12 @@ fn main() -> ! {
     let shared = isr::shared();
     let mut system = rm32::system::SystemTick::new();
     loop {
-        if let Some((result, (ch1, ch2, ch3))) = system.tick_sine(
-            shared,
-            &main_state.config,
+        if let Some(delay_us) = rm32_stm32::isr_handlers::service_sine(
+            &mut system,
+            &mut main_state,
             BOARD.dead_time as i16,
-            Chip::TIM1_AUTORELOAD,
         ) {
-            isr::with_isr_state(|isr| {
-                isr.hal.pwm.set_compare1(ch1);
-                isr.hal.pwm.set_compare2(ch2);
-                isr.hal.pwm.set_compare3(ch3);
-            });
-            match result {
-                rm32::sine::SineStepResult::Continue(delay_us) => {
-                    sys.delay_micros(delay_us as u32);
-                }
-                rm32::sine::SineStepResult::Changeover {
-                    commutation_interval,
-                    step,
-                } => {
-                    system.apply_sine_changeover(
-                        shared,
-                        &mut main_state,
-                        commutation_interval,
-                        step,
-                    );
-                }
-                rm32::sine::SineStepResult::Idle => {
-                    let brake = rm32::system::SystemTick::handle_sine_idle(
-                        &main_state.config,
-                        shared.tim1_arr(),
-                    );
-                    system.input_state.set_prop_brake_active(brake);
-                    shared.set_prop_brake_active(brake);
-                }
-            }
+            sys.delay_micros(delay_us as u32);
         }
 
         // Shared system tick: input processing + main loop pipeline.

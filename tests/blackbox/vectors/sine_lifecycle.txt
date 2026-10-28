@@ -1,0 +1,18 @@
+# Enter through configuration, drive sine, hand off, and return to sine after stop.
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+eeprom.use_sine_start=1
+eeprom.comp_pwm=1
+eeprom.sine_mode_power=5
+eeprom.sine_mode_changeover_throttle_level=10
+eeprom.brake_on_stop=0
+
+@sequence
+tick 1 | throttle=0 | stepper_sine=1 running=0 phase_mode=0 pwm_a=0 pwm_b=0 pwm_c=0
+ticks 3 | throttle=100 | stepper_sine=1 running=0 phase_mode=2 pwm_a>0 pwm_b>0 pwm_c>0
+ticks 2 | throttle=500 | stepper_sine=0 running=1 old_routine=1 step=5 phase_mode=1 commutation_interval=9000
+ticks 2 | throttle=0 | stepper_sine=1 running=0 phase_mode=0 pwm_a=0 pwm_b=0 pwm_c=0
+ticks 3 | throttle=100 | stepper_sine=1 running=0 phase_mode=2 pwm_a>0 pwm_b>0 pwm_c>0
