@@ -69,7 +69,7 @@ pub trait ComTimer {
 ///
 /// Reduces generic parameter count from 5 to 1 in ISR function signatures.
 /// Implementors provide the concrete MCU-specific types.
-pub trait MotorHal {
+pub trait MotorHal: crate::platform::Platform {
     type Pwm: PwmOutput;
     type Comp: Comparator;
     type Phase: PhaseOutput;

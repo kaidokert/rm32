@@ -14,7 +14,7 @@ use rm32::control::state::{BemfState, DutyState};
 use rm32::hal::{PwmOutput, System, TelemetryUart as _};
 use rm32::ws2812::LedStatus;
 
-use rm32::main_state::MainState;
+type MainState = rm32::main_state::MainState<rm32_stm32::platform::StmPlatform>;
 use rm32_stm32::init::InitResult;
 use rm32_stm32::isr::{self, IsrState};
 use rm32_stm32::mcu::FlashStorage;
@@ -218,7 +218,7 @@ fn main() -> ! {
 
     // --- Main loop ---
     let shared = isr::shared();
-    let mut system = rm32::system::SystemTick::new();
+    let mut system = rm32::system::SystemTick::<rm32_stm32::platform::StmPlatform>::new();
     loop {
         if let Some(delay_us) = rm32_stm32::isr_handlers::service_sine(
             &mut system,
@@ -230,7 +230,10 @@ fn main() -> ! {
 
         // Shared system tick: input processing + main loop pipeline.
         // Same function called by harness — eliminates divergence.
-        rm32::system::SystemTick::sync_config_writes(shared, &mut main_state);
+        rm32::system::SystemTick::<rm32_stm32::platform::StmPlatform>::sync_config_writes(
+            shared,
+            &mut main_state,
+        );
         system.tick_input(shared, &mut main_state);
         system.sync_isr_to_main(shared, &mut main_state);
         system.tick_main(shared, &mut main_state, &mut adc, &mut telem);

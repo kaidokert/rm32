@@ -35,6 +35,23 @@ where
     pub phase: PH,
 }
 
+impl<P, I, C, IT, CT, PH> rm32::platform::Platform for IsrHal<P, I, C, IT, CT, PH>
+where
+    P: hal::PwmOutput,
+    I: hal::InputCapture,
+    C: hal::Comparator,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    const TICK_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ;
+    const TIMER_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TIMER_HZ;
+    const CAPTURE_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::CAPTURE_HZ;
+    const GCR_SHIFT: u8 = <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT;
+    const PWM_BASE_PERIOD: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
+}
+
 impl<P, I, C, IT, CT, PH> hal::MotorHal for IsrHal<P, I, C, IT, CT, PH>
 where
     P: hal::PwmOutput,
@@ -98,7 +115,7 @@ pub type TargetIsrState = IsrState<TargetIsrHal>;
 // ============================================================
 
 static ISR_STATE: Mutex<RefCell<Option<TargetIsrState>>> = Mutex::new(RefCell::new(None));
-static SHARED: SharedState = SharedState::new();
+static SHARED: SharedState = SharedState::new::<crate::platform::StmPlatform>();
 
 pub fn shared() -> &'static SharedState {
     &SHARED

@@ -82,7 +82,9 @@ pub fn init(
     let telem = super::telemetry_uart::L431TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
 
-    const CONTROL_RELOAD: u16 = (80_000_000 / rm32::constants::CONTROL_TICK_HZ - 1) as u16;
+    const CONTROL_RELOAD: u16 = (80_000_000
+        / <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ
+        - 1) as u16;
     // TIM6: 80MHz / 4000 = 20kHz
     unsafe {
         // Enable TIM6 (APB1ENR1 bit 4)

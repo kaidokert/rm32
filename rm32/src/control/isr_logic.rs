@@ -13,10 +13,8 @@ use crate::motor_mode::MotorEvent;
 use crate::shared_comm::{IsrAction, SharedComm};
 
 const COMMUTATE_KICK_DELAY_TICKS: u16 = 1;
-const STARTUP_COMMUTATION_INTERVAL: u32 = 10000;
-const STARTUP_INTERVAL_TIMER_COUNT: u32 = STARTUP_COMMUTATION_INTERVAL / 2;
 
-/// 20kHz control loop tick.
+/// Control loop tick at `H::TICK_HZ` (20 kHz on STM32).
 ///
 /// Handles: throttle→setpoint mapping, arming, BEMF polling (old_routine),
 /// ramp rate limiting, PWM output.
@@ -25,7 +23,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     ctx.shared.one_khz_counter_inc();
 
     if ctx.config.telemetry_on_interval != 0 {
-        let limit = telemetry_interval_ticks(ctx.config.telemetry_on_interval);
+        let limit = telemetry_interval_ticks::<H>(ctx.config.telemetry_on_interval);
         if ctx.shared.telem_counter_check_and_inc(limit) {
             ctx.shared.set_send_telemetry(true);
         }
@@ -146,14 +144,16 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 let step = ctx.commutation.advance();
                 let e_com = ctx
                     .commutation
-                    .record_interval(ctx.shared.commutation_interval() as u16);
+                    .record_interval::<H>(ctx.shared.commutation_interval() as u16);
                 ctx.shared.set_e_com_time(e_com);
                 ctx.hal.phase().com_step(step);
                 ctx.hal.comp().set_step(step, ctx.commutation.rising);
                 ctx.hal.comp().change_input();
                 ctx.shared
-                    .set_commutation_interval(STARTUP_COMMUTATION_INTERVAL);
-                ctx.hal.interval().set_count(STARTUP_INTERVAL_TIMER_COUNT);
+                    .set_commutation_interval(H::STARTUP_COMMUTATION_INTERVAL);
+                ctx.hal
+                    .interval()
+                    .set_count(H::STARTUP_COMMUTATION_INTERVAL / 2);
             }
         } else {
             ctx.shared.set_duty_cycle_setpoint(0);
@@ -176,7 +176,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     if !ctx.shared.armed() {
         if ctx.shared.input_set() && ctx.shared.adjusted_input() == 0 {
             *ctx.armed_timeout_count += 1;
-            if *ctx.armed_timeout_count > ARMING_TIMEOUT_TICKS {
+            if *ctx.armed_timeout_count > H::ARMING_TIMEOUT_TICKS {
                 ctx.shared.transition(MotorEvent::Arm);
                 *ctx.armed_timeout_count = 0;
             }
@@ -191,8 +191,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 
     // Ramp rate limiting
-    let average_interval = (ctx.shared.e_com_time() / 3) as u32;
-    ctx.duty.ramp_limit(
+    let average_interval =
+        crate::platform::e_com_us_to_avg_ticks::<H>(ctx.shared.e_com_time()) as u32;
+    ctx.duty.ramp_limit::<H>(
         ctx.shared.battery_voltage(),
         ctx.shared.commutation_interval(),
         ctx.shared.zero_crosses(),
@@ -288,7 +289,7 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             let step = ctx.commutation.advance();
             let e_com = ctx
                 .commutation
-                .record_interval(ctx.shared.commutation_interval() as u16);
+                .record_interval::<H>(ctx.shared.commutation_interval() as u16);
             ctx.shared.set_e_com_time(e_com);
             ctx.hal.phase().com_step(step);
             ctx.hal.phase().pulse_toggle(step);
@@ -306,7 +307,7 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
 /// Commutation timer expired (TIM14/TIM16 ISR body).
 #[allow(clippy::too_many_arguments)]
-pub fn commutation_timer_expired<S, C, Ph, T>(
+pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
     shared: &S,
@@ -332,7 +333,7 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
         shared.set_desync_check_pending(true);
         commutation.set_desync_check(false);
     }
-    let e_com = commutation.record_interval(shared.commutation_interval() as u16);
+    let e_com = commutation.record_interval::<P>(shared.commutation_interval() as u16);
     shared.set_e_com_time(e_com);
     phase.com_step(step);
     phase.pulse_toggle(step);
@@ -340,13 +341,16 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     comp.change_input();
 
     let exit_interval = if bidirectional {
-        OLD_ROUTINE_EXIT_INTERVAL / 2
+        P::OLD_ROUTINE_EXIT_INTERVAL / 2
     } else {
-        OLD_ROUTINE_EXIT_INTERVAL
+        P::OLD_ROUTINE_EXIT_INTERVAL
     };
     let was_interrupt_mode = !shared.old_routine();
 
-    if was_interrupt_mode && (e_com / 3) as u32 > exit_interval + 500 {
+    if was_interrupt_mode
+        && crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
+            > exit_interval + P::OLD_ROUTINE_REENTRY_MARGIN
+    {
         shared.set_old_routine(true);
     }
 
@@ -364,9 +368,9 @@ pub fn commutation_timer_expired<S, C, Ph, T>(
     let zc = shared.zero_crosses();
     let ci = shared.commutation_interval();
     let exit_interval = if bidirectional {
-        OLD_ROUTINE_EXIT_INTERVAL / 2
+        P::OLD_ROUTINE_EXIT_INTERVAL / 2
     } else {
-        OLD_ROUTINE_EXIT_INTERVAL
+        P::OLD_ROUTINE_EXIT_INTERVAL
     };
     let changeover_met = if strict_changeover {
         zc >= OLD_ROUTINE_EXIT_ZC && ci <= exit_interval

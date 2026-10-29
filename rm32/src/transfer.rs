@@ -69,10 +69,10 @@ impl CaptureConfig {
     };
     /// DShot detection uses one full frame. Using 33 edges consumes the next
     /// frame's first edge and can leave steady-state capture misaligned.
-    pub fn dshot_detection(cpu_mhz: u8) -> Self {
+    pub const fn dshot_detection<P: crate::platform::Platform>() -> Self {
         Self {
             ndtr: 32,
-            prescaler: Some((cpu_mhz / 6) as u16),
+            prescaler: Some((P::CAPTURE_HZ / 6_000_000) as u16),
         }
     }
     pub const SERVO: Self = Self {
@@ -97,10 +97,10 @@ impl CaptureConfig {
         prescaler: Some(3),
     };
 
-    pub fn servo_detected(cpu_mhz: u8) -> Self {
+    pub const fn servo_detected<P: crate::platform::Platform>() -> Self {
         Self {
             ndtr: 2,
-            prescaler: Some(cpu_mhz.saturating_sub(1) as u16),
+            prescaler: Some((P::CAPTURE_HZ / 1_000_000).saturating_sub(1) as u16),
         }
     }
 }
@@ -133,9 +133,9 @@ impl TransferState {
     /// `disable_stick_cal`: config disable_stick_calibration flag
     /// `zero_input_count`: current zero input counter
     /// `frametime_low/high`: current DShot frame timing bounds
-    /// `cpu_mhz`: MCU core/timer clock in MHz for capture prescaler selection
+    /// `P`: port capture clock for protocol-detection prescalers
     #[allow(clippy::too_many_arguments)]
-    pub fn process(
+    pub fn process<P: crate::platform::Platform>(
         &mut self,
         dma_buffer: &[u32],
         input_set: bool,
@@ -151,14 +151,13 @@ impl TransferState {
         zero_input_count: &mut u16,
         frametime_low: u16,
         frametime_high: u16,
-        cpu_mhz: u8,
     ) -> TransferActions {
         let mut action = TransferAction::None;
         let mut frametime = None;
 
         // --- Input detection ---
         if !input_set {
-            let sig = signal::detect_input(dma_buffer, cpu_mhz);
+            let sig = signal::detect_input(dma_buffer, (P::CAPTURE_HZ / 1_000_000) as u8);
             let protocol = match sig {
                 signal::SignalType::Dshot600
                 | signal::SignalType::Dshot300
@@ -185,17 +184,14 @@ impl TransferState {
                     signal::SignalType::Dshot600 => CaptureConfig::DSHOT600_DETECTED,
                     signal::SignalType::Dshot300 => CaptureConfig::DSHOT300_DETECTED,
                     signal::SignalType::Dshot150 => CaptureConfig::DSHOT150_DETECTED,
-                    signal::SignalType::ServoPwm => CaptureConfig::servo_detected(cpu_mhz),
+                    signal::SignalType::ServoPwm => CaptureConfig::servo_detected::<P>(),
                     signal::SignalType::None => {
                         unreachable!("confirmed input detection cannot have SignalType::None")
                     }
                 };
                 (TransferAction::InputDetected(protocol), capture)
             } else {
-                (
-                    TransferAction::None,
-                    CaptureConfig::dshot_detection(cpu_mhz),
-                )
+                (TransferAction::None, CaptureConfig::dshot_detection::<P>())
             };
             return TransferActions {
                 action,
@@ -349,6 +345,14 @@ impl TransferState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct CapturePlatform<const MHZ: u32>;
+    impl<const MHZ: u32> crate::platform::Platform for CapturePlatform<MHZ> {
+        const TICK_HZ: u32 = 20_000;
+        const TIMER_HZ: u32 = 2_000_000;
+        const CAPTURE_HZ: u32 = MHZ * 1_000_000;
+        const GCR_SHIFT: u8 = 7;
+        const PWM_BASE_PERIOD: u16 = 1999;
+    }
 
     const DSHOT300_START_TICKS: u32 = 5000;
     const DSHOT300_ZERO_HIGHS: [u32; 16] = [
@@ -425,7 +429,7 @@ mod tests {
     fn servo_pin_high_requests_realign_capture() {
         let mut state = TransferState::default();
         let mut zic = 0;
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<64>>(
             &[0, 0, 0],
             true,
             false,
@@ -440,7 +444,6 @@ mod tests {
             &mut zic,
             400,
             600,
-            64,
         );
 
         assert_eq!(actions.next_capture, CaptureConfig::SERVO_REALIGN);
@@ -451,7 +454,7 @@ mod tests {
         let mut state = TransferState::default();
         state.servo.set_calibration(1100, 1900, 1500, 100);
         let mut zic = 0;
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<64>>(
             &[1000, 2500],
             true,
             false,
@@ -466,7 +469,6 @@ mod tests {
             &mut zic,
             400,
             600,
-            64,
         );
 
         assert_eq!(actions.next_capture, CaptureConfig::SERVO);
@@ -477,9 +479,9 @@ mod tests {
     fn dshot_mode_requests_dshot_capture() {
         let mut state = TransferState::default();
         let mut zic = 0;
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<64>>(
             &[0; 32], true, true, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-            600, 64,
+            600,
         );
 
         assert_eq!(actions.next_capture, CaptureConfig::DSHOT);
@@ -487,8 +489,14 @@ mod tests {
 
     #[test]
     fn dshot_detection_uses_one_frame_capture_window() {
-        assert_eq!(CaptureConfig::dshot_detection(60).ndtr, 32);
-        assert_eq!(CaptureConfig::dshot_detection(60).prescaler, Some(10));
+        assert_eq!(
+            CaptureConfig::dshot_detection::<CapturePlatform<60>>().ndtr,
+            32
+        );
+        assert_eq!(
+            CaptureConfig::dshot_detection::<CapturePlatform<60>>().prescaler,
+            Some(10)
+        );
     }
 
     #[test]
@@ -498,9 +506,9 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, false);
 
         for _ in 0..200 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
 
             assert!(!actions.bidir_detected);
@@ -522,9 +530,9 @@ mod tests {
             - 1;
 
         for tick in 0..150 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
 
             if actions.bidir_detected {
@@ -543,9 +551,9 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, true, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
 
             assert!(!actions.bidir_detected);
@@ -559,9 +567,9 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
 
             assert!(!actions.bidir_detected);
@@ -576,17 +584,17 @@ mod tests {
         let inverted = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &normal, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
             assert!(!actions.bidir_detected);
         }
 
         for _ in 0..10 {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &inverted, true, true, false, false, false, false, 0, 0, false, false, &mut zic,
-                400, 600, 64,
+                400, 600,
             );
             assert!(!actions.bidir_detected);
         }
@@ -602,23 +610,22 @@ mod tests {
             - 1;
 
         for _ in 0..partial_confirm_frames {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
             assert!(!actions.bidir_detected);
         }
 
-        let armed = state.process(
+        let armed = state.process::<CapturePlatform<64>>(
             &frame, true, true, false, false, true, true, 0, 0, false, false, &mut zic, 400, 600,
-            64,
         );
         assert!(!armed.bidir_detected);
 
         for _ in 0..crate::constants::BIDIR_CONFIRM_FRAMES {
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<64>>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
-                600, 64,
+                600,
             );
             assert!(!actions.bidir_detected);
         }
@@ -633,13 +640,15 @@ mod tests {
             *slot = 100 + i as u32 * 5;
         }
 
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<60>>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
-            60,
         );
 
         assert!(matches!(actions.action, TransferAction::None));
-        assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+        assert_eq!(
+            actions.next_capture,
+            CaptureConfig::dshot_detection::<CapturePlatform<60>>()
+        );
         assert_eq!(actions.next_capture.ndtr, CaptureConfig::DSHOT.ndtr);
     }
 
@@ -653,21 +662,24 @@ mod tests {
         }
         let invalid = [0u32; 33];
 
-        let _ = state.process(
+        let _ = state.process::<CapturePlatform<60>>(
             &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-            600, 60,
+            600,
         );
-        let _ = state.process(
+        let _ = state.process::<CapturePlatform<60>>(
             &invalid, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-            600, 60,
+            600,
         );
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<60>>(
             &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-            600, 60,
+            600,
         );
 
         assert!(matches!(actions.action, TransferAction::None));
-        assert_eq!(actions.next_capture, CaptureConfig::dshot_detection(60));
+        assert_eq!(
+            actions.next_capture,
+            CaptureConfig::dshot_detection::<CapturePlatform<60>>()
+        );
     }
 
     #[test]
@@ -675,9 +687,8 @@ mod tests {
         let buf = dshot300_disarm_capture();
         let mut state = TransferState::default();
         let mut zic = 0u16;
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<80>>(
             &buf, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 100, 60000,
-            80,
         );
 
         assert!(
@@ -716,13 +727,13 @@ mod tests {
                 *slot = 100 + i as u32 * step;
             }
 
-            let _ = state.process(
+            let _ = state.process::<CapturePlatform<60>>(
                 &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-                600, 60,
+                600,
             );
-            let actions = state.process(
+            let actions = state.process::<CapturePlatform<60>>(
                 &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
-                600, 60,
+                600,
             );
 
             assert!(matches!(
@@ -742,20 +753,21 @@ mod tests {
             *slot = 100 + i as u32 * 1000;
         }
 
-        let _ = state.process(
+        let _ = state.process::<CapturePlatform<60>>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
-            60,
         );
-        let actions = state.process(
+        let actions = state.process::<CapturePlatform<60>>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
-            60,
         );
 
         assert!(matches!(
             actions.action,
             TransferAction::InputDetected(DetectedProtocol::Servo)
         ));
-        assert_eq!(actions.next_capture, CaptureConfig::servo_detected(60));
+        assert_eq!(
+            actions.next_capture,
+            CaptureConfig::servo_detected::<CapturePlatform<60>>()
+        );
     }
 
     #[test]
@@ -765,7 +777,7 @@ mod tests {
         let mut zic = 0;
 
         for _ in 0..51 {
-            let high = state.process(
+            let high = state.process::<CapturePlatform<64>>(
                 &[1000, 2900],
                 true,
                 false,
@@ -780,7 +792,6 @@ mod tests {
                 &mut zic,
                 400,
                 600,
-                64,
             );
             assert!(matches!(
                 high.action,
@@ -791,7 +802,7 @@ mod tests {
         let mut done = TransferAction::None;
         for _ in 0..76 {
             done = state
-                .process(
+                .process::<CapturePlatform<64>>(
                     &[1000, 2100],
                     true,
                     false,
@@ -806,7 +817,6 @@ mod tests {
                     &mut zic,
                     400,
                     600,
-                    64,
                 )
                 .action;
         }

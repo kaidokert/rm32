@@ -16,23 +16,31 @@ use embedded_hal::digital::OutputPin;
 use crate::shared_state::SharedState;
 
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
-pub(crate) fn variable_pwm_mode1(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
+pub(crate) fn variable_pwm_mode1<P: Timing>(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
     let half = timer1_max_arr as i32 / 2;
     let full = timer1_max_arr as i32;
-    let result = crate::functions::map(commutation_interval as i32, 96, 200, half, full);
+    let result = crate::functions::map(
+        commutation_interval as i32,
+        P::VARIABLE_PWM1_LO as i32,
+        P::VARIABLE_PWM1_HI as i32,
+        half,
+        full,
+    );
     result.clamp(half, full) as u16
 }
 
 /// Compute variable PWM auto-reload value for mode 2 (CPU-scaled).
-pub(crate) fn variable_pwm_mode2(average_interval: u32, cpu_mhz: u8) -> u16 {
-    let scale = cpu_mhz as u32 / 9;
-    if average_interval < 100 && average_interval > 0 {
-        (100 * scale) as u16
-    } else if average_interval >= 250 || average_interval == 0 {
-        (250 * scale) as u16
+pub(crate) fn variable_pwm_mode2<P: Timing>(average_interval: u32, cpu_mhz: u8) -> u16 {
+    let bounded = if average_interval == 0 {
+        P::VARIABLE_PWM2_HI
     } else {
-        (average_interval * scale) as u16
-    }
+        average_interval.clamp(P::VARIABLE_PWM2_LO, P::VARIABLE_PWM2_HI)
+    };
+    // PWM geometry uses the original 2 MHz interval scale, independent of
+    // the port's interval timer. Bound first to keep very long intervals safe.
+    let average_interval = (bounded as u64 * 2_000_000 / P::TIMER_HZ as u64) as u32;
+    let scale = cpu_mhz as u32 / 9;
+    (average_interval * scale) as u16
 }
 
 /// Compute duty ceiling from eRPM and temperature limits.
@@ -94,9 +102,10 @@ impl embedded_hal::digital::ErrorType for NoLed {
 }
 
 /// Main-loop exclusive state, generic over optional LED pin.
-pub struct MainState<LED: OutputPin = NoLed> {
+pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
+    _platform: core::marker::PhantomData<P>,
     pub protection: ProtectionState,
-    pub(crate) measurements: Measurements,
+    pub(crate) measurements: Measurements<P>,
     pub config: EepromConfig,
 
     // PID controllers (main computes adjustments, ISR applies)
@@ -141,7 +150,7 @@ pub struct ChipParams {
     pub cpu_mhz: u8,
 }
 
-impl MainState<NoLed> {
+impl<P: Timing> MainState<P, NoLed> {
     /// Construct MainState from board config and chip constants.
     ///
     /// Used by both firmware and harness to ensure identical initialization.
@@ -152,14 +161,16 @@ impl MainState<NoLed> {
     }
 }
 
-impl<LED: OutputPin> MainState<LED> {
+impl<P: Timing, LED: OutputPin> MainState<P, LED> {
     /// Construct main-loop state with an optional custom status LED output.
     pub fn new_with_led(board: &crate::board::BoardConfig, chip: ChipParams, led: LED) -> Self {
         assert!(
             board.min_bemf_counts <= u8::MAX / 2,
             "min_bemf_counts must fit derived startup thresholds"
         );
+        let () = P::VALID;
         Self {
+            _platform: core::marker::PhantomData,
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
             config: EepromConfig::default(),
@@ -187,9 +198,9 @@ impl<LED: OutputPin> MainState<LED> {
     }
 }
 
-impl<LED: OutputPin> MainState<LED> {
+impl<P: Timing, LED: OutputPin> MainState<P, LED> {
     /// Read-only access to measurements.
-    pub fn measurements(&self) -> &Measurements {
+    pub fn measurements(&self) -> &Measurements<P> {
         &self.measurements
     }
 
@@ -299,7 +310,7 @@ impl<LED: OutputPin> MainState<LED> {
         self.measurements
             .consumed_charge
             .accumulate(self.measurements.actual_current, elapsed);
-        let led_period = LED_BLINK_HALF_PERIOD as u32 * 2;
+        let led_period = P::LED_BLINK_HALF_PERIOD as u32 * 2;
         if elapsed != 0 {
             let phase = self.led_phase + elapsed % led_period;
             self.led_phase = if phase >= led_period {
@@ -313,7 +324,8 @@ impl<LED: OutputPin> MainState<LED> {
         let e_com_time = shared.e_com_time();
 
         // Average interval
-        self.timing.average_interval = (e_com_time / 3) as u32;
+        self.timing.average_interval =
+            crate::platform::e_com_us_to_avg_ticks::<P>(e_com_time) as u32;
 
         // BEMF timeout clearing — check whether the user has released the throttle.
         // For unidirectional: newinput == 0 means stick centered.
@@ -347,7 +359,7 @@ impl<LED: OutputPin> MainState<LED> {
         }
         // Stall detection: if interval timer exceeds threshold, motor has stalled.
         // C: if (INTERVAL_TIMER_COUNT > 45000 && running == 1)
-        if shared.interval_timer_count() > BEMF_STALL_TIMER_THRESHOLD && shared.running() {
+        if shared.interval_timer_count() > P::BEMF_STALL_TIMER_THRESHOLD && shared.running() {
             // Only increment if not already latched (102 = confirmed stuck)
             if self.protection.bemf_timeout_happened != BEMF_FAULT_LATCHED {
                 self.protection.bemf_timeout_happened =
@@ -357,7 +369,7 @@ impl<LED: OutputPin> MainState<LED> {
             if shared.adjusted_input() < THROTTLE_MIN_SIGNAL {
                 shared.request_isr_action(IsrAction::ResetIntervalTimer);
                 shared.transition(crate::motor_mode::MotorEvent::StopMotor);
-                shared.set_commutation_interval(DESYNC_RESET_INTERVAL);
+                shared.set_commutation_interval(P::DESYNC_RESET_INTERVAL);
             } else {
                 shared.request_isr_action(IsrAction::CommutateKick);
             }
@@ -378,16 +390,16 @@ impl<LED: OutputPin> MainState<LED> {
                 self.timing.average_interval as i32,
             );
             if diff > (self.timing.average_interval >> 1)
-                && self.timing.average_interval < DESYNC_MAX_INTERVAL
+                && self.timing.average_interval < P::DESYNC_MAX_INTERVAL
             {
                 // Reset interval to 5000 if motor was running (>100 ZCs)
                 // Check before zeroing zero_crosses (C has this after, which is a bug)
                 if zc > 100 {
-                    self.timing.average_interval = DESYNC_RESET_INTERVAL;
+                    self.timing.average_interval = P::DESYNC_RESET_INTERVAL;
                 }
                 shared.set_zero_crosses(0);
                 if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
-                    || shared.commutation_interval() > 1000
+                    || shared.commutation_interval() > P::DESYNC_STOP_INTERVAL
                 {
                     shared.transition(crate::motor_mode::MotorEvent::StopMotor);
                 }
@@ -400,12 +412,12 @@ impl<LED: OutputPin> MainState<LED> {
         // Signal timeout thresholds fire only after the counter exceeds the limit.
         let signal_timeout = shared.signal_timeout();
         if shared.armed() {
-            if signal_timeout > crate::constants::SIGNAL_TIMEOUT_DISARM {
+            if signal_timeout > P::SIGNAL_TIMEOUT_DISARM {
                 shared.transition(crate::motor_mode::MotorEvent::Disarm);
                 shared.set_input_set(false);
                 self.needs_reset = true;
             }
-        } else if shared.input_set() && signal_timeout > crate::constants::SIGNAL_TIMEOUT_UNARMED {
+        } else if shared.input_set() && signal_timeout > P::SIGNAL_TIMEOUT_UNARMED {
             shared.set_input_set(false);
             self.needs_reset = true;
         }
@@ -427,7 +439,7 @@ impl<LED: OutputPin> MainState<LED> {
         }
         self.last_armed = armed;
 
-        if shared.one_khz_counter_check_and_reset(crate::constants::PID_LOOP_DIVIDER) {
+        if shared.one_khz_counter_check_and_reset(P::PID_LOOP_DIVIDER) {
             // ADC measurements — typed conversions via AdcCount
             let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
             let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
@@ -475,7 +487,11 @@ impl<LED: OutputPin> MainState<LED> {
 
             // Stall protection PID — boosts duty at low RPM for crawlers/RC cars
             if self.config.stall_protection != 0 && shared.running() {
-                let boost = self.pid.tick_stall(shared.commutation_interval() as i32);
+                // Board targets and PID gains retain their established 0.5 us
+                // units; changing the timer clock must not retune the controller.
+                let interval =
+                    (shared.commutation_interval() as u64 * 2_000_000 / P::TIMER_HZ as u64) as i32;
+                let boost = self.pid.tick_stall(interval);
                 shared.set_stall_protection_adjust(boost);
             }
 
@@ -520,12 +536,12 @@ impl<LED: OutputPin> MainState<LED> {
 
         // Variable PWM — adjust tim1_arr based on commutation speed
         if self.config.variable_pwm == 1 {
-            shared.set_tim1_arr(variable_pwm_mode1(
+            shared.set_tim1_arr(variable_pwm_mode1::<P>(
                 shared.commutation_interval(),
                 self.timer1_max_arr,
             ));
         } else if self.config.variable_pwm == 2 {
-            shared.set_tim1_arr(variable_pwm_mode2(
+            shared.set_tim1_arr(variable_pwm_mode2::<P>(
                 self.timing.average_interval,
                 self.cpu_mhz,
             ));
@@ -556,12 +572,18 @@ impl<LED: OutputPin> MainState<LED> {
         }
 
         // Filter level — dynamic based on motor speed
-        let filter = if zc < 100 && shared.commutation_interval() > 500 {
+        let filter = if zc < 100 && shared.commutation_interval() > P::FILTER_SLOW_INTERVAL {
             12u8
-        } else if shared.commutation_interval() < 50 {
+        } else if shared.commutation_interval() < P::FILTER_FAST_INTERVAL {
             2
         } else {
-            crate::functions::map(self.timing.average_interval as i32, 100, 500, 3, 12) as u8
+            crate::functions::map(
+                self.timing.average_interval as i32,
+                P::FILTER_MAP_LO_INTERVAL as i32,
+                P::FILTER_MAP_HI_INTERVAL as i32,
+                3,
+                12,
+            ) as u8
         };
         shared.set_filter_level(filter);
 
@@ -583,7 +605,7 @@ impl<LED: OutputPin> MainState<LED> {
         {
             let input = shared.adjusted_input();
             if (47..1947).contains(&input) {
-                if self.led_phase >= LED_BLINK_HALF_PERIOD as u32 {
+                if self.led_phase >= P::LED_BLINK_HALF_PERIOD as u32 {
                     let _ = self.led.set_high();
                 } else {
                     let _ = self.led.set_low();
@@ -600,43 +622,56 @@ impl<LED: OutputPin> MainState<LED> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    type MainState<LED = NoLed> = super::MainState<crate::platform::TestPlatform, LED>;
 
     // --- Variable PWM mode 2 ---
 
     #[test]
     fn vpwm2_clamps_low() {
         // avg < 100 → floor at 100 * scale
-        assert_eq!(variable_pwm_mode2(50, 64), (100 * (64 / 9)) as u16);
+        assert_eq!(
+            variable_pwm_mode2::<crate::platform::TestPlatform>(50, 64),
+            (100 * (64 / 9)) as u16
+        );
     }
 
     #[test]
     fn vpwm2_clamps_high() {
         // avg >= 250 → ceiling at 250 * scale
-        assert_eq!(variable_pwm_mode2(300, 64), (250 * (64 / 9)) as u16);
+        assert_eq!(
+            variable_pwm_mode2::<crate::platform::TestPlatform>(300, 64),
+            (250 * (64 / 9)) as u16
+        );
     }
 
     #[test]
     fn vpwm2_scales_mid() {
         // 100 <= avg < 250 → avg * scale
-        assert_eq!(variable_pwm_mode2(150, 64), (150 * (64 / 9)) as u16);
+        assert_eq!(
+            variable_pwm_mode2::<crate::platform::TestPlatform>(150, 64),
+            (150 * (64 / 9)) as u16
+        );
     }
 
     #[test]
     fn vpwm2_zero_interval_clamps_high() {
-        assert_eq!(variable_pwm_mode2(0, 64), (250 * (64 / 9)) as u16);
+        assert_eq!(
+            variable_pwm_mode2::<crate::platform::TestPlatform>(0, 64),
+            (250 * (64 / 9)) as u16
+        );
     }
 
     // --- Variable PWM mode 1 ---
 
     #[test]
     fn vpwm1_fast_interval() {
-        let arr = variable_pwm_mode1(96, 1999);
+        let arr = variable_pwm_mode1::<crate::platform::TestPlatform>(96, 1999);
         assert_eq!(arr, 999); // maps to max_arr/2
     }
 
     #[test]
     fn vpwm1_slow_interval() {
-        let arr = variable_pwm_mode1(200, 1999);
+        let arr = variable_pwm_mode1::<crate::platform::TestPlatform>(200, 1999);
         assert_eq!(arr, 1999); // maps to max_arr
     }
 
@@ -754,7 +789,7 @@ mod tests {
     }
 
     fn trip_one_khz(shared: &SharedState) {
-        for _ in 0..crate::constants::PID_LOOP_DIVIDER {
+        for _ in 0..<crate::platform::TestPlatform as Timing>::PID_LOOP_DIVIDER {
             shared.one_khz_counter_inc();
         }
     }
@@ -787,7 +822,7 @@ mod tests {
 
     #[test]
     fn accounting_regression_main_calls_without_time_do_not_consume_charge() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         main.set_actual_current(crate::units::CentiAmps(1000)); // 10 A
         let mut telem = CapturedTelemetry::default();
@@ -801,7 +836,7 @@ mod tests {
 
     #[test]
     fn accounting_regression_main_calls_without_time_do_not_blink() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_adjusted_input(100);
         let mut main = MainState::new_with_led(
             &crate::board::BoardConfig::DEFAULT,
@@ -835,7 +870,7 @@ mod tests {
 
     #[test]
     fn charge_first_service_anchors_without_backfilling_startup_time() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         advance_control_clock(&shared, 72000);
         let mut main = make_test_main_state();
         main.set_actual_current(crate::units::CentiAmps(100));
@@ -848,7 +883,7 @@ mod tests {
     #[test]
     fn charge_and_kiss_are_independent_of_main_service_cadence() {
         for interval in [1, 20, 2000, 72000] {
-            let shared = SharedState::new();
+            let shared = SharedState::new::<crate::platform::TestPlatform>();
             let mut main = make_test_main_state();
             main.set_actual_current(crate::units::CentiAmps(100));
             main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
@@ -862,7 +897,7 @@ mod tests {
 
     #[test]
     fn charge_holds_previous_sample_until_adc_observation() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         main.set_actual_current(crate::units::CentiAmps(100)); // 1 A held
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
@@ -883,7 +918,7 @@ mod tests {
 
     #[test]
     fn charge_wrap_negative_current_and_wire_saturation() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         // 72000 elapsed ticks across a wrap: 1 A * 3.6 s = 1 mAh.
         main.last_control_tick = Some(0u32.wrapping_sub(72000));
@@ -912,7 +947,7 @@ mod tests {
 
     #[test]
     fn led_exact_phase_boundaries_and_delayed_service() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_adjusted_input(100);
         let mut main = make_led_main();
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
@@ -934,7 +969,7 @@ mod tests {
 
     #[test]
     fn led_wrap_and_throttle_gates_preserve_continuous_phase() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_led_main();
         main.led_phase = 1999;
         main.last_control_tick = Some(u32::MAX - 1999);
@@ -971,7 +1006,7 @@ mod tests {
     #[test]
     fn measurement_regression_adc_to_kiss_voltage() {
         // A 3.3 V ADC pin behind the default 11:1 divider means 36.30 V.
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         let mut telem = CapturedTelemetry::default();
         shared.set_send_telemetry(true);
@@ -983,7 +1018,7 @@ mod tests {
     #[test]
     fn measurement_regression_adc_to_edt_voltage() {
         // EDT carries quarter-volts: 36.30 V truncates to 145 * 0.25 V.
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         trip_one_khz(&shared);
         main.tick(
@@ -1008,7 +1043,7 @@ mod tests {
     #[test]
     fn measurement_regression_adc_to_kiss_current() {
         // 3.3 V / (20 mV/A) = 165 A, or 16500 centiamps on KISS.
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         for _ in 0..50 {
             main.measurements.current_filter.update(4095);
@@ -1022,7 +1057,7 @@ mod tests {
 
     #[test]
     fn measurement_regression_adc_to_edt_current() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         let mut main = make_test_main_state();
         for _ in 0..50 {
             main.measurements.current_filter.update(4095);
@@ -1049,7 +1084,7 @@ mod tests {
 
     #[test]
     fn measurement_regression_absolute_cutoff_half_volt_setting() {
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
         let mut main = make_test_main_state();
         main.config.low_voltage_cut_off = 2;
@@ -1078,7 +1113,7 @@ mod tests {
             (1, 0, 1229, false),
             (1, 0, 1230, false),
         ] {
-            let shared = SharedState::new();
+            let shared = SharedState::new::<crate::platform::TestPlatform>();
             shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
             let mut main = make_test_main_state();
             main.voltage_divider_x100 = 1000;
@@ -1096,7 +1131,7 @@ mod tests {
     #[test]
     fn cell_count_uses_nominal_cell_centivolts() {
         for (cv, cells) in [(369, 0), (370, 1), (1109, 2), (1110, 3), (1680, 4)] {
-            let shared = SharedState::new();
+            let shared = SharedState::new::<crate::platform::TestPlatform>();
             shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
             let mut main = make_test_main_state();
             main.config.low_voltage_cut_off = 1;
@@ -1111,7 +1146,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine); // running=true
         shared.set_interval_timer_count(50000); // > 45000 threshold
         shared.set_adjusted_input(100); // above throttle min
@@ -1131,7 +1166,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
         shared.set_interval_timer_count(40000); // below 45000
 
@@ -1145,7 +1180,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1171,7 +1206,7 @@ mod tests {
     fn min_bemf_counts_are_stricter_during_unidirectional_startup() {
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_zero_crosses(4);
 
         let mut main = make_test_main_state();
@@ -1185,7 +1220,7 @@ mod tests {
     fn min_bemf_counts_are_stricter_during_bidirectional_startup() {
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_zero_crosses(4);
 
         let mut main = make_test_main_state();
@@ -1199,7 +1234,7 @@ mod tests {
     fn min_bemf_counts_use_target_after_startup() {
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_zero_crosses(5);
 
         let mut main = make_test_main_state();
@@ -1216,7 +1251,7 @@ mod tests {
             min_bemf_counts: 5,
             ..crate::board::BoardConfig::DEFAULT
         };
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_zero_crosses(4);
 
         let mut main = MainState::new(
@@ -1246,7 +1281,7 @@ mod tests {
         use crate::shared_comm::MainControl;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1268,7 +1303,7 @@ mod tests {
         use crate::shared_comm::MainControl;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1288,7 +1323,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1307,7 +1342,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1330,7 +1365,7 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
 
         let mut main = make_test_main_state();
@@ -1365,10 +1400,10 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::OldRoutine);
         shared.set_input_set(true);
-        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_DISARM {
+        for _ in 0..=<crate::platform::TestPlatform as Timing>::SIGNAL_TIMEOUT_DISARM {
             shared.increment_signal_timeout();
         }
 
@@ -1385,10 +1420,10 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::Disarmed);
         shared.set_input_set(true);
-        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_UNARMED {
+        for _ in 0..=<crate::platform::TestPlatform as Timing>::SIGNAL_TIMEOUT_UNARMED {
             shared.increment_signal_timeout();
         }
 
@@ -1404,10 +1439,10 @@ mod tests {
         use crate::motor_mode::MotorMode;
         use crate::shared_state::SharedState;
 
-        let shared = SharedState::new();
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::Disarmed);
         assert!(!shared.input_set());
-        for _ in 0..=crate::constants::SIGNAL_TIMEOUT_UNARMED {
+        for _ in 0..=<crate::platform::TestPlatform as Timing>::SIGNAL_TIMEOUT_UNARMED {
             shared.increment_signal_timeout();
         }
 

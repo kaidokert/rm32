@@ -217,6 +217,13 @@ mod tests {
         interval: MockInterval,
         com_timer: MockComTimer,
     }
+    impl crate::platform::Platform for MockMotorHal {
+        const TICK_HZ: u32 = 20_000;
+        const TIMER_HZ: u32 = 2_000_000;
+        const CAPTURE_HZ: u32 = 64_000_000;
+        const GCR_SHIFT: u8 = 7;
+        const PWM_BASE_PERIOD: u16 = 1999;
+    }
     impl hal::MotorHal for MockMotorHal {
         type Pwm = MockPwm;
         type Comp = MockComp;
@@ -586,8 +593,9 @@ mod tests {
         let mut armed_timeout = make_armed_timeout();
         let shared = TestShared::new();
         let mut hal = MockMotorHal::new();
-        let interval_ticks =
-            crate::constants::telemetry_interval_ticks(config.telemetry_on_interval);
+        let interval_ticks = crate::constants::telemetry_interval_ticks::<
+            crate::platform::TestPlatform,
+        >(config.telemetry_on_interval);
 
         for _ in 0..interval_ticks - 1 {
             isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
@@ -881,7 +889,7 @@ mod tests {
         };
 
         let step_before = comm.step;
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -920,7 +928,7 @@ mod tests {
         };
         let step_before = comm.step();
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -956,7 +964,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -989,7 +997,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -1006,7 +1014,7 @@ mod tests {
 
     fn seed_slow_commutation_history(comm: &mut crate::commutation::Commutation) {
         for _ in 0..5 {
-            comm.record_interval(4000);
+            comm.record_interval::<crate::platform::TestPlatform>(4000);
             comm.advance();
         }
     }
@@ -1031,7 +1039,7 @@ mod tests {
                 ..Default::default()
             };
 
-            isr_logic::commutation_timer_expired(
+            isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
                 &mut comm,
                 &mut bemf,
                 &shared,
@@ -1068,7 +1076,7 @@ mod tests {
                 ..Default::default()
             };
 
-            isr_logic::commutation_timer_expired(
+            isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
                 &mut comm,
                 &mut bemf,
                 &shared,
@@ -1080,9 +1088,9 @@ mod tests {
             );
 
             let exit_interval = if bidirectional {
-                crate::constants::OLD_ROUTINE_EXIT_INTERVAL / 2
+                <crate::platform::TestPlatform as crate::constants::Timing>::OLD_ROUTINE_EXIT_INTERVAL / 2
             } else {
-                crate::constants::OLD_ROUTINE_EXIT_INTERVAL
+                <crate::platform::TestPlatform as crate::constants::Timing>::OLD_ROUTINE_EXIT_INTERVAL
             };
             assert!(shared.old_routine());
             assert!(shared.commutation_interval() < exit_interval);
@@ -1109,7 +1117,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -1142,7 +1150,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -1175,7 +1183,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,
@@ -1209,7 +1217,7 @@ mod tests {
             ..Default::default()
         };
 
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _>(
             &mut comm,
             &mut bemf,
             &shared,

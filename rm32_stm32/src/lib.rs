@@ -49,3 +49,5 @@ pub mod mcu_g071;
 pub mod mcu_g431;
 #[cfg(feature = "stm32l431")]
 pub mod mcu_l431;
+
+pub mod platform;

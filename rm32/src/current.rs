@@ -4,14 +4,14 @@ use crate::units::CentiAmps;
 
 /// A main-loop-owned integral of current over control ticks. Fractional mAh
 /// remain in the accumulator; only telemetry truncates to whole mAh.
-#[derive(Clone, Default)]
-pub(crate) struct ConsumedCharge {
+pub(crate) struct ConsumedCharge<P: crate::platform::Platform> {
+    _platform: core::marker::PhantomData<P>,
     centiamp_ticks: u64,
 }
 
-impl ConsumedCharge {
+impl<P: crate::platform::Platform> ConsumedCharge<P> {
     // 1 mAh = 3600 mA*s = 360 cA*s.
-    const TICKS_PER_MAH: u64 = 360 * crate::constants::CONTROL_TICK_HZ as u64;
+    const TICKS_PER_MAH: u64 = 360 * P::TICK_HZ as u64;
     const MAX: u64 = u16::MAX as u64 * Self::TICKS_PER_MAH;
 
     /// Integrate the last observed current over the entire elapsed interval.
@@ -29,6 +29,23 @@ impl ConsumedCharge {
 
     pub(crate) fn milliamp_hours(&self) -> u16 {
         (self.centiamp_ticks / Self::TICKS_PER_MAH) as u16
+    }
+}
+
+impl<P: crate::platform::Platform> Default for ConsumedCharge<P> {
+    fn default() -> Self {
+        Self {
+            centiamp_ticks: 0,
+            _platform: core::marker::PhantomData,
+        }
+    }
+}
+impl<P: crate::platform::Platform> Clone for ConsumedCharge<P> {
+    fn clone(&self) -> Self {
+        Self {
+            centiamp_ticks: self.centiamp_ticks,
+            _platform: core::marker::PhantomData,
+        }
     }
 }
 
@@ -72,6 +89,7 @@ impl Default for CurrentFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    type ConsumedCharge = super::ConsumedCharge<crate::platform::TestPlatform>;
 
     #[test]
     fn charge_physical_values_and_fractional_ticks() {

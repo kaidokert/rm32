@@ -14,7 +14,7 @@ use rm32::dshot_commands::CommandResult;
 use rm32::hal;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
-use rm32::system::SystemTick;
+type SystemTick = rm32::system::SystemTick<HarnessPlatform>;
 use rm32::transfer::{DetectedProtocol, TransferAction};
 use std::cell::Cell;
 use std::io::{self, BufRead, Write};
@@ -142,6 +142,21 @@ struct MockMotorHal {
     com_timer: MockComTimer,
 }
 
+struct HarnessPlatform;
+impl rm32::platform::Platform for HarnessPlatform {
+    const TICK_HZ: u32 = 20_000;
+    const TIMER_HZ: u32 = 2_000_000;
+    const CAPTURE_HZ: u32 = 64_000_000;
+    const GCR_SHIFT: u8 = 7;
+    const PWM_BASE_PERIOD: u16 = 1999;
+}
+impl rm32::platform::Platform for MockMotorHal {
+    const TICK_HZ: u32 = <HarnessPlatform as rm32::platform::Platform>::TICK_HZ;
+    const TIMER_HZ: u32 = <HarnessPlatform as rm32::platform::Platform>::TIMER_HZ;
+    const CAPTURE_HZ: u32 = <HarnessPlatform as rm32::platform::Platform>::CAPTURE_HZ;
+    const GCR_SHIFT: u8 = <HarnessPlatform as rm32::platform::Platform>::GCR_SHIFT;
+    const PWM_BASE_PERIOD: u16 = <HarnessPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
+}
 impl hal::MotorHal for MockMotorHal {
     type Pwm = MockPwm;
     type Comp = MockComp;
@@ -216,7 +231,7 @@ struct Harness {
     telem: MockTelem,
 
     // Main-loop state (uses real MainState)
-    main: rm32::main_state::MainState,
+    main: rm32::main_state::MainState<HarnessPlatform>,
 
     // Harness-level state
     tick_count: u32,
@@ -246,7 +261,7 @@ impl Harness {
     fn new() -> Self {
         let counts = HalCounts::new();
         Self {
-            shared: SharedState::new(),
+            shared: SharedState::new::<HarnessPlatform>(),
             commutation: Commutation::new(),
             bemf: BemfState::with_cpu_mhz(64),
             duty: DutyState::default(),
@@ -297,7 +312,7 @@ impl Harness {
                 temperature: 25,
             },
             telem: MockTelem::default(),
-            main: rm32::main_state::MainState::new(
+            main: rm32::main_state::MainState::<HarnessPlatform>::new(
                 &rm32::board::BoardConfig::DEFAULT,
                 rm32::main_state::ChipParams {
                     timer1_max_arr: 1999,
@@ -347,7 +362,7 @@ impl Harness {
 
     fn handle_transfer(&mut self) {
         // Use library TransferState for all input processing
-        let actions = self.transfer.process(
+        let actions = self.transfer.process::<HarnessPlatform>(
             &self.dma_buffer,
             self.shared.input_set(),
             self.dshot,
@@ -362,7 +377,6 @@ impl Harness {
             &mut self.zero_input_count,
             self.frametime_low,
             self.frametime_high,
-            64,
         );
 
         // Apply transfer actions
@@ -680,7 +694,7 @@ impl Harness {
                         &mut self.hal.interval,
                         &mut self.hal.com_timer,
                     );
-                    isr_logic::commutation_timer_expired(
+                    isr_logic::commutation_timer_expired::<HarnessPlatform, _, _, _, _>(
                         &mut self.commutation,
                         &mut self.bemf,
                         &self.shared,
@@ -743,7 +757,7 @@ impl Harness {
             "EDT_ARM_ENABLE" => self.edt_arm_enable = v != 0,
             "dshot_telemetry" => self.shared.set_dshot_telemetry(v != 0),
             "input_pin_state" => self.input_pin_high = v != 0,
-            "signaltimeout" => self.shared.set_signal_timeout(v as u16),
+            "signaltimeout" => self.shared.set_signal_timeout(v as u32),
             "cell_count" => self.main.cell_count = v as u8, // pub field
             "battery_voltage" => {
                 self.main

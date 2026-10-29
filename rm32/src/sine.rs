@@ -97,7 +97,7 @@ pub enum SineStepResult {
 /// `motor_poles`: from EEPROM config
 /// `changeover_step`: commutation step to use when transitioning to BLDC
 #[allow(clippy::too_many_arguments)]
-pub fn sine_step(
+pub fn sine_step<P: crate::constants::Timing>(
     positions: &mut PhasePositions,
     input: u16,
     armed: bool,
@@ -154,7 +154,7 @@ pub fn sine_step(
                 // Phase wrapped to 0 at sufficient throttle — transition to BLDC
                 (
                     SineStepResult::Changeover {
-                        commutation_interval: 9000,
+                        commutation_interval: P::SINE_CHANGEOVER_INTERVAL,
                         step: changeover_step,
                     },
                     pwm,
@@ -276,7 +276,9 @@ mod tests {
     fn slow_step_delay_never_wraps_above_calibrated_range() {
         for input in 48..137 {
             let mut p = PhasePositions::new();
-            let (result, _) = sine_step(&mut p, input, true, true, 14, 5, 60, 1999, 5);
+            let (result, _) = sine_step::<crate::platform::TestPlatform>(
+                &mut p, input, true, true, 14, 5, 60, 1999, 5,
+            );
             let SineStepResult::Continue(delay) = result else {
                 panic!("expected slow step");
             };
@@ -366,7 +368,9 @@ mod tests {
             b: 120,
             c: 240,
         };
-        let (result, _) = sine_step(&mut p, 100, false, true, 14, 1, 60, 1999, 5);
+        let (result, _) = sine_step::<crate::platform::TestPlatform>(
+            &mut p, 100, false, true, 14, 1, 60, 1999, 5,
+        );
         assert!(matches!(result, SineStepResult::Idle));
     }
 
@@ -377,7 +381,8 @@ mod tests {
             b: 120,
             c: 240,
         };
-        let (result, _) = sine_step(&mut p, 80, true, true, 14, 1, 60, 1999, 5);
+        let (result, _) =
+            sine_step::<crate::platform::TestPlatform>(&mut p, 80, true, true, 14, 1, 60, 1999, 5);
         match result {
             SineStepResult::Continue(delay) => assert!(delay > 0),
             _ => panic!("expected Continue"),
@@ -393,7 +398,8 @@ mod tests {
             b: 210,
             c: 330,
         };
-        let (result, _) = sine_step(&mut p, 500, true, true, 14, 3, 60, 1999, 5);
+        let (result, _) =
+            sine_step::<crate::platform::TestPlatform>(&mut p, 500, true, true, 14, 3, 60, 1999, 5);
         match result {
             SineStepResult::Changeover {
                 commutation_interval,
@@ -416,7 +422,7 @@ mod tests {
             b: 210,
             c: 330,
         };
-        let (result, _) = sine_step(
+        let (result, _) = sine_step::<crate::platform::TestPlatform>(
             &mut p,
             crate::constants::SINE_CHANGEOVER_THROTTLE,
             true,
