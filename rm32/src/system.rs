@@ -104,6 +104,36 @@ impl<P: crate::constants::Timing> SystemTick<P> {
         }
     }
 
+    /// Recover from a bounded-queue overflow or prepare a persistent snapshot.
+    /// The caller must exclude the input producer for this entire operation.
+    /// Discard old queued bytes before copying, so they cannot undo the snapshot.
+    pub fn sync_config_snapshot<LED: OutputPin>(
+        shared: &SharedState,
+        main: &mut MainState<P, LED>,
+        authoritative: &crate::config::EepromConfig,
+    ) {
+        while shared.pop_config_write().is_some() {}
+        main.config = *authoritative;
+        shared.clear_config_write_overflow();
+    }
+
+    /// Claim one save and prepare the exact config to persist. Call with the
+    /// input producer excluded; perform flash I/O after releasing that exclusion.
+    /// A subsequent producer request must remain pending for the next save.
+    pub fn prepare_config_save<LED: OutputPin>(
+        shared: &SharedState,
+        main: &mut MainState<P, LED>,
+        authoritative: &crate::config::EepromConfig,
+    ) -> bool {
+        if !shared.save_settings_flag() {
+            return false;
+        }
+        Self::sync_config_snapshot(shared, main, authoritative);
+        shared.take_servo_calibration();
+        shared.set_save_settings_flag(false);
+        true
+    }
+
     /// Calculate one step using mapped/protected input. Hardware writes are
     /// performed only by `service_sine` while interrupt access is excluded.
     fn tick_sine(

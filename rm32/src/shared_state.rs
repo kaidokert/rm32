@@ -36,6 +36,7 @@ pub struct SharedState {
     config_write_queue: [AtomicU16; CONFIG_WRITE_QUEUE_LEN as usize],
     config_write_head: AtomicU8,
     config_write_tail: AtomicU8,
+    config_write_overflow: AtomicBool,
 
     // Timing (ISR writes, main reads)
     control_ticks: AtomicU32,
@@ -101,6 +102,7 @@ impl SharedState {
             config_write_queue: [const { AtomicU16::new(0) }; CONFIG_WRITE_QUEUE_LEN as usize],
             config_write_head: AtomicU8::new(0),
             config_write_tail: AtomicU8::new(0),
+            config_write_overflow: AtomicBool::new(false),
             control_ticks: AtomicU32::new(0),
             zero_crosses: AtomicU32::new(0),
             commutation_interval: AtomicU32::new(P::INITIAL_COMMUTATION_INTERVAL),
@@ -328,8 +330,20 @@ impl SharedState {
             self.config_write_head.store(next, REL);
             true
         } else {
+            self.config_write_overflow.store(true, REL);
             false
         }
+    }
+
+    /// A producer update was not queued; main must obtain a live config snapshot.
+    pub fn config_write_overflowed(&self) -> bool {
+        self.config_write_overflow.load(ACQ)
+    }
+
+    /// Call only after draining the queue and copying the authoritative config,
+    /// with the input producer excluded for the entire operation.
+    pub fn clear_config_write_overflow(&self) {
+        self.config_write_overflow.store(false, REL);
     }
 
     pub fn pop_config_write(&self) -> Option<(u8, u8)> {

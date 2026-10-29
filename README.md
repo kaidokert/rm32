@@ -47,6 +47,31 @@ HARNESS_EXE=../../downloads/target/release/rm32_harness python3 -m pytest test_v
 
 ## Library compatibility
 
+Input actions are now applied by `transfer::dispatch` in both firmware and the
+host harness. `InputContext` borrows the caller's command/configuration and EDT
+state; `DispatchResult` returns tone intent without playing it. CRSF callers use
+`CrsfParser::dispatch_byte`. Capture decoding, command repetition, and the
+armed/stopped command gate are unchanged.
+
+Programming command 36 now connects to the existing programming state machine:
+after six accepted command repetitions, the next valid DShot values supply the
+EEPROM byte offset and value; value 37 commits the byte to RAM. Programming data
+does not become motor throttle. Out-of-range offsets are rejected, loss of the
+armed/stopped gate cancels the sequence, and command 12 remains the explicit
+save request. CRC-valid CRSF channel frames with missing payload are rejected.
+
+Input configuration changes reach main through the bounded publication queue.
+If it fills, main recovers an authoritative snapshot with input interrupts
+excluded. Saves claim a request and copy the live ISR configuration under the
+same exclusion, then perform flash I/O afterwards. Host port tests execute the
+production ISR adapters after their first-interrupt ownership transfer; they
+model exclusion and ordering, not hardware interrupt latency.
+
+The harness accepts `crsf c8 ...` with space-separated hexadecimal bytes for raw
+serial-input tests. Explicit `eeprom.*` configuration injection still updates the
+test setup; command processing no longer relies on unconditional config copies
+that could hide missing ISR-to-main publication.
+
 Both crates are experimental pre-1.0 libraries. Source-breaking changes use a new
 minor version. Version 0.4 combines the power-stage and BEMF interfaces:
 

@@ -230,6 +230,7 @@ fn main() -> ! {
 
         // Shared system tick: input processing + main loop pipeline.
         // Same function called by harness — eliminates divergence.
+        rm32_stm32::isr_handlers::resync_input_config(&mut main_state);
         rm32::system::SystemTick::<rm32_stm32::platform::StmPlatform>::sync_config_writes(
             shared,
             &mut main_state,
@@ -279,17 +280,7 @@ fn main() -> ! {
         );
 
         // EEPROM save on DShot command
-        if shared.save_settings_flag() {
-            shared.set_save_settings_flag(false);
-            if let Some((low, high)) = shared.take_servo_calibration() {
-                main_state.config.servo_low_threshold = low;
-                main_state.config.servo_high_threshold = high;
-            } else {
-                // Copy pre-ISR-local config updates back and write to flash.
-                isr::with_isr_state(|isr| {
-                    main_state.config = isr.config;
-                });
-            }
+        if rm32_stm32::isr_handlers::prepare_input_save(&mut main_state) {
             let mut flash = FlashStorage::new();
             use rm32::hal::Flash as _;
             flash.write(eeprom_address, main_state.config.as_bytes());
