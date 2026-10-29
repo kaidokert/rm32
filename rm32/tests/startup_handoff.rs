@@ -13,10 +13,9 @@ use rm32::{
         state::{BemfState, DutyState},
     },
     hal::*,
-    main_state::{ChipParams, MainState},
+    main_state::ChipParams,
     motor_mode::MotorEvent,
     shared_state::SharedState,
-    system::SystemTick,
 };
 
 type Log = Rc<RefCell<Vec<&'static str>>>;
@@ -134,14 +133,30 @@ impl ComTimer for Com {
         self.enabled = true;
     }
 }
-struct Hal {
+struct Hal<P: rm32::platform::Platform> {
+    _platform: std::marker::PhantomData<P>,
     pwm: Pwm,
     phase: Phase,
     comp: Comp,
     interval: Interval,
     com: Com,
 }
-impl MotorHal for Hal {
+struct TestPlatform;
+impl rm32::platform::Platform for TestPlatform {
+    const TICK_HZ: u32 = 20_000;
+    const TIMER_HZ: u32 = 2_000_000;
+    const CAPTURE_HZ: u32 = 64_000_000;
+    const GCR_SHIFT: u8 = 7;
+    const PWM_BASE_PERIOD: u16 = 1999;
+}
+impl<P: rm32::platform::Platform> rm32::platform::Platform for Hal<P> {
+    const TICK_HZ: u32 = P::TICK_HZ;
+    const TIMER_HZ: u32 = P::TIMER_HZ;
+    const CAPTURE_HZ: u32 = P::CAPTURE_HZ;
+    const GCR_SHIFT: u8 = P::GCR_SHIFT;
+    const PWM_BASE_PERIOD: u16 = P::PWM_BASE_PERIOD;
+}
+impl<P: rm32::platform::Platform> MotorHal for Hal<P> {
     type Pwm = Pwm;
     type Phase = Phase;
     type Comp = Comp;
@@ -163,26 +178,26 @@ impl MotorHal for Hal {
         &mut self.com
     }
 }
-struct Rig {
+struct RigFor<P: rm32::platform::Platform> {
     shared: SharedState,
-    system: SystemTick,
-    main: MainState,
+    system: rm32::system::SystemTick<P>,
+    main: rm32::main_state::MainState<P>,
     comm: Commutation,
     bemf: BemfState,
     duty: DutyState,
-    hal: Hal,
+    hal: Hal<P>,
     log: Log,
 }
-impl Rig {
+impl<P: rm32::platform::Platform> RigFor<P> {
     fn new() -> Self {
         let log: Log = Rc::default();
         let active = Rc::new(Cell::new([0; 3]));
-        let shared = SharedState::new();
+        let shared = SharedState::new::<P>();
         shared.transition(MotorEvent::Arm);
         shared.set_tim1_arr(1999);
         shared.set_duty_maximum(2000);
         shared.set_current_limit_adjust(2000);
-        let mut main = MainState::new(
+        let mut main = rm32::main_state::MainState::<P>::new(
             &BoardConfig::DEFAULT,
             ChipParams {
                 timer1_max_arr: 1999,
@@ -196,11 +211,12 @@ impl Rig {
         Self {
             shared,
             main,
-            system: SystemTick::new(),
+            system: rm32::system::SystemTick::<P>::new(),
             comm: Commutation::new(),
             bemf: BemfState::default(),
             duty,
             hal: Hal {
+                _platform: std::marker::PhantomData,
                 pwm: Pwm {
                     active: active.clone(),
                     values: [0; 3],
@@ -472,7 +488,7 @@ fn active_braking_waits_for_stop_and_restarts_consistently() {
         assert_eq!(r.hal.pwm.active.get(), [490; 3]);
         r.log.borrow_mut().clear();
         // Even a callback already pending at the stop cannot replace the brake.
-        isr_logic::commutation_timer_expired(
+        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _>(
             &mut r.comm,
             &mut r.bemf,
             &r.shared,
@@ -593,4 +609,122 @@ fn brief_main_sine_service_invalidates_active_brake_topology() {
     assert_eq!(r.hal.phase.step, 2);
     assert_eq!(r.hal.phase.sector_active, [0; 3]);
     assert_eq!(r.hal.pwm.values, [490; 3]);
+}
+
+type Rig = RigFor<TestPlatform>;
+
+// Deliberately independent of the STM32 clock configuration.
+struct AlternatePlatform;
+impl rm32::platform::Platform for AlternatePlatform {
+    const TICK_HZ: u32 = 40_000;
+    const TIMER_HZ: u32 = 1_000_000;
+    const CAPTURE_HZ: u32 = 48_000_000;
+    const GCR_SHIFT: u8 = 6;
+    const PWM_BASE_PERIOD: u16 = 2399;
+}
+
+#[test]
+fn alternate_clock_startup_and_handoff_keep_physical_delays_and_ownership() {
+    let mut r = RigFor::<AlternatePlatform>::new();
+    r.main.config.use_sine_start = 0;
+    r.tick(300);
+    assert_eq!(r.shared.commutation_interval(), 5000); // 5 ms at 1 MHz
+    assert_eq!(r.hal.interval.count, 2500);
+
+    r.main.config.use_sine_start = 1;
+    r.tick(80);
+    r.sine();
+    r.hal.pwm.generate_update_event();
+    let compares = r.hal.pwm.active.get();
+    r.log.borrow_mut().clear();
+    for _ in 0..8 {
+        r.tick(80);
+    }
+    assert_eq!(r.hal.pwm.active.get(), compares);
+    assert!(
+        !r.log
+            .borrow()
+            .iter()
+            .any(|e| ["a", "b", "c", "duty", "latch"].contains(e))
+    );
+
+    r.tick(250);
+    r.sine();
+    assert_eq!(r.shared.commutation_interval(), 4500); // 4.5 ms at 1 MHz
+    assert!(r.shared.stepper_sine());
+    r.log.borrow_mut().clear();
+    r.tick(250);
+    assert_eq!(r.hal.com.delay, 4500);
+    assert_eq!(r.hal.interval.count, 4500);
+    assert!(r.hal.com.enabled);
+    assert!(!r.hal.comp.enabled);
+    assert_eq!(r.hal.phase.sector_active, [0; 3]);
+    let log = r.log.borrow();
+    let latch = log.iter().position(|e| *e == "latch").unwrap();
+    let sector = log.iter().position(|e| *e == "sector").unwrap();
+    let timer = log.iter().position(|e| *e == "com_on").unwrap();
+    assert!(latch < sector && sector < timer);
+    drop(log);
+    r.shared
+        .request_isr_action(rm32::shared_comm::IsrAction::AllOff);
+    r.tick(0);
+    assert!(!r.hal.com.enabled);
+    assert!(!r.hal.comp.enabled);
+    assert_eq!(r.hal.pwm.active.get(), [0; 3]);
+    assert_eq!(r.shared.changeover_step(), 0);
+    r.tick(80);
+    assert!(r.sine().is_some());
+}
+
+#[test]
+fn alternate_control_clock_arms_after_one_second_and_schedules_telemetry() {
+    let mut r = RigFor::<AlternatePlatform>::new();
+    r.shared.transition(MotorEvent::Disarm);
+    r.shared.set_input_set(true);
+    r.shared.set_adjusted_input(0);
+    r.main.config.telemetry_on_interval = 1;
+    let mut arming = 0;
+    for tick in 1..=40_001 {
+        r.shared.set_send_telemetry(false);
+        isr_logic::ten_khz_tick(&mut MotorContext {
+            commutation: &mut r.comm,
+            bemf: &mut r.bemf,
+            duty: &mut r.duty,
+            config: &r.main.config,
+            armed_timeout_count: &mut arming,
+            voltage_based_ramp: false,
+            shared: &r.shared,
+            hal: &mut r.hal,
+        });
+        assert_eq!(r.shared.armed(), tick > 40_000);
+        // 30 ms at 40 kHz, with the existing dispatch-on-limit convention.
+        assert_eq!(r.shared.send_telemetry(), tick % 1200 == 0);
+        r.log.borrow_mut().clear();
+    }
+    assert_eq!(r.shared.control_ticks(), 40_001);
+}
+
+#[test]
+fn alternate_timer_commutation_reports_microseconds_and_switches_at_one_ms() {
+    let mut r = RigFor::<AlternatePlatform>::new();
+    r.shared.transition(MotorEvent::StartMotor);
+    r.shared.set_zero_crosses(30);
+    r.shared.set_commutation_interval(900);
+    for _ in 0..6 {
+        // Keep the actual measured interval fixed while filling all six slots.
+        r.shared.set_old_routine(true);
+        isr_logic::commutation_timer_expired::<AlternatePlatform, _, _, _, _>(
+            &mut r.comm,
+            &mut r.bemf,
+            &r.shared,
+            &mut r.hal.com,
+            &mut r.hal.comp,
+            &mut r.hal.phase,
+            false,
+            true,
+        );
+        assert!(!r.shared.old_routine());
+        assert!(r.hal.comp.enabled);
+    }
+    assert_eq!(r.shared.e_com_time(), 5400);
 }

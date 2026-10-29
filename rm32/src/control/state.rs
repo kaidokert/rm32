@@ -95,8 +95,8 @@ impl DutyState {
     }
 
     /// Apply ramp rate limiting to duty cycle.
-    /// `average_interval`: from e_com_time/3, used for RPM-based ramp profile selection.
-    pub(crate) fn ramp_limit(
+    /// `average_interval`: in platform timer counts, used for RPM-based ramp selection.
+    pub(crate) fn ramp_limit<P: Timing>(
         &mut self,
         battery_voltage: crate::units::CentiVolts,
         commutation_interval: u32,
@@ -114,7 +114,7 @@ impl DutyState {
                     RAMP_VOLTAGE_CHANGE_MAX,
                     RAMP_VOLTAGE_CHANGE_MIN,
                 ) as u8;
-                self.max_change = if commutation_interval > RAMP_FAST_COMMUTATION_THRESHOLD {
+                self.max_change = if commutation_interval > P::RAMP_FAST_COMMUTATION_THRESHOLD {
                     v_change
                 } else {
                     v_change.saturating_mul(3)
@@ -123,7 +123,7 @@ impl DutyState {
                 || self.last < RAMP_STARTUP_THRESHOLD
             {
                 self.max_change = self.max_ramp_startup;
-            } else if average_interval > RAMP_LOW_RPM_INTERVAL {
+            } else if average_interval > P::RAMP_LOW_RPM_INTERVAL {
                 self.max_change = self.max_ramp_low_rpm;
             } else {
                 self.max_change = self.max_ramp_high_rpm;
@@ -334,19 +334,18 @@ impl ProtectionState {
 }
 
 /// Sensor measurements.
-#[derive(Clone, Default)]
-pub struct Measurements {
+pub struct Measurements<P: crate::platform::Platform> {
     pub(crate) battery_voltage: crate::units::CentiVolts,
     pub(crate) actual_current: crate::units::CentiAmps,
     pub(crate) degrees_celsius: crate::units::DegreesCelsius,
-    pub(crate) consumed_charge: crate::current::ConsumedCharge,
+    pub(crate) consumed_charge: crate::current::ConsumedCharge<P>,
     /// EWMA filter for ADC voltage readings.
     pub(crate) voltage_filter: crate::filter::EwmaPow2<3>,
     /// Multi-stage filter for ADC current readings.
     pub(crate) current_filter: crate::current::CurrentFilter,
 }
 
-impl Measurements {
+impl<P: crate::platform::Platform> Measurements<P> {
     /// Consumed charge in whole mAh, saturated to the KISS telemetry range.
     pub fn consumed_milliamp_hours(&self) -> u16 {
         self.consumed_charge.milliamp_hours()
@@ -374,6 +373,31 @@ impl Measurements {
     /// Read temperature in degrees Celsius.
     pub fn degrees_celsius(&self) -> crate::units::DegreesCelsius {
         self.degrees_celsius
+    }
+}
+
+impl<P: crate::platform::Platform> Default for Measurements<P> {
+    fn default() -> Self {
+        Self {
+            battery_voltage: Default::default(),
+            actual_current: Default::default(),
+            degrees_celsius: Default::default(),
+            consumed_charge: Default::default(),
+            voltage_filter: Default::default(),
+            current_filter: Default::default(),
+        }
+    }
+}
+impl<P: crate::platform::Platform> Clone for Measurements<P> {
+    fn clone(&self) -> Self {
+        Self {
+            battery_voltage: self.battery_voltage,
+            actual_current: self.actual_current,
+            degrees_celsius: self.degrees_celsius,
+            consumed_charge: self.consumed_charge.clone(),
+            voltage_filter: self.voltage_filter.clone(),
+            current_filter: self.current_filter.clone(),
+        }
     }
 }
 
@@ -865,7 +889,13 @@ mod tests {
         let mut d = ramp_test_duty(400, 500);
         d.apply_max_ramp(7);
 
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 1000, false);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            1000,
+            false,
+        );
 
         assert_eq!(d.cycle(), 400);
 
@@ -873,7 +903,13 @@ mod tests {
         for _ in 0..10 {
             d.increment_ramp_count();
         }
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 1000, false);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            1000,
+            false,
+        );
 
         assert_eq!(d.cycle(), 407);
     }
@@ -883,7 +919,13 @@ mod tests {
         let mut d = ramp_test_duty(400, 500);
         d.apply_max_ramp(30);
 
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 100, false);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            100,
+            false,
+        );
 
         assert_eq!(d.cycle(), 403);
     }
@@ -893,7 +935,13 @@ mod tests {
         let mut d = ramp_test_duty(400, 500);
         d.apply_max_ramp(200);
 
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 50, 1000, false);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            50,
+            1000,
+            false,
+        );
 
         assert_eq!(d.cycle(), 402);
     }
@@ -939,7 +987,13 @@ mod tests {
     fn ramp_profile_low_rpm() {
         let mut d = ramp_test_duty(400, 500);
         // Default: max_ramp_low_rpm=6, max_ramp_high_rpm=16
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 1000, false); // average_interval=1000 > 500
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            1000,
+            false,
+        ); // average_interval=1000 > 500
         // cycle should be clamped to last + max_ramp_low_rpm = 400 + 6 = 406
         assert_eq!(d.cycle(), 406, "low RPM should use max_ramp_low_rpm=6");
     }
@@ -948,7 +1002,13 @@ mod tests {
     #[test]
     fn ramp_profile_high_rpm() {
         let mut d = ramp_test_duty(400, 500);
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 100, false); // average_interval=100 <= 500
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            100,
+            false,
+        ); // average_interval=100 <= 500
         // cycle should be clamped to last + max_ramp_high_rpm = 400 + 16 = 416
         assert_eq!(d.cycle(), 416, "high RPM should use max_ramp_high_rpm=16");
     }
@@ -957,7 +1017,13 @@ mod tests {
     #[test]
     fn ramp_profile_startup() {
         let mut d = ramp_test_duty(400, 500);
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 50, 1000, false); // zero_crosses=50 < 150
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            50,
+            1000,
+            false,
+        ); // zero_crosses=50 < 150
         // cycle should be clamped to last + max_ramp_startup = 400 + 2 = 402
         assert_eq!(d.cycle(), 402, "startup should use max_ramp_startup=2");
     }
@@ -966,7 +1032,13 @@ mod tests {
     #[test]
     fn ramp_profile_low_duty_uses_startup() {
         let mut d = ramp_test_duty(100, 200);
-        d.ramp_limit(crate::units::CentiVolts(0), 0, 200, 1000, false); // last=100 < 150
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            0,
+            200,
+            1000,
+            false,
+        ); // last=100 < 150
         assert_eq!(d.cycle(), 102, "low duty should use max_ramp_startup=2");
     }
 
@@ -975,14 +1047,26 @@ mod tests {
     #[test]
     fn measurement_regression_ramp_clamps_above_voltage_range() {
         let mut d = ramp_test_duty(400, 500);
-        d.ramp_limit(crate::units::CentiVolts(5000), 300, 200, 1000, true); // 50 V
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(5000),
+            300,
+            200,
+            1000,
+            true,
+        ); // 50 V
         assert_eq!(d.cycle(), 401);
     }
 
     #[test]
     fn measurement_regression_ramp_clamps_below_voltage_range() {
         let mut d = ramp_test_duty(400, 500);
-        d.ramp_limit(crate::units::CentiVolts(0), 300, 200, 1000, true);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(0),
+            300,
+            200,
+            1000,
+            true,
+        );
         assert_eq!(d.cycle(), 410);
     }
 
@@ -991,7 +1075,13 @@ mod tests {
     fn ramp_voltage_low_battery_high_change() {
         let mut d = ramp_test_duty(400, 500);
         // battery=800cV (low end), commutation_interval=300 (> 200 threshold)
-        d.ramp_limit(crate::units::CentiVolts(800), 300, 200, 1000, true);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(800),
+            300,
+            200,
+            1000,
+            true,
+        );
         // map(800, 800, 2200, 10, 1) = 10, ci>200 so no 3x
         assert_eq!(d.cycle(), 410, "low voltage should give max_change=10");
     }
@@ -1001,7 +1091,13 @@ mod tests {
     fn ramp_voltage_high_battery_low_change() {
         let mut d = ramp_test_duty(400, 500);
         // battery=2200cV (high end), commutation_interval=300
-        d.ramp_limit(crate::units::CentiVolts(2200), 300, 200, 1000, true);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(2200),
+            300,
+            200,
+            1000,
+            true,
+        );
         // map(2200, 800, 2200, 10, 1) = 1
         assert_eq!(d.cycle(), 401, "high voltage should give max_change=1");
     }
@@ -1011,7 +1107,13 @@ mod tests {
     fn ramp_voltage_fast_commutation_3x() {
         let mut d = ramp_test_duty(400, 500);
         // battery=800cV, commutation_interval=100 (<= 200 threshold) → 3x
-        d.ramp_limit(crate::units::CentiVolts(800), 100, 200, 1000, true);
+        d.ramp_limit::<crate::platform::TestPlatform>(
+            crate::units::CentiVolts(800),
+            100,
+            200,
+            1000,
+            true,
+        );
         // map(800, 800, 2200, 10, 1) = 10, ci<=200 so 10*3=30
         assert_eq!(
             d.cycle(),

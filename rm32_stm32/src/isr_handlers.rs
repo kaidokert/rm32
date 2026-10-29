@@ -5,7 +5,6 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, TargetIsrState};
-use crate::mcu::ChipConfig;
 use rm32::hal::{DshotOutputPrescaler, InputCapture};
 use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
 
@@ -63,8 +62,8 @@ static ISR_LOCAL: IsrCell = IsrCell::new();
 /// after the first ISR has taken it from the initialization cell. Keep the
 /// returned delay outside interrupt exclusion.
 pub fn service_sine(
-    system: &mut rm32::system::SystemTick,
-    main: &mut rm32::main_state::MainState,
+    system: &mut rm32::system::SystemTick<crate::platform::StmPlatform>,
+    main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>,
     dead_time: i16,
 ) -> Option<u16> {
     cortex_m::interrupt::free(|_| {
@@ -104,7 +103,7 @@ pub fn handle_tim14() {
     }
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
-    rm32::control::isr_logic::commutation_timer_expired(
+    rm32::control::isr_logic::commutation_timer_expired::<crate::platform::StmPlatform, _, _, _, _>(
         &mut state.commutation,
         &mut state.bemf,
         shared,
@@ -151,7 +150,12 @@ pub fn handle_dma_tc() {
                     rm32::dshot::erpm_to_12bit(shared.e_com_time() as u16, shared.running())
                 }
             };
-            rm32::dshot::encode_gcr_frame(value_12bit, gcr, 7, crate::mcu::Chip::GCR_SHIFT);
+            rm32::dshot::encode_gcr_frame(
+                value_12bit,
+                gcr,
+                7,
+                <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT,
+            );
 
             state.hal.input.send_dshot_dma();
         }
@@ -168,7 +172,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
     let pin_high = state.hal.input.input_pin_state();
 
     let mut zic = shared.zero_input_count();
-    let actions = state.transfer.process(
+    let actions = state.transfer.process::<crate::platform::StmPlatform>(
         buf,
         shared.input_set(),
         shared.dshot(),
@@ -183,7 +187,6 @@ pub fn handle_exti_frame() -> CaptureConfig {
         &mut zic,
         state.frametime_low,
         state.frametime_high,
-        crate::mcu::Chip::CPU_FREQUENCY_MHZ as u8,
     );
     shared.set_zero_input_count(zic);
 

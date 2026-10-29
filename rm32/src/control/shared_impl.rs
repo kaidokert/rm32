@@ -19,7 +19,7 @@ pub struct TestShared {
     pub zero_crosses: Cell<u32>,
     pub commutation_interval: Cell<u32>,
     pub e_com_time: Cell<i32>,
-    pub signal_timeout: Cell<u16>,
+    pub signal_timeout: Cell<u32>,
     pub send_telemetry: Cell<bool>,
     // Main→ISR published state
     pub tim1_arr: Cell<u16>,
@@ -123,12 +123,12 @@ impl IsrTiming for TestShared {
     fn set_interval_timer_count(&self, v: u32) {
         self.interval_timer_count.set(v);
     }
-    fn signal_timeout(&self) -> u16 {
+    fn signal_timeout(&self) -> u32 {
         self.signal_timeout.get()
     }
     fn increment_signal_timeout(&self) {
         let v = self.signal_timeout.get();
-        if v < u16::MAX {
+        if v < u32::MAX {
             self.signal_timeout.set(v + 1);
         }
     }

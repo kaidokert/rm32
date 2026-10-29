@@ -27,10 +27,13 @@ impl Commutation {
     /// `commutation_intervals[step - 1] = commutation_interval`
     ///
     /// Returns the updated e_com_time for publishing to SharedComm.
-    pub(crate) fn record_interval(&mut self, commutation_interval: u16) -> i32 {
+    pub(crate) fn record_interval<P: crate::platform::Platform>(
+        &mut self,
+        commutation_interval: u16,
+    ) -> i32 {
         self.intervals[(self.step - 1) as usize] = commutation_interval;
         let sum: u32 = self.intervals.iter().map(|&v| v as u32).sum();
-        ((sum + 4) >> 1) as i32
+        crate::platform::six_intervals_to_us::<P>(sum)
     }
 
     /// Advance one commutation step. Returns the new step number.

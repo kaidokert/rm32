@@ -110,7 +110,7 @@ pub trait IsrTiming {
         0
     }
     fn set_interval_timer_count(&self, _v: u32) {}
-    fn signal_timeout(&self) -> u16;
+    fn signal_timeout(&self) -> u32;
     fn increment_signal_timeout(&self);
 
     /// Current duty cycle (ISR writes each tick, main reads for bidir speed gate).

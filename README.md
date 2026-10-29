@@ -48,7 +48,25 @@ HARNESS_EXE=../../downloads/target/release/rm32_harness python3 -m pytest test_v
 ## Library compatibility
 
 Both crates are experimental pre-1.0 libraries. Source-breaking changes use a new
-minor version. Version 0.2 changes the motor service interfaces:
+minor version. Version 0.3 makes the clock contract explicit:
+
+- Implement `platform::Platform` for the port and its `MotorHal`, supplying
+  control, interval/commutation, and capture clock rates, GCR bit shift, and
+  base PWM period. STM32 uses `platform::StmPlatform`.
+- Select that port in `MainState<P, LED>`, `SystemTick<P>`, `Measurements<P>`,
+  and `SharedState::new::<P>()`. Shared state no longer has a clock-independent
+  `Default`. Board ADC calibration still comes from `BoardConfig`.
+- Use `constants::Timing` for clock-derived thresholds; raw clock-dependent
+  globals are removed. Select `P` in `sine_step`, `commutation_timer_expired`,
+  `TransferState::process`, and capture-setup constructors. Transfer processing
+  no longer takes a separate CPU MHz argument. Signal timeouts are now `u32`.
+
+STM32 control ticks remain 20 kHz and interval timers remain 2 MHz. Other clock
+rates require execution-time and hardware validation; see `Platform` for the
+counter constraints. PWM ownership, measurement scaling, and telemetry wire
+formats are unchanged.
+
+Version 0.2 introduced these motor service interfaces:
 
 - `control::isr_logic::bemf_zero_cross` now requires shared motor state as its
   first argument so it can reject interrupts in stopped, sine, and polling modes.

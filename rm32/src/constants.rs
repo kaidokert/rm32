@@ -16,42 +16,12 @@ pub const THROTTLE_MIN_SIGNAL: u16 = 47;
 /// `(duty_cycle * tim1_arr) / DUTY_SCALE_MAX`.
 pub const DUTY_SCALE_MAX: u16 = 2000;
 
-/// Default TIM1 auto-reload value.
-/// At 64MHz (G071): 64MHz / (1999+1) = 32kHz PWM frequency.
-/// At 48MHz (F051): 48MHz / (1999+1) = 24kHz.
-pub const TIM1_DEFAULT_ARR: u16 = 1999;
-
-/// Arming timeout in 20kHz ticks (20000 ticks = 1.0 second).
-/// ESC arms after receiving zero throttle for this duration.
-pub const ARMING_TIMEOUT_TICKS: u32 = 20000;
-
-/// Frequency of the control ISR, shared with STM32 TIM6 initialization.
-pub const CONTROL_TICK_HZ: u32 = 20_000;
-
-/// Number of 20 kHz TIM6 ticks between 1 kHz ADC/PID dispatches.
-pub const PID_LOOP_DIVIDER: u8 = 20;
-
 /// Base interval for periodic KISS telemetry, in milliseconds.
 pub const TELEMETRY_INTERVAL_MS: u16 = 30;
-
-/// Number of 20 kHz TIM6 ticks in one millisecond.
-pub const TELEMETRY_INTERVAL_TICKS_PER_MS: u16 = 20;
-
-pub const fn telemetry_interval_ticks(config_interval: u8) -> u16 {
-    (TELEMETRY_INTERVAL_MS - 1 + config_interval as u16) * TELEMETRY_INTERVAL_TICKS_PER_MS
-}
-
-/// Default initial commutation interval in timer ticks (0.5µs each).
-/// 10000 ticks = 5ms between commutations = very slow startup.
-pub const INITIAL_COMMUTATION_INTERVAL: u32 = 10000;
 
 /// Zero-cross counter cap. Prevents overflow; after 10000 ZCs the motor
 /// is considered reliably running.
 pub const ZERO_CROSS_CAP: u32 = 10000;
-
-/// Commutation interval threshold (timer ticks) to exit old_routine polling mode
-/// and switch to interrupt-driven BEMF detection. Lower = higher RPM.
-pub const OLD_ROUTINE_EXIT_INTERVAL: u32 = 2000;
 
 /// Minimum zero-cross count before exiting old_routine.
 /// Ensures enough successful commutations before trusting interrupt-driven mode.
@@ -72,14 +42,6 @@ pub const LVC_NORMAL_THRESHOLD: u16 = 10000;
 /// Counted at 1 kHz: 100 counts = 0.1 second.
 pub const LVC_STARTUP_THRESHOLD: u16 = 100;
 
-/// Desync recovery: average_interval is reset to this value (5ms between commutations).
-/// Provides a safe slow-speed starting point after desync event.
-pub const DESYNC_RESET_INTERVAL: u32 = 5000;
-
-/// Desync detection: only triggers when average_interval < this value.
-/// Prevents false desync detection at very low RPM where intervals are naturally large.
-pub const DESYNC_MAX_INTERVAL: u32 = 2000;
-
 /// Consecutive inverted-CRC DShot frames required before committing
 /// auto-detected bidirectional DShot mode.
 pub const BIDIR_CONFIRM_FRAMES: u8 = 4;
@@ -97,10 +59,6 @@ pub const BEMF_TIMEOUT_STRICT: u8 = 10;
 
 /// Throttle level below which the lenient BEMF timeout is used.
 pub const BEMF_LENIENT_THROTTLE: u16 = 150;
-
-/// Interval timer threshold for stall detection (timer ticks at 2MHz).
-/// 45000 ticks = 22.5ms without a BEMF zero-cross → motor is stalled.
-pub const BEMF_STALL_TIMER_THRESHOLD: u32 = 45000;
 
 /// BEMF timeout fault latch value. When bemf_timeout_happened exceeds the
 /// threshold, it's set to this sentinel (> any threshold) to indicate a
@@ -120,12 +78,6 @@ pub const ADVANCE_SHIFT: u32 = 6;
 /// Minimum zero-crosses before applying advance timing in old_routine BEMF polling.
 /// Below this count, commutate immediately without waiting for advance delay.
 pub const MIN_ZC_FOR_ADVANCE: u32 = 5;
-
-/// Signal timeout threshold (20kHz ticks). 10000 = 0.5 second with no valid input.
-pub const SIGNAL_TIMEOUT_DISARM: u16 = 10000;
-
-/// Unarmed signal timeout threshold (20kHz ticks). 4x disarm timeout = 2 seconds.
-pub const SIGNAL_TIMEOUT_UNARMED: u16 = SIGNAL_TIMEOUT_DISARM * 4;
 
 /// Sine startup: throttle below which BEMF timeout is cleared.
 pub const SINE_BEMF_CLEAR_THROTTLE: u16 = 160;
@@ -147,9 +99,6 @@ pub const SINE_FAST_STEP_DELAY: u16 = 80;
 
 /// Sine mode step delay at medium throttle (µs).
 pub const SINE_MEDIUM_STEP_DELAY: u16 = 120;
-
-/// Custom LED blink half-period: 100 ms in control ISR ticks.
-pub const LED_BLINK_HALF_PERIOD: u16 = (CONTROL_TICK_HZ / 10) as u16;
 
 /// Custom LED high-throttle threshold (above this = solid on).
 pub const LED_HIGH_THROTTLE: u16 = 1947;
@@ -176,14 +125,66 @@ pub const RAMP_VOLTAGE_HIGH_CV: i32 = 2200;
 pub const RAMP_VOLTAGE_CHANGE_MAX: i32 = 10;
 /// Voltage ramp: min duty change at high voltage.
 pub const RAMP_VOLTAGE_CHANGE_MIN: i32 = 1;
-/// Commutation interval threshold: below this, apply 3x voltage ramp multiplier.
-pub const RAMP_FAST_COMMUTATION_THRESHOLD: u32 = 200;
 /// Zero-crosses / duty threshold for startup ramp profile.
 pub const RAMP_STARTUP_THRESHOLD: u16 = 150;
-/// Average interval threshold: above = low RPM, below = high RPM.
-pub const RAMP_LOW_RPM_INTERVAL: u32 = 500;
-
 // --- Brake ---
 
 /// Brake strength per-unit scale factor (DUTY_SCALE_MAX / 10).
 pub const BRAKE_STRENGTH_SCALE: u32 = 200;
+
+use crate::platform::{Platform, ms_to_control_ticks, us_to_ticks};
+
+/// Physical durations expressed in the selected port's timer units.
+/// Blanket implementation keeps all thresholds tied to the same clocks.
+pub trait Timing: Platform + Sized {
+    const VALID: () = crate::platform::validate::<Self>();
+    const ARMING_TIMEOUT_TICKS: u32 = ms_to_control_ticks::<Self>(1000);
+
+    const PID_LOOP_DIVIDER: u8 = ms_to_control_ticks::<Self>(1) as u8;
+
+    const CONTROL_TICKS_PER_MS: u16 = ms_to_control_ticks::<Self>(1) as u16;
+
+    const SIGNAL_TIMEOUT_DISARM: u32 = ms_to_control_ticks::<Self>(500);
+    const SIGNAL_TIMEOUT_UNARMED: u32 = Self::SIGNAL_TIMEOUT_DISARM * 4;
+
+    const INITIAL_COMMUTATION_INTERVAL: u32 = us_to_ticks::<Self>(6250);
+
+    const STARTUP_COMMUTATION_INTERVAL: u32 = us_to_ticks::<Self>(5000);
+
+    const SINE_CHANGEOVER_INTERVAL: u32 = us_to_ticks::<Self>(4500);
+
+    const OLD_ROUTINE_EXIT_INTERVAL: u32 = us_to_ticks::<Self>(1000);
+
+    const OLD_ROUTINE_REENTRY_MARGIN: u32 = us_to_ticks::<Self>(250);
+
+    const DESYNC_RESET_INTERVAL: u32 = us_to_ticks::<Self>(2500);
+
+    const DESYNC_MAX_INTERVAL: u32 = us_to_ticks::<Self>(1000);
+
+    const DESYNC_STOP_INTERVAL: u32 = us_to_ticks::<Self>(500);
+
+    const BEMF_STALL_TIMER_THRESHOLD: u32 = us_to_ticks::<Self>(22_500);
+
+    const RAMP_FAST_COMMUTATION_THRESHOLD: u32 = us_to_ticks::<Self>(100);
+    const RAMP_LOW_RPM_INTERVAL: u32 = us_to_ticks::<Self>(250);
+
+    const FILTER_SLOW_INTERVAL: u32 = us_to_ticks::<Self>(250);
+    const FILTER_FAST_INTERVAL: u32 = us_to_ticks::<Self>(25);
+    const FILTER_MAP_LO_INTERVAL: u32 = us_to_ticks::<Self>(50);
+    const FILTER_MAP_HI_INTERVAL: u32 = us_to_ticks::<Self>(250);
+
+    const VARIABLE_PWM1_LO: u32 = us_to_ticks::<Self>(48);
+    const VARIABLE_PWM1_HI: u32 = us_to_ticks::<Self>(100);
+    const VARIABLE_PWM2_LO: u32 = us_to_ticks::<Self>(50);
+    const VARIABLE_PWM2_HI: u32 = us_to_ticks::<Self>(125);
+
+    const LED_BLINK_HALF_PERIOD: u16 = ms_to_control_ticks::<Self>(100) as u16;
+}
+
+impl<P: Platform> Timing for P {}
+
+/// Interval-telemetry period in control ticks for config slot
+/// `config_interval` (AM32: `(30 - 1 + telemetry_on_interval)` ms).
+pub const fn telemetry_interval_ticks<P: Platform>(config_interval: u8) -> u16 {
+    (TELEMETRY_INTERVAL_MS - 1 + config_interval as u16) * <P as Timing>::CONTROL_TICKS_PER_MS
+}

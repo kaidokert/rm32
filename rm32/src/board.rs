@@ -41,7 +41,8 @@ pub struct BoardConfig {
     pub current_adc_channel: u8,
     /// ADC channel for voltage sense
     pub voltage_adc_channel: u8,
-    /// Stall protection target interval
+    /// Stall protection target interval in 0.5 us units, independent of the
+    /// port's interval timer rate. PID gains use the same established scale.
     pub stall_protect_interval: u16,
     /// Minimum BEMF filter counts for zero-cross detection (varies by target)
     pub min_bemf_counts: u8,
