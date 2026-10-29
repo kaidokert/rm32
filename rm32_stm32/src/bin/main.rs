@@ -11,7 +11,7 @@ use cortex_m_rt::entry;
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::state::{BemfState, DutyState};
-use rm32::hal::{PwmOutput, System, TelemetryUart as _};
+use rm32::hal::{Bridge, MotorHal, System, TelemetryUart as _};
 use rm32::ws2812::LedStatus;
 
 type MainState = rm32::main_state::MainState<rm32_stm32::platform::StmPlatform>;
@@ -69,7 +69,7 @@ fn main() -> ! {
     {
         use rm32::sounds::Sounds;
         let sounds = Sounds::new(Chip::TIM1_AUTORELOAD);
-        sounds.play_startup(&mut hal.pwm, &mut hal.phase, &mut sys);
+        sounds.play_startup(&mut hal.bridge(), &mut sys);
     }
 
     // --- RPM pulse output (debug): configure GPIO before phase moves to ISR ---
@@ -199,10 +199,10 @@ fn main() -> ! {
         }
     });
 
-    // Apply dead-time override via PwmOutput trait
+    // Apply dead-time override via the bridge
     if dead_time_override > 0 {
         isr::with_isr_state(|isr| {
-            isr.hal.pwm.set_dead_time_override(dead_time_override);
+            isr.hal.bridge().set_dead_time_override(dead_time_override);
         });
     }
 
@@ -245,12 +245,12 @@ fn main() -> ! {
                 let sounds = rm32::sounds::Sounds::new(Chip::TIM1_AUTORELOAD);
                 if main_state.cell_count > 0 {
                     for _ in 0..main_state.cell_count {
-                        sounds.play_input(&mut isr.hal.pwm, &mut isr.hal.phase, &mut sys);
+                        sounds.play_input(&mut isr.hal.bridge(), &mut sys);
                         sys.delay_millis(100);
                         sys.reload_watchdog();
                     }
                 } else {
-                    sounds.play_input(&mut isr.hal.pwm, &mut isr.hal.phase, &mut sys);
+                    sounds.play_input(&mut isr.hal.bridge(), &mut sys);
                 }
             });
 

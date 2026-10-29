@@ -47,6 +47,21 @@ impl ExtiOps for G071Exti {
         exti.rpr1().write(|w| unsafe { w.bits(LINE) });
         exti.fpr1().write(|w| unsafe { w.bits(LINE) });
     }
+    fn pending(&self) -> bool {
+        let exti = unsafe { &*EXTI::ptr() };
+        (exti.rpr1().read().bits() | exti.fpr1().read().bits()) & LINE != 0
+    }
+    #[inline(always)]
+    fn clear_pending(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.rpr1().write(|w| unsafe { w.bits(LINE) });
+        exti.fpr1().write(|w| unsafe { w.bits(LINE) });
+    }
+    #[inline(always)]
+    fn repend(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.swier1().write(|w| unsafe { w.bits(LINE) });
+    }
 }
 
 pub type G071BemfComparator = BemfComparator<G071Comp, G071Exti>;

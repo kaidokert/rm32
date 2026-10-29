@@ -24,7 +24,7 @@ struct Pwm {
     values: [u16; 3],
     log: Log,
 }
-impl PwmOutput for Pwm {
+impl Pwm {
     fn set_duty_all(&mut self, v: u16) {
         self.values = [v; 3];
         self.log.borrow_mut().push("duty");
@@ -77,26 +77,30 @@ impl PhaseOutput for Phase {
 struct Comp {
     log: Log,
     enabled: bool,
-    step: u8,
+    phase: rm32::hal::Phase,
     rising: bool,
 }
-impl Comparator for Comp {
-    fn output_level(&self) -> bool {
+impl BemfSensor for Comp {
+    fn level(&self) -> bool {
         false
     }
-    fn set_step(&mut self, step: u8, rising: bool) {
-        self.step = step;
+    fn select_phase(&mut self, phase: rm32::hal::Phase, rising: bool) {
+        self.phase = phase;
         self.rising = rising;
         self.log.borrow_mut().push("route");
-    }
-    fn change_input(&mut self) {
+
         self.log.borrow_mut().push("mux");
     }
-    fn enable_interrupts(&mut self) {
+    fn pending(&self) -> bool {
+        false
+    }
+    fn clear_pending(&mut self) {}
+    fn repend(&mut self) {}
+    fn enable_irq(&mut self) {
         self.enabled = true;
         self.log.borrow_mut().push("comp_on");
     }
-    fn mask_interrupts(&mut self) {
+    fn mask_irq(&mut self) {
         self.enabled = false;
         self.log.borrow_mut().push("comp_off");
     }
@@ -156,19 +160,60 @@ impl<P: rm32::platform::Platform> rm32::platform::Platform for Hal<P> {
     const GCR_SHIFT: u8 = P::GCR_SHIFT;
     const PWM_BASE_PERIOD: u16 = P::PWM_BASE_PERIOD;
 }
+impl<P: rm32::platform::Platform> rm32::hal::PhaseOutput for Hal<P> {
+    fn com_step(&mut self, step: u8) {
+        rm32::hal::PhaseOutput::com_step(&mut self.phase, step);
+    }
+    fn all_off(&mut self) {
+        rm32::hal::PhaseOutput::all_off(&mut self.phase);
+    }
+    fn full_brake(&mut self) {
+        rm32::hal::PhaseOutput::full_brake(&mut self.phase);
+    }
+    fn all_pwm(&mut self) {
+        rm32::hal::PhaseOutput::all_pwm(&mut self.phase);
+    }
+    fn proportional_brake(&mut self) {
+        rm32::hal::PhaseOutput::proportional_brake(&mut self.phase);
+    }
+    fn pulse_toggle(&mut self, step: u8) {
+        rm32::hal::PhaseOutput::pulse_toggle(&mut self.phase, step);
+    }
+}
+impl<P: rm32::platform::Platform> rm32::bridge::Bridge for Hal<P> {
+    fn set_duty_all(&mut self, v: u16) {
+        self.pwm.set_duty_all(v);
+    }
+    fn set_phase_duties(&mut self, a: u16, b: u16, c: u16) {
+        self.pwm.set_compare1(a);
+        self.pwm.set_compare2(b);
+        self.pwm.set_compare3(c);
+    }
+    fn set_period(&mut self, v: u16) {
+        self.pwm.set_auto_reload(v);
+    }
+    fn latch(&mut self) {
+        self.pwm.generate_update_event();
+    }
+    fn set_tone_divider(&mut self, v: u16) {
+        self.pwm.set_prescaler(v);
+    }
+    fn set_dead_time_override(&mut self, v: u16) {
+        self.pwm.set_dead_time_override(v);
+    }
+}
 impl<P: rm32::platform::Platform> MotorHal for Hal<P> {
-    type Pwm = Pwm;
-    type Phase = Phase;
-    type Comp = Comp;
+    type Bridge<'a>
+        = &'a mut Self
+    where
+        Self: 'a;
+    type Bemf = Comp;
     type Interval = Interval;
     type Com = Com;
-    fn pwm(&mut self) -> &mut Pwm {
-        &mut self.pwm
+    fn bridge(&mut self) -> Self::Bridge<'_> {
+        self
     }
-    fn phase(&mut self) -> &mut Phase {
-        &mut self.phase
-    }
-    fn comp(&mut self) -> &mut Comp {
+    fn bemf(&mut self) -> &mut Comp {
         &mut self.comp
     }
     fn interval(&mut self) -> &mut Interval {
@@ -231,7 +276,7 @@ impl<P: rm32::platform::Platform> RigFor<P> {
                 comp: Comp {
                     log: log.clone(),
                     enabled: false,
-                    step: 0,
+                    phase: rm32::hal::Phase::C,
                     rising: false,
                 },
                 interval: Interval {
@@ -355,7 +400,7 @@ fn handoff_is_ordered_single_use_and_direction_correct() {
         assert_eq!(r.shared.changeover_step(), 0);
         assert_eq!(r.comm.step(), 5);
         assert_eq!(r.hal.phase.sector_active, [0; 3]);
-        assert_eq!(r.hal.comp.step, 5);
+        assert_eq!(r.hal.comp.phase, rm32::hal::Phase::A);
         assert_eq!(r.hal.comp.rising, forward);
         assert!(
             !r.hal.comp.enabled,
@@ -505,7 +550,17 @@ fn active_braking_waits_for_stop_and_restarts_consistently() {
         r.tick(500);
         assert!(r.shared.old_routine());
         assert_eq!(r.hal.phase.step, r.comm.step());
-        assert_eq!(r.hal.comp.step, r.comm.step());
+        assert_eq!(
+            r.hal.comp.phase,
+            [
+                rm32::hal::Phase::C,
+                rm32::hal::Phase::A,
+                rm32::hal::Phase::B,
+                rm32::hal::Phase::C,
+                rm32::hal::Phase::A,
+                rm32::hal::Phase::B
+            ][usize::from(r.comm.step() - 1)]
+        );
         assert_eq!(r.hal.phase.sector_active, [0; 3]);
         assert_eq!(r.hal.interval.count, 5000);
         assert_eq!(r.shared.commutation_interval(), 10000);

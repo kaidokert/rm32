@@ -46,6 +46,20 @@ impl ExtiOps for L431Exti {
         // L4: PR1 at offset 0x14
         exti.pr1.write(|w| unsafe { w.bits(LINE) });
     }
+    fn pending(&self) -> bool {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.pr1.read().bits() & LINE != 0
+    }
+    #[inline(always)]
+    fn clear_pending(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.pr1.write(|w| unsafe { w.bits(LINE) });
+    }
+    #[inline(always)]
+    fn repend(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.swier1.write(|w| unsafe { w.bits(LINE) });
+    }
 }
 
 pub type L431BemfComparator = BemfComparator<L431Comp, L431Exti>;

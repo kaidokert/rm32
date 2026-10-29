@@ -19,6 +19,7 @@ pub use mcu::pac;
 // --- Shared across all MCUs (zero cfg) ---
 pub mod adc_generic;
 pub mod adc_hal;
+pub mod bridge;
 pub mod capture_generic;
 pub mod capture_hal;
 pub mod comp_hal;

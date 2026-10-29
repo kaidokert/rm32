@@ -1,6 +1,6 @@
 //! TIM1 3-phase PWM output for STM32L431.
 
-use rm32::hal::PwmOutput;
+use crate::bridge::TimerPwm;
 
 pub struct Pwm {
     _private: (),
@@ -12,7 +12,7 @@ impl Pwm {
     }
 }
 
-impl PwmOutput for Pwm {
+impl TimerPwm for Pwm {
     fn set_duty_all(&mut self, d: u16) {
         let tim1 = unsafe { &*stm32l4xx_hal::pac::TIM1::ptr() };
         tim1.ccr1.write(|w| unsafe { w.bits(d as u32) });

@@ -48,7 +48,32 @@ HARNESS_EXE=../../downloads/target/release/rm32_harness python3 -m pytest test_v
 ## Library compatibility
 
 Both crates are experimental pre-1.0 libraries. Source-breaking changes use a new
-minor version. Version 0.3 makes the clock contract explicit:
+minor version. Version 0.4 combines the power-stage and BEMF interfaces:
+
+- Implement `bridge::Bridge` over the phase driver and PWM timer. `MotorHal`
+  returns a borrowed `Bridge<'a>` through `bridge()` and exposes `Bemf` through
+  `bemf()`. Separate `pwm()`, `phase()`, and `comp()` accessors are removed.
+  STM32 uses `StmBridge` over its existing timer and GPIO drivers; host ports
+  can return `&mut Self` when they implement `Bridge` directly.
+- Replace `Comparator` with `BemfSensor`. Route a `hal::Phase` and edge together
+  with `select_phase`; use `floating_phase(step)` for six-step commutation.
+  IRQ enable, mask-and-clear, pending, clear, and software-pend operations are
+  explicit. `filter_read` defaults to an ordinary level read. These operations
+  do not add interrupt entry gates or change the persistence filter.
+- `step_legs` defines the six-step table shared by GPIO and BEMF selection.
+  The GPIO driver retains its constructor-selected complementary/bridge-enable
+  mode and existing write order. Firmware constructors still select
+  non-complementary drive; this change does not apply a new EEPROM drive policy.
+- Tone methods now take one `Bridge` instead of separate PWM and phase outputs.
+  Tones remain blocking, with the same interrupt ownership. `latch` explicitly
+  applies queued timer values; per-phase compares remain ordered A, B, C.
+
+The host register tests execute production GPIO, bridge, and all four comparator
+adapters with observable register substitutes. They verify software ordering and
+routing, not analog behavior, gate timing, or interrupt latency. Those still need
+hardware validation. F051 flash fit remains a separate limitation.
+
+Version 0.3 makes the clock contract explicit:
 
 - Implement `platform::Platform` for the port and its `MotorHal`, supplying
   control, interval/commutation, and capture clock rates, GCR bit shift, and

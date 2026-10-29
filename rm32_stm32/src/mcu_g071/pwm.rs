@@ -4,8 +4,8 @@
 //! Dead-time / complementary outputs and runtime ARR changes use raw PAC
 //! (HAL doesn't expose these).
 
+use crate::bridge::TimerPwm;
 use crate::pac::TIM1;
-use rm32::hal::PwmOutput;
 use stm32g0xx_hal::gpio::{DefaultMode, gpioa::*};
 use stm32g0xx_hal::rcc::Rcc;
 use stm32g0xx_hal::time::Hertz;
@@ -63,7 +63,7 @@ impl Tim1Pwm {
     }
 }
 
-impl PwmOutput for Tim1Pwm {
+impl TimerPwm for Tim1Pwm {
     fn set_duty_all(&mut self, duty: u16) {
         // PwmPin::set_duty writes to the channel's CCR register
         self.ch1.set_duty(duty);

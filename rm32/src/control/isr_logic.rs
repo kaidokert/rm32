@@ -8,7 +8,7 @@ use crate::commutation::Commutation;
 use crate::constants::*;
 use crate::control::context::MotorContext;
 use crate::control::state::{BemfState, DutyState};
-use crate::hal::{self, ComTimer, Comparator, IntervalTimer, MotorHal, PhaseOutput, PwmOutput};
+use crate::hal::{self, BemfSensor, Bridge, ComTimer, IntervalTimer, MotorHal, PhaseOutput};
 use crate::motor_mode::MotorEvent;
 use crate::shared_comm::{IsrAction, SharedComm};
 
@@ -31,7 +31,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
     if !ctx.shared.running() {
         // Keep COMP masked while phases are not commutating.
-        ctx.hal.comp().mask_interrupts();
+        ctx.hal.bemf().mask_irq();
     }
 
     let action = ctx.shared.isr_action();
@@ -42,10 +42,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.duty.active_brake_on = false;
             ctx.shared.set_changeover_step(0);
             ctx.hal.com_timer().disable_interrupt();
-            ctx.hal.phase().all_off();
-            ctx.hal.pwm().set_duty_all(0);
-            ctx.hal.pwm().generate_update_event();
-            ctx.hal.comp().mask_interrupts();
+            ctx.hal.bridge().all_off();
+            ctx.hal.bridge().set_duty_all(0);
+            ctx.hal.bridge().latch();
+            ctx.hal.bemf().mask_irq();
             ctx.shared.clear_isr_action(IsrAction::AllOff);
             return;
         }
@@ -78,16 +78,18 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         && input > SINE_CHANGEOVER_THROTTLE;
     if handoff {
         ctx.hal.com_timer().disable_interrupt();
-        ctx.hal.comp().mask_interrupts();
-        ctx.hal.pwm().set_duty_all(0);
-        ctx.hal.pwm().generate_update_event();
+        ctx.hal.bemf().mask_irq();
+        ctx.hal.bridge().set_duty_all(0);
+        ctx.hal.bridge().latch();
         ctx.commutation.set_step(changeover);
-        ctx.hal.phase().com_step(changeover);
+        ctx.hal.bridge().com_step(changeover);
         let ci = ctx.shared.commutation_interval();
         ctx.hal.interval().set_count(ci);
         ctx.bemf.reset_for_step();
-        ctx.hal.comp().set_step(changeover, ctx.commutation.rising);
-        ctx.hal.comp().change_input();
+        ctx.hal.bemf().select_phase(
+            crate::hal::floating_phase(changeover),
+            ctx.commutation.rising,
+        );
         ctx.shared.transition(MotorEvent::ExitSine);
         ctx.hal.com_timer().set_and_enable(ci as u16);
     }
@@ -109,9 +111,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     if ctx.shared.armed() && sine_start && input < start_threshold {
         if !ctx.shared.stepper_sine() {
             // Do not hold a driven six-step sector while main has yet to enter sine.
-            ctx.hal.phase().all_off();
-            ctx.hal.pwm().set_duty_all(0);
-            ctx.hal.pwm().generate_update_event();
+            ctx.hal.bridge().all_off();
+            ctx.hal.bridge().set_duty_all(0);
+            ctx.hal.bridge().latch();
             ctx.duty.sine_outputs_on = false;
         }
         ctx.shared.transition(MotorEvent::StopMotor);
@@ -120,7 +122,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.shared.set_zero_crosses(0);
         ctx.bemf.reset_for_step();
         ctx.hal.com_timer().disable_interrupt();
-        ctx.hal.comp().mask_interrupts();
+        ctx.hal.bemf().mask_irq();
     }
     if ctx.shared.armed() && !ctx.shared.stepper_sine() {
         if input >= start_threshold {
@@ -132,11 +134,11 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             );
             ctx.shared.set_duty_cycle_setpoint(setpoint);
             if !ctx.shared.running() {
-                ctx.hal.phase().all_off();
+                ctx.hal.bridge().all_off();
                 if ctx.duty.active_brake_on {
                     // Do not apply the old brake compare to the restart sector.
-                    ctx.hal.pwm().set_duty_all(0);
-                    ctx.hal.pwm().generate_update_event();
+                    ctx.hal.bridge().set_duty_all(0);
+                    ctx.hal.bridge().latch();
                     ctx.duty.active_brake_on = false;
                 }
                 ctx.shared.transition(MotorEvent::StartMotor);
@@ -146,9 +148,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                     .commutation
                     .record_interval::<H>(ctx.shared.commutation_interval() as u16);
                 ctx.shared.set_e_com_time(e_com);
-                ctx.hal.phase().com_step(step);
-                ctx.hal.comp().set_step(step, ctx.commutation.rising);
-                ctx.hal.comp().change_input();
+                ctx.hal.bridge().com_step(step);
+                ctx.hal
+                    .bemf()
+                    .select_phase(crate::hal::floating_phase(step), ctx.commutation.rising);
                 ctx.shared
                     .set_commutation_interval(H::STARTUP_COMMUTATION_INTERVAL);
                 ctx.hal
@@ -238,32 +241,34 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     } else if active_brake {
         if !ctx.duty.active_brake_on {
             ctx.hal.com_timer().disable_interrupt();
-            ctx.hal.comp().mask_interrupts();
-            ctx.hal.pwm().set_duty_all(0);
-            ctx.hal.pwm().generate_update_event();
-            ctx.hal.phase().com_step(2);
+            ctx.hal.bemf().mask_irq();
+            ctx.hal.bridge().set_duty_all(0);
+            ctx.hal.bridge().latch();
+            ctx.hal.bridge().com_step(2);
             ctx.duty.active_brake_on = true;
         }
         let brake_duty =
             (ctx.config.active_brake_power as u32 * tim1_arr as u32 / DUTY_SCALE_MAX as u32) * 10;
         ctx.hal
-            .pwm()
+            .bridge()
             .set_duty_all(brake_duty.min(tim1_arr as u32) as u16);
     } else if ctx.shared.armed() && ctx.shared.running() {
-        ctx.hal.pwm().set_duty_all(ctx.duty.pwm_compare(tim1_arr));
+        ctx.hal
+            .bridge()
+            .set_duty_all(ctx.duty.pwm_compare(tim1_arr));
     } else if ctx.shared.prop_brake_active() {
-        ctx.hal.phase().proportional_brake();
-        ctx.hal.pwm().set_duty_all(DutyState::brake_compare(
+        ctx.hal.bridge().proportional_brake();
+        ctx.hal.bridge().set_duty_all(DutyState::brake_compare(
             ctx.config.drag_brake_strength,
             tim1_arr,
         ));
     } else {
-        ctx.hal.phase().all_off();
-        ctx.hal.pwm().set_duty_all(0);
+        ctx.hal.bridge().all_off();
+        ctx.hal.bridge().set_duty_all(0);
     }
     let final_duty = ctx.duty.finalize();
     ctx.shared.set_duty_cycle(final_duty);
-    ctx.hal.pwm().set_auto_reload(tim1_arr);
+    ctx.hal.bridge().set_period(tim1_arr);
 
     // Sync ISR→shared (Commutation owns truth, shared publishes for main loop)
     ctx.shared.set_forward(ctx.commutation.forward);
@@ -273,8 +278,8 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
 /// BEMF polling (old_routine path).
 fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
-    ctx.hal.comp().mask_interrupts();
-    let comp_level = ctx.hal.comp().output_level();
+    ctx.hal.bemf().mask_irq();
+    let comp_level = ctx.hal.bemf().level();
     let rising = ctx.commutation.rising;
     ctx.bemf.update(comp_level, rising);
 
@@ -291,10 +296,11 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 .commutation
                 .record_interval::<H>(ctx.shared.commutation_interval() as u16);
             ctx.shared.set_e_com_time(e_com);
-            ctx.hal.phase().com_step(step);
-            ctx.hal.phase().pulse_toggle(step);
-            ctx.hal.comp().set_step(step, ctx.commutation.rising);
-            ctx.hal.comp().change_input();
+            ctx.hal.bridge().com_step(step);
+            ctx.hal.bridge().pulse_toggle(step);
+            ctx.hal
+                .bemf()
+                .select_phase(crate::hal::floating_phase(step), ctx.commutation.rising);
             ctx.bemf.reset_for_step();
             ctx.shared.increment_zero_crosses();
         } else {
@@ -318,13 +324,13 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     strict_changeover: bool,
 ) where
     S: SharedComm,
-    C: hal::Comparator,
+    C: hal::BemfSensor,
     Ph: hal::PhaseOutput,
     T: hal::ComTimer,
 {
     com_timer.disable_interrupt();
     if !shared.running() {
-        comp.mask_interrupts();
+        comp.mask_irq();
         return;
     }
 
@@ -337,8 +343,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     shared.set_e_com_time(e_com);
     phase.com_step(step);
     phase.pulse_toggle(step);
-    comp.set_step(step, commutation.rising);
-    comp.change_input();
+    comp.select_phase(crate::hal::floating_phase(step), commutation.rising);
 
     let exit_interval = if bidirectional {
         P::OLD_ROUTINE_EXIT_INTERVAL / 2
@@ -360,7 +365,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     }
 
     if !shared.old_routine() {
-        comp.enable_interrupts();
+        comp.enable_irq();
     }
     bemf.reset_after_commutation();
     shared.increment_zero_crosses();
@@ -379,14 +384,14 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     };
     if !was_interrupt_mode && shared.old_routine() && changeover_met {
         shared.transition(MotorEvent::BemfLocked);
-        comp.enable_interrupts();
+        comp.enable_irq();
     }
 }
 
 /// BEMF zero-cross detected (COMP ISR body).
 pub fn bemf_zero_cross<
     S: SharedComm,
-    C: hal::Comparator,
+    C: hal::BemfSensor,
     I: hal::IntervalTimer,
     T: hal::ComTimer,
 >(
@@ -400,15 +405,15 @@ pub fn bemf_zero_cross<
     // An IRQ already pending when sine/polling masks the comparator must not
     // restart the commutation timer or consume a polling-mode zero crossing.
     if !shared.running() || shared.old_routine() {
-        comp.mask_interrupts();
+        comp.mask_irq();
         return false;
     }
     for _ in 0..bemf.filter_level() {
-        if comp.output_level() == commutation.rising() {
+        if comp.filter_read() == commutation.rising() {
             return false;
         }
     }
-    comp.mask_interrupts();
+    comp.mask_irq();
     let count = interval.count() as u16;
     interval.set_count(0);
     bemf.record_zc_timing(count);

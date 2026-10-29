@@ -1,6 +1,6 @@
 //! TIM1 3-phase PWM output for STM32G431.
 
-use rm32::hal::PwmOutput;
+use crate::bridge::TimerPwm;
 
 pub struct Pwm {
     _private: (),
@@ -12,7 +12,7 @@ impl Pwm {
     }
 }
 
-impl PwmOutput for Pwm {
+impl TimerPwm for Pwm {
     fn set_prescaler(&mut self, psc: u16) {
         let tim1 = unsafe { &*stm32g4xx_hal::stm32::TIM1::PTR };
         unsafe {

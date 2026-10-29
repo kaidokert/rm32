@@ -1,7 +1,7 @@
 //! Motor phase output control (6-step commutation via GPIO mode switching).
 //!
 //! PhaseDriver is generic over 6 pin types — all pin identity is resolved
-//! at compile time. Runtime methods contain no branches on port or pin number.
+//! at compile time. The sector table selects which phase helper runs first.
 //!
 //! Pin assignments for HARDWARE_GROUP_G0_A:
 //!   Phase A: high=PA10, low=PB1
@@ -11,11 +11,38 @@
 use crate::gpio_pin::GpioPin;
 use crate::gpio_regs::GpioPort;
 use core::marker::PhantomData;
+use rm32::bridge::{LegRole, step_legs};
 use rm32::hal::PhaseOutput;
 
 /// GPIO MODER values.
 const MODE_OUTPUT: u32 = 0b01;
 const MODE_ALTERNATE: u32 = 0b10;
+
+// Derive the operation order from the semantic table at compile time.
+// Floating first, low second, driven last preserves the gate-write sequence.
+const fn ordered_phases(step: u8) -> [u8; 3] {
+    let legs = step_legs(step, false);
+    let mut order = [0; 3];
+    let mut phase = 0;
+    while phase < 3 {
+        let slot = match legs[phase] {
+            LegRole::Float => 0,
+            LegRole::LowSolid => 1,
+            _ => 2,
+        };
+        order[slot] = phase as u8;
+        phase += 1;
+    }
+    order
+}
+const PHASE_ORDER: [[u8; 3]; 6] = [
+    ordered_phases(1),
+    ordered_phases(2),
+    ordered_phases(3),
+    ordered_phases(4),
+    ordered_phases(5),
+    ordered_phases(6),
+];
 
 /// Pulse output toggle function — stored as fn pointer to avoid storing raw addresses.
 /// Monomorphized per pin type at `enable_pulse_output` call site.
@@ -24,7 +51,7 @@ type PulseToggleFn = fn(u32);
 /// 3-phase driver, parameterized by 6 compile-time pin types.
 ///
 /// AH/AL = Phase A high/low, BH/BL = Phase B, CH/CL = Phase C.
-/// After monomorphization, all port/pin constants are inlined — zero overhead.
+/// Port and pin constants are resolved by monomorphization.
 pub struct PhaseDriver<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin>
 {
     comp_pwm: bool,
@@ -112,38 +139,24 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     for PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
     fn com_step(&mut self, step: u8) {
-        match step {
-            1 => {
-                Self::phase_float::<CH, CL>();
-                Self::phase_low::<BH, BL>();
-                self.phase_pwm::<AH, AL>();
-            }
-            2 => {
-                Self::phase_float::<AH, AL>();
-                Self::phase_low::<BH, BL>();
-                self.phase_pwm::<CH, CL>();
-            }
-            3 => {
-                Self::phase_float::<BH, BL>();
-                Self::phase_low::<AH, AL>();
-                self.phase_pwm::<CH, CL>();
-            }
-            4 => {
-                Self::phase_float::<CH, CL>();
-                Self::phase_low::<AH, AL>();
-                self.phase_pwm::<BH, BL>();
-            }
-            5 => {
-                Self::phase_float::<AH, AL>();
-                Self::phase_low::<CH, CL>();
-                self.phase_pwm::<BH, BL>();
-            }
-            6 => {
-                Self::phase_float::<BH, BL>();
-                Self::phase_low::<CH, CL>();
-                self.phase_pwm::<AH, AL>();
-            }
-            _ => {}
+        if !(1..=6).contains(&step) {
+            return;
+        }
+        let [float, low, pwm] = PHASE_ORDER[(step - 1) as usize];
+        match float {
+            0 => Self::phase_float::<AH, AL>(),
+            1 => Self::phase_float::<BH, BL>(),
+            _ => Self::phase_float::<CH, CL>(),
+        }
+        match low {
+            0 => Self::phase_low::<AH, AL>(),
+            1 => Self::phase_low::<BH, BL>(),
+            _ => Self::phase_low::<CH, CL>(),
+        }
+        match pwm {
+            0 => self.phase_pwm::<AH, AL>(),
+            1 => self.phase_pwm::<BH, BL>(),
+            _ => self.phase_pwm::<CH, CL>(),
         }
     }
 
