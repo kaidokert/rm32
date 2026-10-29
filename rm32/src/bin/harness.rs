@@ -28,7 +28,7 @@ struct MockPwm {
     arr: u16,
     duty_count: u32,
 }
-impl hal::PwmOutput for MockPwm {
+impl MockPwm {
     fn set_duty_all(&mut self, d: u16) {
         self.duty = d;
         self.phases = [d; 3];
@@ -55,14 +55,18 @@ struct MockComp {
     level: bool,
     mask_interrupts: HalCounter,
 }
-impl hal::Comparator for MockComp {
-    fn output_level(&self) -> bool {
+impl hal::BemfSensor for MockComp {
+    fn level(&self) -> bool {
         self.level
     }
-    fn set_step(&mut self, _: u8, _: bool) {}
-    fn change_input(&mut self) {}
-    fn enable_interrupts(&mut self) {}
-    fn mask_interrupts(&mut self) {
+    fn select_phase(&mut self, _: rm32::hal::Phase, _: bool) {}
+    fn pending(&self) -> bool {
+        false
+    }
+    fn clear_pending(&mut self) {}
+    fn repend(&mut self) {}
+    fn enable_irq(&mut self) {}
+    fn mask_irq(&mut self) {
         self.mask_interrupts.set(self.mask_interrupts.get() + 1);
     }
 }
@@ -157,21 +161,62 @@ impl rm32::platform::Platform for MockMotorHal {
     const GCR_SHIFT: u8 = <HarnessPlatform as rm32::platform::Platform>::GCR_SHIFT;
     const PWM_BASE_PERIOD: u16 = <HarnessPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
 }
+impl rm32::hal::PhaseOutput for MockMotorHal {
+    fn com_step(&mut self, step: u8) {
+        rm32::hal::PhaseOutput::com_step(&mut self.phase, step);
+    }
+    fn all_off(&mut self) {
+        rm32::hal::PhaseOutput::all_off(&mut self.phase);
+    }
+    fn full_brake(&mut self) {
+        rm32::hal::PhaseOutput::full_brake(&mut self.phase);
+    }
+    fn all_pwm(&mut self) {
+        rm32::hal::PhaseOutput::all_pwm(&mut self.phase);
+    }
+    fn proportional_brake(&mut self) {
+        rm32::hal::PhaseOutput::proportional_brake(&mut self.phase);
+    }
+    fn pulse_toggle(&mut self, step: u8) {
+        rm32::hal::PhaseOutput::pulse_toggle(&mut self.phase, step);
+    }
+}
+impl rm32::bridge::Bridge for MockMotorHal {
+    fn set_duty_all(&mut self, v: u16) {
+        self.pwm.set_duty_all(v);
+    }
+    fn set_phase_duties(&mut self, a: u16, b: u16, c: u16) {
+        self.pwm.set_compare1(a);
+        self.pwm.set_compare2(b);
+        self.pwm.set_compare3(c);
+    }
+    fn set_period(&mut self, v: u16) {
+        self.pwm.set_auto_reload(v);
+    }
+    fn latch(&mut self) {
+        self.pwm.generate_update_event();
+    }
+    fn set_tone_divider(&mut self, v: u16) {
+        self.pwm.set_prescaler(v);
+    }
+    fn set_dead_time_override(&mut self, v: u16) {
+        self.pwm.set_dead_time_override(v);
+    }
+}
 impl hal::MotorHal for MockMotorHal {
-    type Pwm = MockPwm;
-    type Comp = MockComp;
-    type Phase = MockPhase;
+    type Bridge<'a>
+        = &'a mut Self
+    where
+        Self: 'a;
+    type Bemf = MockComp;
     type Interval = MockInterval;
     type Com = MockComTimer;
 
-    fn pwm(&mut self) -> &mut MockPwm {
-        &mut self.pwm
+    fn bridge(&mut self) -> Self::Bridge<'_> {
+        self
     }
-    fn comp(&mut self) -> &mut MockComp {
+    fn bemf(&mut self) -> &mut MockComp {
         &mut self.comp
-    }
-    fn phase(&mut self) -> &mut MockPhase {
-        &mut self.phase
     }
     fn interval(&mut self) -> &mut MockInterval {
         &mut self.interval
@@ -868,7 +913,7 @@ impl Harness {
 
 #[cfg(test)]
 mod tests {
-    use rm32::hal::{Comparator as _, PhaseOutput as _};
+    use rm32::hal::{BemfSensor as _, PhaseOutput as _};
 
     use super::*;
 
@@ -943,7 +988,7 @@ mod tests {
 
         harness.hal.phase.all_off();
         harness.hal.phase.full_brake();
-        harness.hal.comp.mask_interrupts();
+        harness.hal.comp.mask_irq();
 
         assert_eq!(harness.hal_counts.all_off.get(), 1);
         assert_eq!(harness.hal_counts.full_brake.get(), 1);

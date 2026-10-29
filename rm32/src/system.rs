@@ -6,7 +6,7 @@
 //! that caused bugs across multiple review rounds.
 
 use crate::control::input::{self, InputState};
-use crate::hal::{Adc, ComTimer, Comparator, MotorHal, PhaseOutput, PwmOutput, TelemetryUart};
+use crate::hal::{Adc, BemfSensor, Bridge, ComTimer, MotorHal, PhaseOutput, TelemetryUart};
 use crate::main_state::MainState;
 use crate::shared_state::SharedState;
 use crate::sine::PhasePositions;
@@ -162,10 +162,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
         if !duty.sine_outputs_on {
             self.sine_positions = PhasePositions::from_step(commutation_step);
             hal.com_timer().disable_interrupt();
-            hal.comp().mask_interrupts();
-            hal.pwm().set_duty_all(0);
-            hal.pwm().generate_update_event();
-            hal.phase().all_pwm();
+            hal.bemf().mask_irq();
+            hal.bridge().set_duty_all(0);
+            hal.bridge().latch();
+            hal.bridge().all_pwm();
             duty.active_brake_on = false;
             duty.sine_outputs_on = true;
         }
@@ -173,9 +173,7 @@ impl<P: crate::constants::Timing> SystemTick<P> {
         shared.set_prop_brake_active(false);
         let (result, (a, b, c)) =
             self.tick_sine(shared, &main.config, dead_time, shared.tim1_arr())?;
-        hal.pwm().set_compare1(a);
-        hal.pwm().set_compare2(b);
-        hal.pwm().set_compare3(c);
+        hal.bridge().set_phase_duties(a, b, c);
         match result {
             crate::sine::SineStepResult::Continue(delay) => Some(delay),
             crate::sine::SineStepResult::Changeover {

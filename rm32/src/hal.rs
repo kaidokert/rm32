@@ -11,28 +11,56 @@ pub use embedded_hal::delay::DelayNs;
 pub use embedded_hal::digital::InputPin;
 pub use embedded_hal::pwm::SetDutyCycle;
 
-/// PWM output interface for 3-phase motor control.
-/// Goes beyond embedded-hal's single-channel SetDutyCycle.
-pub trait PwmOutput {
-    fn set_duty_all(&mut self, duty: u16);
-    fn set_auto_reload(&mut self, arr: u16);
-    fn set_prescaler(&mut self, psc: u16);
-    fn set_compare1(&mut self, val: u16);
-    fn set_compare2(&mut self, val: u16);
-    fn set_compare3(&mut self, val: u16);
-    fn generate_update_event(&mut self);
-    /// Override dead-time in TIM1 BDTR register (OR'd with existing DTG value).
-    fn set_dead_time_override(&mut self, dtg: u16);
+/// The combined power-stage interface.
+pub use crate::bridge::Bridge;
+
+/// A motor phase, independent of the port's comparator mux encoding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum Phase {
+    A,
+    B,
+    C,
 }
 
-/// Comparator (BEMF sensing) interface
-pub trait Comparator {
-    fn output_level(&self) -> bool;
-    /// Set the commutation step and rising/falling edge for BEMF sensing.
-    fn set_step(&mut self, step: u8, rising: bool);
-    fn change_input(&mut self);
-    fn enable_interrupts(&mut self);
-    fn mask_interrupts(&mut self);
+/// Floating phase for six-step commutation. Invalid steps retain the
+/// established comparator fallback to C; they do not wrap into valid steps.
+pub const fn floating_phase(step: u8) -> Phase {
+    let legs = crate::bridge::step_legs(step, false);
+    if step < 1 || step > 6 {
+        return Phase::C;
+    }
+    if matches!(legs[0], crate::bridge::LegRole::Float) {
+        Phase::A
+    } else if matches!(legs[1], crate::bridge::LegRole::Float) {
+        Phase::B
+    } else {
+        Phase::C
+    }
+}
+
+/// Comparator routing and edge-interrupt control for BEMF sensing.
+pub trait BemfSensor {
+    /// Route the floating phase and edge without unmasking the interrupt.
+    /// The port handles mux encoding and comparator/EXTI polarity.
+    fn select_phase(&mut self, phase: Phase, rising: bool);
+    /// Unmask the selected comparator source without clearing pending edges.
+    fn enable_irq(&mut self);
+    /// Mask the interrupt and clear its pending edge state.
+    fn mask_irq(&mut self);
+    /// Current comparator output, with the port's established polarity.
+    fn level(&self) -> bool;
+    /// Persistence-filter read; identical to an ordinary read unless a port
+    /// explicitly supplies a separately validated implementation.
+    fn filter_read(&self) -> bool {
+        self.level()
+    }
+    /// Whether any edge is pending on the comparator's owned EXTI line(s).
+    fn pending(&self) -> bool;
+    /// Discard pending edges on owned lines without changing the IRQ mask.
+    fn clear_pending(&mut self);
+    /// Software-pend the selected source without changing the IRQ mask.
+    fn repend(&mut self);
 }
 
 /// Debug pulse output — toggles a GPIO on commutation for RPM measurement.
@@ -40,7 +68,8 @@ pub trait PulseOutput {
     fn toggle(&mut self);
 }
 
-/// Motor phase output control (6-step commutation)
+/// Motor phase output control. The port retains its configured drive mode.
+/// Invalid commutation steps leave outputs unchanged.
 pub trait PhaseOutput {
     fn com_step(&mut self, step: u8);
     fn all_off(&mut self);
@@ -70,15 +99,15 @@ pub trait ComTimer {
 /// Reduces generic parameter count from 5 to 1 in ISR function signatures.
 /// Implementors provide the concrete MCU-specific types.
 pub trait MotorHal: crate::platform::Platform {
-    type Pwm: PwmOutput;
-    type Comp: Comparator;
-    type Phase: PhaseOutput;
+    type Bridge<'a>: Bridge
+    where
+        Self: 'a;
+    type Bemf: BemfSensor;
     type Interval: IntervalTimer;
     type Com: ComTimer;
 
-    fn pwm(&mut self) -> &mut Self::Pwm;
-    fn comp(&mut self) -> &mut Self::Comp;
-    fn phase(&mut self) -> &mut Self::Phase;
+    fn bridge(&mut self) -> Self::Bridge<'_>;
+    fn bemf(&mut self) -> &mut Self::Bemf;
     fn interval(&mut self) -> &mut Self::Interval;
     fn com_timer(&mut self) -> &mut Self::Com;
 }

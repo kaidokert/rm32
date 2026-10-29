@@ -7,6 +7,7 @@
 
 pub mod bemf;
 pub mod board;
+pub mod bridge;
 pub mod brushed;
 pub mod commutation;
 pub mod config;

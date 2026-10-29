@@ -109,7 +109,7 @@ mod tests {
         last_duty: u16,
         order: *const MockOrder,
     }
-    impl hal::PwmOutput for MockPwm {
+    impl MockPwm {
         fn set_duty_all(&mut self, d: u16) {
             self.last_duty = d;
             self.compares = [d; 3];
@@ -134,16 +134,20 @@ mod tests {
         mask_called: bool,
         enable_calls: u32,
     }
-    impl hal::Comparator for MockComp {
-        fn output_level(&self) -> bool {
+    impl hal::BemfSensor for MockComp {
+        fn level(&self) -> bool {
             self.level
         }
-        fn set_step(&mut self, _: u8, _: bool) {}
-        fn change_input(&mut self) {}
-        fn enable_interrupts(&mut self) {
+        fn select_phase(&mut self, _: crate::hal::Phase, _: bool) {}
+        fn pending(&self) -> bool {
+            false
+        }
+        fn clear_pending(&mut self) {}
+        fn repend(&mut self) {}
+        fn enable_irq(&mut self) {
             self.enable_calls += 1;
         }
-        fn mask_interrupts(&mut self) {
+        fn mask_irq(&mut self) {
             self.mask_called = true;
         }
     }
@@ -224,21 +228,62 @@ mod tests {
         const GCR_SHIFT: u8 = 7;
         const PWM_BASE_PERIOD: u16 = 1999;
     }
+    impl crate::hal::PhaseOutput for MockMotorHal {
+        fn com_step(&mut self, step: u8) {
+            crate::hal::PhaseOutput::com_step(&mut self.phase, step);
+        }
+        fn all_off(&mut self) {
+            crate::hal::PhaseOutput::all_off(&mut self.phase);
+        }
+        fn full_brake(&mut self) {
+            crate::hal::PhaseOutput::full_brake(&mut self.phase);
+        }
+        fn all_pwm(&mut self) {
+            crate::hal::PhaseOutput::all_pwm(&mut self.phase);
+        }
+        fn proportional_brake(&mut self) {
+            crate::hal::PhaseOutput::proportional_brake(&mut self.phase);
+        }
+        fn pulse_toggle(&mut self, step: u8) {
+            crate::hal::PhaseOutput::pulse_toggle(&mut self.phase, step);
+        }
+    }
+    impl crate::bridge::Bridge for MockMotorHal {
+        fn set_duty_all(&mut self, v: u16) {
+            self.pwm.set_duty_all(v);
+        }
+        fn set_phase_duties(&mut self, a: u16, b: u16, c: u16) {
+            self.pwm.set_compare1(a);
+            self.pwm.set_compare2(b);
+            self.pwm.set_compare3(c);
+        }
+        fn set_period(&mut self, v: u16) {
+            self.pwm.set_auto_reload(v);
+        }
+        fn latch(&mut self) {
+            self.pwm.generate_update_event();
+        }
+        fn set_tone_divider(&mut self, v: u16) {
+            self.pwm.set_prescaler(v);
+        }
+        fn set_dead_time_override(&mut self, v: u16) {
+            self.pwm.set_dead_time_override(v);
+        }
+    }
     impl hal::MotorHal for MockMotorHal {
-        type Pwm = MockPwm;
-        type Comp = MockComp;
-        type Phase = MockPhase;
+        type Bridge<'a>
+            = &'a mut Self
+        where
+            Self: 'a;
+        type Bemf = MockComp;
         type Interval = MockInterval;
         type Com = MockComTimer;
 
-        fn pwm(&mut self) -> &mut MockPwm {
-            &mut self.pwm
+        fn bridge(&mut self) -> Self::Bridge<'_> {
+            self
         }
-        fn comp(&mut self) -> &mut MockComp {
+        fn bemf(&mut self) -> &mut MockComp {
             &mut self.comp
-        }
-        fn phase(&mut self) -> &mut MockPhase {
-            &mut self.phase
         }
         fn interval(&mut self) -> &mut MockInterval {
             &mut self.interval

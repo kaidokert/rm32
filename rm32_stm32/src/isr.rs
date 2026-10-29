@@ -20,9 +20,9 @@ use rm32::shared_state::SharedState;
 /// Zero cfg blocks. Concrete types resolved by `TargetIsrHal` alias.
 pub struct IsrHal<P, I, C, IT, CT, PH>
 where
-    P: hal::PwmOutput,
+    P: crate::bridge::TimerPwm,
     I: hal::InputCapture,
-    C: hal::Comparator,
+    C: hal::BemfSensor,
     IT: hal::IntervalTimer,
     CT: hal::ComTimer,
     PH: hal::PhaseOutput,
@@ -37,9 +37,9 @@ where
 
 impl<P, I, C, IT, CT, PH> rm32::platform::Platform for IsrHal<P, I, C, IT, CT, PH>
 where
-    P: hal::PwmOutput,
+    P: crate::bridge::TimerPwm,
     I: hal::InputCapture,
-    C: hal::Comparator,
+    C: hal::BemfSensor,
     IT: hal::IntervalTimer,
     CT: hal::ComTimer,
     PH: hal::PhaseOutput,
@@ -54,27 +54,29 @@ where
 
 impl<P, I, C, IT, CT, PH> hal::MotorHal for IsrHal<P, I, C, IT, CT, PH>
 where
-    P: hal::PwmOutput,
+    P: crate::bridge::TimerPwm,
     I: hal::InputCapture,
-    C: hal::Comparator,
+    C: hal::BemfSensor,
     IT: hal::IntervalTimer,
     CT: hal::ComTimer,
     PH: hal::PhaseOutput,
 {
-    type Pwm = P;
-    type Comp = C;
-    type Phase = PH;
+    type Bridge<'a>
+        = crate::bridge::StmBridge<'a, P, PH>
+    where
+        Self: 'a;
+    type Bemf = C;
     type Interval = IT;
     type Com = CT;
 
-    fn pwm(&mut self) -> &mut P {
-        &mut self.pwm
+    fn bridge(&mut self) -> Self::Bridge<'_> {
+        crate::bridge::StmBridge {
+            pwm: &mut self.pwm,
+            phase: &mut self.phase,
+        }
     }
-    fn comp(&mut self) -> &mut C {
+    fn bemf(&mut self) -> &mut C {
         &mut self.comp
-    }
-    fn phase(&mut self) -> &mut PH {
-        &mut self.phase
     }
     fn interval(&mut self) -> &mut IT {
         &mut self.interval

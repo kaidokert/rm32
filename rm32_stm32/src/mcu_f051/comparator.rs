@@ -39,6 +39,20 @@ impl ExtiOps for F051Exti {
         exti.imr.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
         exti.pr.write(|w| unsafe { w.bits(LINE) });
     }
+    fn pending(&self) -> bool {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.pr.read().bits() & LINE != 0
+    }
+    #[inline(always)]
+    fn clear_pending(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.pr.write(|w| unsafe { w.bits(LINE) });
+    }
+    #[inline(always)]
+    fn repend(&self) {
+        let exti = unsafe { &*EXTI::ptr() };
+        exti.swier.write(|w| unsafe { w.bits(LINE) });
+    }
 }
 
 pub type F051BemfComparator = BemfComparator<F051Comp, F051Exti>;

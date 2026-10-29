@@ -14,4 +14,8 @@ pub trait ExtiOps {
     fn set_falling_edge(&self);
     fn enable_interrupt(&self);
     fn mask_and_clear(&self);
+    fn pending(&self) -> bool;
+    fn clear_pending(&self);
+    /// Software re-trigger of the line (SWIER).
+    fn repend(&self);
 }
