@@ -236,7 +236,17 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     if !active_brake {
         ctx.duty.active_brake_on = false;
     }
-    if sine_drive {
+    let tone_owns_bridge = ctx.shared.tone_active()
+        && ctx.shared.armed()
+        && !ctx.shared.running()
+        && !ctx.shared.stepper_sine()
+        && !ctx.shared.prop_brake_active()
+        && !active_brake
+        && !ctx.duty.active_brake_on;
+    if tone_owns_bridge {
+        // Runtime tone output is owned by the control-tick scheduler. Skipping
+        // the normal idle PWM writes keeps AllOff and braking from muting it.
+    } else if sine_drive {
         // Main owns the individual phase compares until the handoff is consumed.
     } else if active_brake {
         if !ctx.duty.active_brake_on {
@@ -268,7 +278,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
     let final_duty = ctx.duty.finalize();
     ctx.shared.set_duty_cycle(final_duty);
-    ctx.hal.bridge().set_period(tim1_arr);
+    if !tone_owns_bridge {
+        ctx.hal.bridge().set_period(tim1_arr);
+    }
 
     // Sync ISR→shared (Commutation owns truth, shared publishes for main loop)
     ctx.shared.set_forward(ctx.commutation.forward);

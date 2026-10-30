@@ -11,6 +11,7 @@ use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
 use rm32::hal;
+use rm32::hal::MotorHal as _;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 type SystemTick = rm32::system::SystemTick<HarnessPlatform>;
@@ -25,6 +26,7 @@ struct MockPwm {
     duty: u16,
     arr: u16,
     duty_count: u32,
+    tone_divider: u16,
 }
 impl MockPwm {
     fn set_duty_all(&mut self, d: u16) {
@@ -35,7 +37,9 @@ impl MockPwm {
     fn set_auto_reload(&mut self, arr: u16) {
         self.arr = arr;
     }
-    fn set_prescaler(&mut self, _: u16) {}
+    fn set_prescaler(&mut self, v: u16) {
+        self.tone_divider = v;
+    }
     fn set_compare1(&mut self, v: u16) {
         self.phases[0] = v;
     }
@@ -289,6 +293,7 @@ struct Harness {
     transfer: rm32::transfer::TransferState,
     crsf: rm32::crsf::CrsfParser,
     cmd_proc: rm32::dshot_commands::CommandProcessor,
+    tone: rm32::tone::ToneScheduler,
     edt: rm32::edt::EdtScheduler,
     dshot: bool,
     servo_pwm: bool,
@@ -317,6 +322,7 @@ impl Harness {
                     duty: 0,
                     arr: 0,
                     duty_count: 0,
+                    tone_divider: 0,
                 },
                 comp: MockComp {
                     level: false,
@@ -341,6 +347,7 @@ impl Harness {
             transfer: rm32::transfer::TransferState::default(),
             crsf: rm32::crsf::CrsfParser::new(),
             cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
+            tone: rm32::tone::ToneScheduler::default(),
             edt: rm32::edt::EdtScheduler::default(),
             dshot: false,
             servo_pwm: false,
@@ -445,6 +452,7 @@ impl Harness {
         self.servo_pwm = self.shared.servo_pwm();
         if let Some(tone) = result.tone {
             self.play_tone_flag = tone;
+            self.shared.set_tone_request(tone);
         }
     }
 
@@ -543,6 +551,7 @@ impl Harness {
         let armed_timeout_count = &mut self.armed_timeout_count;
         let shared = &self.shared;
         let hal = &mut self.hal;
+        let tone = &mut self.tone;
 
         self.system.run_tick(
             shared,
@@ -561,8 +570,26 @@ impl Harness {
                     hal,
                 };
                 isr_logic::ten_khz_tick(&mut ctx);
+                let request = shared.take_tone_request();
+                let bridge_busy = !shared.armed()
+                    || shared.running()
+                    || shared.stepper_sine()
+                    || shared.prop_brake_active()
+                    || duty.active_brake_on();
+                rm32::tone::step::<HarnessPlatform, _, _>(
+                    tone,
+                    request,
+                    bridge_busy,
+                    config.beep_volume,
+                    shared.tim1_arr(),
+                    || hal.bridge(),
+                );
+                shared.set_tone_active(tone.active());
             },
         );
+        if self.main.just_armed {
+            self.shared.set_arming_tone_request(self.main.cell_count);
+        }
 
         self.tick_count += 1;
     }

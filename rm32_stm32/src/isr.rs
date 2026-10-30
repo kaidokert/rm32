@@ -93,6 +93,7 @@ pub struct IsrState<H> {
     pub duty: DutyState,
     pub hal: H,
     pub cmd: CommandProcessor,
+    pub tone: rm32::tone::ToneScheduler,
     pub edt: EdtScheduler,
     pub crsf: CrsfParser,
     pub transfer: TransferState,

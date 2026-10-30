@@ -37,6 +37,7 @@ pub mod sine;
 pub mod sounds;
 pub mod system;
 pub mod telemetry;
+pub mod tone;
 pub mod transfer;
 pub mod units;
 pub mod ws2812;

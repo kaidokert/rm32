@@ -31,6 +31,7 @@ pub struct TestShared {
     pub one_khz_counter: Cell<u8>,
     pub telem_counter: Cell<u16>,
     pub prop_brake_active: Cell<bool>,
+    pub tone_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
     pub changeover_step: Cell<u8>,
     pub desync_check_pending: Cell<bool>,
@@ -69,6 +70,7 @@ impl TestShared {
             one_khz_counter: Cell::new(0),
             telem_counter: Cell::new(0),
             prop_brake_active: Cell::new(false),
+            tone_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
             changeover_step: Cell::new(0),
             desync_check_pending: Cell::new(false),
@@ -216,6 +218,9 @@ impl MainControl for TestShared {
     }
     fn set_prop_brake_active(&self, v: bool) {
         self.prop_brake_active.set(v);
+    }
+    fn tone_active(&self) -> bool {
+        self.tone_active.get()
     }
     fn isr_action(&self) -> IsrAction {
         self.isr_action.get()

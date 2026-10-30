@@ -29,6 +29,8 @@ pub struct SharedState {
     servo_pwm: AtomicBool,
     dshot_telemetry: AtomicBool,
     save_settings_flag: AtomicBool,
+    tone_request: AtomicU16,
+    tone_active: AtomicBool,
     send_esc_info_flag: AtomicBool,
     pending_servo_calibration: AtomicBool,
     pending_servo_low_threshold: AtomicU8,
@@ -95,6 +97,8 @@ impl SharedState {
             servo_pwm: AtomicBool::new(false),
             dshot_telemetry: AtomicBool::new(false),
             save_settings_flag: AtomicBool::new(false),
+            tone_request: AtomicU16::new(0),
+            tone_active: AtomicBool::new(false),
             send_esc_info_flag: AtomicBool::new(false),
             pending_servo_calibration: AtomicBool::new(false),
             pending_servo_low_threshold: AtomicU8::new(0),
@@ -302,6 +306,35 @@ impl SharedState {
     }
     pub fn set_save_settings_flag(&self, v: bool) {
         self.save_settings_flag.store(v, REL);
+    }
+
+    /// Queue a DShot tone command for the control-tick tone owner.
+    pub fn set_tone_request(&self, id: u8) {
+        self.tone_request.store(id as u16, REL);
+    }
+
+    /// Queue the normal arming tune once per detected cell, or once when the
+    /// cell count is unavailable. The count and request are published together.
+    pub fn set_arming_tone_request(&self, cell_count: u8) {
+        let repeats = if cell_count == 0 { 1 } else { cell_count };
+        self.tone_request.store(
+            ((repeats as u16) << 8) | crate::tone::TONE_ARMED as u16,
+            REL,
+        );
+    }
+
+    /// Atomically take one pending tone request; a later producer request is retained.
+    pub fn take_tone_request(&self) -> u16 {
+        self.tone_request.swap(0, portable_atomic::Ordering::AcqRel)
+    }
+
+    /// Whether the scheduler currently owns bridge PWM output.
+    pub fn tone_active(&self) -> bool {
+        self.tone_active.load(ACQ)
+    }
+
+    pub fn set_tone_active(&self, active: bool) {
+        self.tone_active.store(active, REL);
     }
 
     pub fn publish_servo_calibration(&self, low_threshold: u8, high_threshold: u8) {
@@ -747,6 +780,9 @@ impl crate::shared_comm::MainControl for SharedState {
     fn battery_voltage(&self) -> crate::units::CentiVolts {
         SharedState::battery_voltage(self)
     }
+    fn tone_active(&self) -> bool {
+        SharedState::tone_active(self)
+    }
 }
 
 impl crate::shared_comm::SharedComm for SharedState {
@@ -926,5 +962,28 @@ mod tests {
 
         assert!(shared.telem_counter_check_and_inc(5));
         assert!(!shared.telem_counter_check_and_inc(5));
+    }
+
+    #[test]
+    fn tone_requests_are_single_consumer_and_arming_count_is_carried() {
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        assert_eq!(shared.take_tone_request(), 0);
+        shared.set_tone_request(3);
+        assert_eq!(shared.take_tone_request(), 3);
+        assert_eq!(shared.take_tone_request(), 0);
+        shared.set_arming_tone_request(4);
+        assert_eq!(
+            shared.take_tone_request(),
+            (4 << 8) | crate::tone::TONE_ARMED as u16
+        );
+        shared.set_arming_tone_request(0);
+        assert_eq!(
+            shared.take_tone_request(),
+            (1 << 8) | crate::tone::TONE_ARMED as u16
+        );
+        shared.set_tone_active(true);
+        assert!(shared.tone_active());
+        shared.set_tone_active(false);
+        assert!(!shared.tone_active());
     }
 }
