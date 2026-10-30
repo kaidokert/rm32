@@ -299,6 +299,7 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     assert_eq!(main.config.dir_reversed, 0);
 
     shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    shared.set_tim1_arr(1777);
     command(1);
     take_events();
     isr_handlers::handle_tim6();
@@ -322,12 +323,24 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
         BridgeEvent::AllOff | BridgeEvent::Duty(_) | BridgeEvent::Period(_)
     )));
 
+    for _ in 0..6000 {
+        isr_handlers::handle_tim6();
+    }
+    let completed = take_events();
+    assert!(completed.contains(&BridgeEvent::AllOff));
+    assert!(completed.contains(&BridgeEvent::Divider(0)));
+    assert!(completed.contains(&BridgeEvent::Period(1777)));
+    assert!(!shared.tone_active());
+
+    command(2);
+    isr_handlers::handle_tim6();
+    assert!(shared.tone_active());
     shared.set_motor_mode(rm32::motor_mode::MotorMode::OldRoutine);
     take_events();
     isr_handlers::handle_tim6();
     let interrupted = take_events();
     assert!(interrupted.contains(&BridgeEvent::Divider(0)));
-    assert!(interrupted.contains(&BridgeEvent::Period(1999)));
+    assert!(interrupted.contains(&BridgeEvent::Period(1777)));
     assert!(
         !interrupted.contains(&BridgeEvent::AllOff),
         "aborting a tone must not clear motor phase outputs"

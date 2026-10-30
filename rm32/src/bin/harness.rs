@@ -571,11 +571,7 @@ impl Harness {
                 };
                 isr_logic::ten_khz_tick(&mut ctx);
                 let request = shared.take_tone_request();
-                let bridge_busy = !shared.armed()
-                    || shared.running()
-                    || shared.stepper_sine()
-                    || shared.prop_brake_active()
-                    || duty.active_brake_on();
+                let bridge_busy = rm32::tone::bridge_busy(shared, duty.active_brake_on());
                 rm32::tone::step::<HarnessPlatform, _, _>(
                     tone,
                     request,

@@ -203,6 +203,16 @@ impl ToneScheduler {
     }
 }
 
+/// Whether motor operation currently needs the bridge PWM registers.
+/// `active_brake_on` includes the control tick's locally computed brake state.
+pub fn bridge_busy<S: crate::shared_comm::SharedComm>(shared: &S, active_brake_on: bool) -> bool {
+    !shared.armed()
+        || shared.running()
+        || shared.stepper_sine()
+        || shared.prop_brake_active()
+        || active_brake_on
+}
+
 pub fn duty(beep_volume: u8) -> u16 {
     ((if beep_volume == 0 {
         DEFAULT_VOLUME
@@ -232,7 +242,7 @@ pub fn step<P, B, M>(
     match tone.tick::<P>(request, bridge_busy) {
         ToneAction::StartNote(note) => {
             let mut bridge = bridge();
-            bridge.set_period(base_period);
+            bridge.set_period(P::PWM_BASE_PERIOD);
             bridge.set_tone_divider(note.prescaler);
             bridge.set_duty_all(tone.duty(beep_volume));
             bridge.com_step(note.step);
@@ -401,5 +411,23 @@ mod tests {
         let mut dshot = ToneScheduler::default();
         dshot.tick::<TestTime>(1, false);
         assert_eq!(dshot.duty(9), 27);
+    }
+
+    #[test]
+    fn shared_bridge_busy_rule_covers_each_motor_owner() {
+        let shared = crate::shared_state::SharedState::new::<TestTime>();
+        assert!(bridge_busy(&shared, false));
+
+        shared.set_motor_mode(crate::motor_mode::MotorMode::Armed);
+        assert!(!bridge_busy(&shared, false));
+        assert!(bridge_busy(&shared, true));
+
+        shared.set_motor_mode(crate::motor_mode::MotorMode::StepperSine);
+        assert!(bridge_busy(&shared, false));
+        shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
+        assert!(bridge_busy(&shared, false));
+        shared.set_motor_mode(crate::motor_mode::MotorMode::Armed);
+        shared.set_prop_brake_active(true);
+        assert!(bridge_busy(&shared, false));
     }
 }

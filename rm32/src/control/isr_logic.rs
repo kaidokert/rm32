@@ -237,12 +237,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.duty.active_brake_on = false;
     }
     let tone_owns_bridge = ctx.shared.tone_active()
-        && ctx.shared.armed()
-        && !ctx.shared.running()
-        && !ctx.shared.stepper_sine()
-        && !ctx.shared.prop_brake_active()
-        && !active_brake
-        && !ctx.duty.active_brake_on;
+        && !crate::tone::bridge_busy(ctx.shared, active_brake || ctx.duty.active_brake_on);
     if tone_owns_bridge {
         // Runtime tone output is owned by the control-tick scheduler. Skipping
         // the normal idle PWM writes keeps AllOff and braking from muting it.
