@@ -123,3 +123,7 @@ class TestHarnessAPI:
         for throttle, expected in [(172, 0), (1811, 2047), (992, 1024)]:
             state = harness.crsf(frame(throttle))
             assert (state["newinput"], state["signaltimeout"], state["inputSet"]) == (expected, 0, 1)
+
+    def test_empty_crsf_input_returns_current_state(self, harness):
+        harness.config(newinput=1234, signaltimeout=17)
+        assert harness.crsf([]) == harness.state()
