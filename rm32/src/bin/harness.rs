@@ -10,12 +10,10 @@ use rm32::control::context::MotorContext;
 use rm32::control::isr_logic;
 use rm32::control::state::{BemfState, DutyState};
 use rm32::dshot;
-use rm32::dshot_commands::CommandResult;
 use rm32::hal;
 use rm32::motor_mode::MotorMode;
 use rm32::shared_state::SharedState;
 type SystemTick = rm32::system::SystemTick<HarnessPlatform>;
-use rm32::transfer::{DetectedProtocol, TransferAction};
 use std::cell::Cell;
 use std::io::{self, BufRead, Write};
 use std::rc::Rc;
@@ -289,6 +287,7 @@ struct Harness {
     // Unified system tick (shared with firmware)
     system: SystemTick,
     transfer: rm32::transfer::TransferState,
+    crsf: rm32::crsf::CrsfParser,
     cmd_proc: rm32::dshot_commands::CommandProcessor,
     edt: rm32::edt::EdtScheduler,
     dshot: bool,
@@ -340,6 +339,7 @@ impl Harness {
             input_pin_high: false,
             system: SystemTick::new(),
             transfer: rm32::transfer::TransferState::default(),
+            crsf: rm32::crsf::CrsfParser::new(),
             cmd_proc: rm32::dshot_commands::CommandProcessor::default(),
             edt: rm32::edt::EdtScheduler::default(),
             dshot: false,
@@ -424,94 +424,32 @@ impl Harness {
             self.frametime_high,
         );
 
-        // Apply transfer actions
-        match actions.action {
-            TransferAction::InputDetected(proto) => {
-                self.shared.set_input_set(true);
-                match proto {
-                    DetectedProtocol::Dshot => {
-                        self.dshot = true;
-                        self.shared.set_dshot(true);
-                        if let Some(prescaler) = actions.next_capture.prescaler {
-                            self.dshot_output_prescaler = hal::DshotOutputPrescaler::new(prescaler)
-                                .expect("invalid DShot output prescaler")
-                                .raw();
-                        }
-                    }
-                    DetectedProtocol::Servo => {
-                        self.servo_pwm = true;
-                        self.shared.set_servo_pwm(true);
-                    }
-                }
-            }
-            TransferAction::DshotThrottle { value, telemetry } => {
-                if !self.edt_arm_enable || self.edt_armed || value == 0 {
-                    self.shared.set_newinput(value);
-                }
-                if value == 0 && self.edt_arm_enable {
-                    self.edt_armed = false;
-                }
-                if telemetry {
-                    self.shared.set_send_telemetry(true);
-                }
-                self.shared.set_signal_timeout(0);
-            }
-            TransferAction::DshotCommand { cmd, telemetry } => {
-                self.shared.set_newinput(0);
-                if telemetry {
-                    self.shared.set_send_telemetry(true);
-                }
-                self.shared.set_signal_timeout(0);
-                let mut fwd = self.commutation.forward();
-                let result = self.cmd_proc.process(
-                    cmd,
-                    self.shared.armed(),
-                    self.shared.running(),
-                    &mut self.config,
-                    &mut fwd,
-                    &mut self.edt_armed,
-                    self.edt_arm_enable,
-                );
-                self.commutation.set_forward(fwd);
-                match result {
-                    CommandResult::PlayTone(tone) => {
-                        self.play_tone_flag = tone;
-                    }
-                    CommandResult::SaveSettings => {
-                        self.shared.set_save_settings_flag(true);
-                    }
-                    CommandResult::SendEscInfo => {
-                        self.shared.set_send_esc_info_flag(true);
-                    }
-                    _ => {}
-                }
-                self.shared.set_forward(self.commutation.forward());
-            }
-            TransferAction::ServoThrottle(value) => {
-                self.shared.set_newinput(value);
-                self.shared.set_signal_timeout(0);
-            }
-            TransferAction::ServoCalibrating => {
-                self.shared.set_signal_timeout(0);
-            }
-            TransferAction::ServoCalibrationDone {
-                low_threshold,
-                high_threshold,
-            } => {
-                self.config.servo_low_threshold = low_threshold;
-                self.config.servo_high_threshold = high_threshold;
-                self.shared.set_save_settings_flag(true);
-                self.shared.set_signal_timeout(0);
-            }
-            TransferAction::None => {}
+        let mut forward = self.commutation.forward();
+        let result = rm32::transfer::dispatch(
+            &actions,
+            &self.shared,
+            rm32::transfer::InputContext {
+                config: &mut self.config,
+                cmd: &mut self.cmd_proc,
+                edt: &mut self.edt,
+                forward: &mut forward,
+                edt_armed: &mut self.edt_armed,
+                edt_arm_enable: self.edt_arm_enable,
+                frametime_low: &mut self.frametime_low,
+                frametime_high: &mut self.frametime_high,
+            },
+            |prescaler| self.dshot_output_prescaler = prescaler.raw(),
+        );
+        self.commutation.set_forward(forward);
+        self.dshot = self.shared.dshot();
+        self.servo_pwm = self.shared.servo_pwm();
+        if let Some(tone) = result.tone {
+            self.play_tone_flag = tone;
         }
-        if let Some((low, high)) = actions.frametime {
-            self.frametime_low = low;
-            self.frametime_high = high;
-        }
-        if actions.bidir_detected {
-            self.shared.set_dshot_telemetry(true);
-        }
+    }
+
+    fn handle_crsf_byte(&mut self, byte: u8) {
+        self.crsf.dispatch_byte(byte, &self.shared);
     }
 
     fn edt_next_frame(&mut self, current: i16, voltage: u16, temperature: i16) -> i32 {
@@ -574,7 +512,6 @@ impl Harness {
             self.shared.set_signal_timeout(0);
         }
 
-        self.main.config = self.config;
         self.system.service_sine(
             &self.shared,
             &mut self.main,
@@ -594,7 +531,10 @@ impl Harness {
         }
 
         // --- Shared pipeline via run_tick (same orchestration as firmware) ---
-        self.main.config = self.config;
+
+        if self.shared.config_write_overflowed() {
+            SystemTick::sync_config_snapshot(&self.shared, &mut self.main, &self.config);
+        }
 
         let commutation = &mut self.commutation;
         let bemf = &mut self.bemf;
@@ -788,7 +728,10 @@ impl Harness {
                 self.dshot = v != 0;
                 self.shared.set_dshot(v != 0);
             }
-            "servoPwm" => self.servo_pwm = v != 0,
+            "servoPwm" => {
+                self.servo_pwm = v != 0;
+                self.shared.set_servo_pwm(v != 0);
+            }
             "forward" => {
                 self.shared.set_forward(v != 0);
                 self.commutation.set_forward(v != 0);
@@ -903,10 +846,15 @@ impl Harness {
     }
 
     fn parse_kvs(&mut self, args: &str) {
+        let mut config_injected = false;
         for token in args.split_whitespace() {
             if let Some((k, v)) = token.split_once('=') {
                 self.apply_kv(k, v);
+                config_injected |= k.starts_with("eeprom.");
             }
+        }
+        if config_injected {
+            self.main.config = self.config;
         }
     }
 }
@@ -1037,6 +985,99 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod dispatch_regressions {
+    use super::*;
+
+    fn armed_input() -> Harness {
+        let mut h = Harness::new();
+        h.shared.set_motor_mode(MotorMode::Armed);
+        h.shared.set_input_set(true);
+        h.shared.set_dshot(true);
+        h.dshot = true;
+        h.frametime_low = 1400;
+        h.frametime_high = 1650;
+        h
+    }
+    fn frame(h: &mut Harness, value: u16) {
+        let payload = value * 2;
+        let crc = (payload & 15) ^ ((payload / 16) & 15) ^ ((payload / 256) & 15);
+        let packet = payload * 16 + crc;
+        for i in 0..16 {
+            h.dma_buffer[2 * i] = i as u32 * 100;
+            h.dma_buffer[2 * i + 1] = i as u32 * 100
+                + if packet & (1 << (15 - i)) == 0 {
+                    25
+                } else {
+                    75
+                };
+        }
+        h.handle_transfer();
+    }
+    fn repeat(h: &mut Harness, value: u16) {
+        for _ in 0..6 {
+            frame(h, value);
+        }
+    }
+
+    #[test]
+    fn command_config_reaches_main_through_publication() {
+        let mut h = armed_input();
+        repeat(&mut h, 8);
+        assert_eq!(h.config.dir_reversed, 1);
+        assert_eq!(h.main.config.dir_reversed, 0);
+        SystemTick::sync_config_writes(&h.shared, &mut h.main);
+        assert_eq!(h.main.config.dir_reversed, 1);
+    }
+
+    #[test]
+    fn edt_commands_reach_the_response_scheduler() {
+        let mut h = armed_input();
+        repeat(&mut h, 13);
+        assert_eq!(h.edt_next_frame(0, 0, 0), 0xe00);
+        repeat(&mut h, 14);
+        assert_eq!(h.edt_next_frame(0, 0, 0), 0xeff);
+    }
+
+    #[test]
+    fn programming_data_is_not_motor_throttle() {
+        let mut h = armed_input();
+        repeat(&mut h, 36);
+        frame(&mut h, 48);
+        frame(&mut h, 201);
+        assert_eq!(h.shared.newinput(), 0);
+        frame(&mut h, 37);
+        SystemTick::sync_config_writes(&h.shared, &mut h.main);
+        assert_eq!(h.main.config.as_bytes()[48], 201);
+    }
+
+    #[test]
+    fn servo_calibration_is_published_before_save() {
+        let mut h = armed_input();
+        h.shared.set_motor_mode(MotorMode::Disarmed);
+        h.shared.set_dshot(false);
+        h.dshot = false;
+        h.shared.set_servo_pwm(true);
+        h.servo_pwm = true;
+        h.config.disable_stick_calibration = 0;
+        h.shared.set_adjusted_input(1900);
+        h.dma_buffer[0] = 0;
+        h.dma_buffer[1] = 1900;
+        for _ in 0..120 {
+            h.handle_transfer();
+        }
+        h.dma_buffer[1] = 1100;
+        for _ in 0..76 {
+            h.handle_transfer();
+        }
+        assert!(h.shared.save_settings_flag());
+        assert_eq!(h.shared.take_servo_calibration(), Some((187, 62)));
+        SystemTick::sync_config_writes(&h.shared, &mut h.main);
+        assert_eq!(h.main.config.servo_low_threshold, 187);
+        assert_eq!(h.main.config.servo_high_threshold, 62);
+    }
+}
+
 fn main() {
     let mut harness = Harness::new();
     let stdin = io::stdin();
@@ -1146,6 +1187,23 @@ fn main() {
                 shift, dshot_full, padding
             );
             io::stdout().flush().unwrap();
+        } else if let Some(rest) = line.strip_prefix("crsf ") {
+            let bytes: Result<Vec<u8>, _> = rest
+                .split_whitespace()
+                .map(|byte| u8::from_str_radix(byte, 16))
+                .collect();
+            match bytes {
+                Ok(bytes) => {
+                    for byte in bytes {
+                        harness.handle_crsf_byte(byte);
+                    }
+                    harness.print_state();
+                }
+                Err(_) => {
+                    println!("error: expected hexadecimal bytes");
+                    io::stdout().flush().unwrap();
+                }
+            }
         } else if let Some(rest) = line.strip_prefix("edt_next") {
             let frame = harness.run_edt_next_command(rest);
             println!("edt_frame={}", frame);

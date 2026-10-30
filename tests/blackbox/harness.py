@@ -105,6 +105,13 @@ class AM32Harness:
         self._send("state")
         return self._parse_state(self._recv())
 
+    def crsf(self, data):
+        """Feed raw serial bytes without advancing the control loop."""
+        if not data:
+            return self.state()
+        self._send("crsf " + " ".join(f"{byte:02x}" for byte in data))
+        return self._parse_state(self._recv())
+
     def tick(self, **kwargs):
         """Advance one tick with optional overrides. Returns state dict."""
         if kwargs:

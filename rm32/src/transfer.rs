@@ -342,6 +342,175 @@ impl TransferState {
     }
 }
 
+/// Input state owned by the frame-processing caller. Shared dispatch updates
+/// the ISR configuration and publishes changes to the main-loop consumer.
+pub struct InputContext<'a> {
+    pub config: &'a mut crate::config::EepromConfig,
+    pub cmd: &'a mut crate::dshot_commands::CommandProcessor,
+    pub edt: &'a mut crate::edt::EdtScheduler,
+    pub forward: &'a mut bool,
+    pub edt_armed: &'a mut bool,
+    pub edt_arm_enable: bool,
+    pub frametime_low: &'a mut u16,
+    pub frametime_high: &'a mut u16,
+}
+
+/// Side effects that belong to the caller, not to input-state dispatch.
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct DispatchResult {
+    /// A requested tone. Firmware may leave this unsupported; dispatch never
+    /// drives the bridge or changes interrupt ownership to play it.
+    pub tone: Option<u8>,
+}
+
+/// Apply decoded input identically in firmware and the host harness.
+/// The caller performs the returned capture setup and owns any requested tone.
+/// `set_prescaler` applies the output timer setting when DShot is detected.
+pub fn dispatch(
+    actions: &TransferActions,
+    shared: &crate::shared_state::SharedState,
+    mut ctx: InputContext<'_>,
+    set_prescaler: impl FnOnce(crate::hal::DshotOutputPrescaler),
+) -> DispatchResult {
+    let mut result = DispatchResult::default();
+    // A sequence started while stopped must not survive loss of its gate.
+    // Drop a decoded DShot frame in this call as well: its programming bytes
+    // are not throttle. An invalid frame still cancels an ineligible sequence,
+    // but otherwise retains the normal invalid-frame/no-side-effect behavior.
+    let cancelled = ctx.cmd.in_programming_mode() && (!shared.armed() || shared.running());
+    if cancelled {
+        ctx.cmd.cancel_programming();
+    }
+    match actions.action {
+        TransferAction::InputDetected(proto) => {
+            shared.set_input_set(true);
+            match proto {
+                DetectedProtocol::Dshot => {
+                    shared.set_dshot(true);
+                    if let Some(prescaler) = actions.next_capture.prescaler {
+                        set_prescaler(
+                            crate::hal::DshotOutputPrescaler::new(prescaler)
+                                .expect("invalid DShot output prescaler"),
+                        );
+                    }
+                }
+                DetectedProtocol::Servo => shared.set_servo_pwm(true),
+            }
+        }
+        TransferAction::DshotThrottle { value, telemetry } => {
+            if cancelled {
+                shared.set_newinput(0);
+            } else if ctx.cmd.in_programming_mode() {
+                shared.set_newinput(0);
+                apply_command(value, shared, &mut ctx, &mut result);
+            } else {
+                if !ctx.edt_arm_enable || *ctx.edt_armed || value == 0 {
+                    shared.set_newinput(value);
+                }
+                if value == 0 && ctx.edt_arm_enable {
+                    *ctx.edt_armed = false;
+                }
+            }
+            if telemetry {
+                shared.set_send_telemetry(true);
+            }
+            shared.set_signal_timeout(0);
+        }
+        TransferAction::DshotCommand { cmd, telemetry } => {
+            shared.set_newinput(0);
+            if telemetry {
+                shared.set_send_telemetry(true);
+            }
+            shared.set_signal_timeout(0);
+            if !cancelled {
+                apply_command(cmd, shared, &mut ctx, &mut result);
+            }
+        }
+        TransferAction::ServoThrottle(value) => {
+            shared.set_newinput(value);
+            shared.set_signal_timeout(0);
+        }
+        TransferAction::ServoCalibrating => shared.set_signal_timeout(0),
+        TransferAction::ServoCalibrationDone {
+            low_threshold,
+            high_threshold,
+        } => {
+            ctx.config.servo_low_threshold = low_threshold;
+            ctx.config.servo_high_threshold = high_threshold;
+            shared.publish_servo_calibration(low_threshold, high_threshold);
+            shared.push_config_write(
+                core::mem::offset_of!(crate::config::EepromConfig, servo_low_threshold) as u8,
+                low_threshold,
+            );
+            shared.push_config_write(
+                core::mem::offset_of!(crate::config::EepromConfig, servo_high_threshold) as u8,
+                high_threshold,
+            );
+            shared.set_save_settings_flag(true);
+            shared.set_signal_timeout(0);
+        }
+        TransferAction::None => {}
+    }
+    if let Some((low, high)) = actions.frametime {
+        *ctx.frametime_low = low;
+        *ctx.frametime_high = high;
+    }
+    if actions.bidir_detected {
+        shared.set_dshot_telemetry(true);
+    }
+    result
+}
+
+fn apply_command(
+    value: u16,
+    shared: &crate::shared_state::SharedState,
+    ctx: &mut InputContext<'_>,
+    dispatch_result: &mut DispatchResult,
+) {
+    use crate::dshot_commands::CommandResult;
+    let old_config = *ctx.config;
+    let result = if ctx.cmd.in_programming_mode() {
+        ctx.cmd
+            .process_programming(value, ctx.config)
+            .unwrap_or(CommandResult::None)
+    } else {
+        ctx.cmd.process(
+            value,
+            shared.armed(),
+            shared.running(),
+            ctx.config,
+            ctx.forward,
+            ctx.edt_armed,
+            ctx.edt_arm_enable,
+        )
+    };
+    // Programming updates the config directly too. Publish each changed byte
+    // once; never truncate an unvalidated programming position to a queue key.
+    for (offset, (old, new)) in old_config
+        .as_bytes()
+        .iter()
+        .zip(ctx.config.as_bytes())
+        .enumerate()
+    {
+        if old != new {
+            shared.push_config_write(offset as u8, *new);
+        }
+    }
+    match result {
+        CommandResult::SaveSettings => shared.set_save_settings_flag(true),
+        CommandResult::PlayTone(tone) => dispatch_result.tone = Some(tone),
+        CommandResult::SendEscInfo => shared.set_send_esc_info_flag(true),
+        CommandResult::ProgrammingCommit { .. } | CommandResult::None => {}
+    }
+    shared.set_forward(*ctx.forward);
+    if ctx.cmd.take_edt_init() {
+        ctx.edt.request_init();
+    }
+    if ctx.cmd.take_edt_deinit() {
+        ctx.edt.request_deinit();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

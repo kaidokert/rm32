@@ -133,7 +133,8 @@ impl CommandProcessor {
     }
 
     /// Process a frame while in programming mode.
-    /// Returns Some((position, value)) when a commit happens.
+    /// Returns a commit result only for a valid EEPROM position. Invalid
+    /// positions end the sequence without changing configuration.
     pub fn process_programming(
         &mut self,
         value: u16,
@@ -153,14 +154,15 @@ impl CommandProcessor {
             3 => {
                 if value == 37 {
                     let pos = self.position as usize;
+                    self.programming_mode = 0;
                     if pos < EepromConfig::SIZE {
                         config.as_bytes_mut()[pos] = self.new_byte;
+                        return Some(CommandResult::ProgrammingCommit {
+                            position: self.position,
+                            value: self.new_byte,
+                        });
                     }
-                    self.programming_mode = 0;
-                    Some(CommandResult::ProgrammingCommit {
-                        position: self.position,
-                        value: self.new_byte,
-                    })
+                    None
                 } else {
                     None
                 }
@@ -171,6 +173,11 @@ impl CommandProcessor {
 
     pub fn in_programming_mode(&self) -> bool {
         self.programming_mode > 0
+    }
+
+    /// Discard an unfinished sequence when command processing is no longer allowed.
+    pub fn cancel_programming(&mut self) {
+        self.programming_mode = 0;
     }
 }
 
@@ -409,6 +416,30 @@ mod tests {
         );
         assert_eq!(cp.programming_mode, 0);
         assert_eq!(config.as_bytes()[5], 200);
+    }
+
+    #[test]
+    fn programming_invalid_position_does_not_report_a_commit() {
+        for position in [EepromConfig::SIZE as u16, 256, 304, u16::MAX] {
+            let (mut cp, mut config, mut forward, mut edt_armed) = setup();
+            for _ in 0..6 {
+                cp.process(
+                    36,
+                    true,
+                    false,
+                    &mut config,
+                    &mut forward,
+                    &mut edt_armed,
+                    false,
+                );
+            }
+            let before = config;
+            cp.process_programming(position, &mut config);
+            cp.process_programming(201, &mut config);
+            assert_eq!(cp.process_programming(37, &mut config), None);
+            assert_eq!(config.as_bytes(), before.as_bytes());
+            assert!(!cp.in_programming_mode());
+        }
     }
 
     #[test]

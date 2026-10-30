@@ -5,8 +5,8 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, TargetIsrState};
-use rm32::hal::{DshotOutputPrescaler, InputCapture};
-use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
+use rm32::hal::InputCapture;
+use rm32::transfer::CaptureConfig;
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
 ///
@@ -22,8 +22,8 @@ use rm32::transfer::{CaptureConfig, DetectedProtocol, TransferAction};
 /// 2. **Single core**: All STM32 targets (G071/F051/L431/G431) are
 ///    single-core. No other hart can access this cell.
 ///
-/// 3. **Serialized main-loop access**: The fixed `service_sine` entry point
-///    masks interrupts for its entire borrow. It does not call ISR handlers,
+/// 3. **Serialized main-loop access**: The fixed sine/configuration entry points
+///    mask interrupts for their entire borrow. It does not call ISR handlers,
 ///    expose the reference, or delay while holding it.
 ///
 /// 4. **Init-once**: `get()` lazily initializes from `take_isr_state()`
@@ -49,7 +49,7 @@ impl IsrCell {
     #[inline]
     #[allow(clippy::mut_from_ref)]
     fn get(&self) -> &mut TargetIsrState {
-        // SAFETY: Called from same-priority ISRs or service_sine with interrupts
+        // SAFETY: Called from same-priority ISRs or fixed main-loop entry points with interrupts
         // masked. No concurrent/reentrant access (see struct-level safety doc).
         let opt = unsafe { &mut *self.0.get() };
         opt.get_or_insert_with(|| isr::take_isr_state().expect("ISR state not initialized"))
@@ -75,6 +75,40 @@ pub fn service_sine(
             &mut state.duty,
             state.commutation.step(),
             dead_time,
+        )
+    })
+}
+
+/// Recover input configuration after the bounded publication queue fills.
+/// Access the live ISR cell, not the initialization cell consumed by the first IRQ.
+pub fn resync_input_config(main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>) {
+    let shared = isr::shared();
+    if shared.config_write_overflowed() {
+        cortex_m::interrupt::free(|_| {
+            let state = ISR_LOCAL.get();
+            rm32::system::SystemTick::<crate::platform::StmPlatform>::sync_config_snapshot(
+                shared,
+                main,
+                &state.config,
+            );
+        });
+    }
+}
+
+/// Claim a save and copy authoritative bytes with the input producer excluded.
+/// Flash I/O must happen after this function returns, outside the exclusion.
+pub fn prepare_input_save(
+    main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>,
+) -> bool {
+    if !isr::shared().save_settings_flag() {
+        return false;
+    }
+    cortex_m::interrupt::free(|_| {
+        let state = ISR_LOCAL.get();
+        rm32::system::SystemTick::<crate::platform::StmPlatform>::prepare_config_save(
+            isr::shared(),
+            main,
+            &state.config,
         )
     })
 }
@@ -190,104 +224,23 @@ pub fn handle_exti_frame() -> CaptureConfig {
     );
     shared.set_zero_input_count(zic);
 
-    match actions.action {
-        TransferAction::InputDetected(proto) => {
-            shared.set_input_set(true);
-            match proto {
-                DetectedProtocol::Dshot => {
-                    shared.set_dshot(true);
-                    if let Some(prescaler) = actions.next_capture.prescaler {
-                        state.hal.input.set_output_prescaler(
-                            DshotOutputPrescaler::new(prescaler)
-                                .expect("invalid DShot output prescaler"),
-                        );
-                    }
-                }
-                DetectedProtocol::Servo => shared.set_servo_pwm(true),
-            }
-        }
-        TransferAction::DshotThrottle { value, telemetry } => {
-            if !state.edt_arm_enable || state.edt_armed || value == 0 {
-                shared.set_newinput(value);
-            }
-            if value == 0 && state.edt_arm_enable {
-                state.edt_armed = false;
-            }
-            if telemetry {
-                shared.set_send_telemetry(true);
-            }
-            shared.set_signal_timeout(0);
-        }
-        TransferAction::DshotCommand { cmd, telemetry } => {
-            shared.set_newinput(0);
-            if telemetry {
-                shared.set_send_telemetry(true);
-            }
-            shared.set_signal_timeout(0);
-            let old_config = state.config;
-            let result = state.cmd.process(
-                cmd,
-                shared.armed(),
-                shared.running(),
-                &mut state.config,
-                &mut state.forward,
-                &mut state.edt_armed,
-                state.edt_arm_enable,
-            );
-            for (offset, (old, new)) in old_config
-                .as_bytes()
-                .iter()
-                .zip(state.config.as_bytes().iter())
-                .enumerate()
-            {
-                if old != new {
-                    shared.push_config_write(offset as u8, *new);
-                }
-            }
-            match result {
-                rm32::dshot_commands::CommandResult::SaveSettings => {
-                    shared.set_save_settings_flag(true);
-                }
-                rm32::dshot_commands::CommandResult::PlayTone(_tone) => {}
-                rm32::dshot_commands::CommandResult::SendEscInfo => {
-                    shared.set_send_esc_info_flag(true);
-                }
-                _ => {}
-            }
-            shared.set_forward(state.forward);
-            if state.cmd.take_edt_init() {
-                state.edt.request_init();
-            }
-            if state.cmd.take_edt_deinit() {
-                state.edt.request_deinit();
-            }
-        }
-        TransferAction::ServoThrottle(value) => {
-            shared.set_newinput(value);
-            shared.set_signal_timeout(0);
-        }
-        TransferAction::ServoCalibrating => {
-            shared.set_signal_timeout(0);
-        }
-        TransferAction::ServoCalibrationDone {
-            low_threshold,
-            high_threshold,
-        } => {
-            state.config.servo_low_threshold = low_threshold;
-            state.config.servo_high_threshold = high_threshold;
-            shared.publish_servo_calibration(low_threshold, high_threshold);
-            shared.set_save_settings_flag(true);
-            shared.set_signal_timeout(0);
-        }
-        TransferAction::None => {}
-    }
-    if let Some((low, high)) = actions.frametime {
-        state.frametime_low = low;
-        state.frametime_high = high;
-    }
-    if actions.bidir_detected {
-        shared.set_dshot_telemetry(true);
-    }
+    let _result = rm32::transfer::dispatch(
+        &actions,
+        shared,
+        rm32::transfer::InputContext {
+            config: &mut state.config,
+            cmd: &mut state.cmd,
+            edt: &mut state.edt,
+            forward: &mut state.forward,
+            edt_armed: &mut state.edt_armed,
+            edt_arm_enable: state.edt_arm_enable,
+            frametime_low: &mut state.frametime_low,
+            frametime_high: &mut state.frametime_high,
+        },
+        |prescaler| state.hal.input.set_output_prescaler(prescaler),
+    );
+    // Tone intent remains unsupported here. Do not borrow the bridge or block
+    // an input interrupt to play it; tone ownership is a separate concern.
     actions.next_capture
 }
 
@@ -296,13 +249,5 @@ pub fn handle_crsf_byte(byte: u8) {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
 
-    if let Some(rm32::crsf::CrsfResult::Channels(channels)) = state.crsf.feed(byte) {
-        let throttle =
-            rm32::crsf::CrsfParser::channel_to_throttle(channels[rm32::crsf::THROTTLE_CHANNEL]);
-        shared.set_newinput(throttle);
-        shared.set_signal_timeout(0);
-        if !shared.input_set() {
-            shared.set_input_set(true);
-        }
-    }
+    state.crsf.dispatch_byte(byte, shared);
 }

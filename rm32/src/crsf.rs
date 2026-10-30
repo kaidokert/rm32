@@ -138,6 +138,10 @@ impl CrsfParser {
 
         let frame_type = self.buf[2];
         let result = if frame_type == CRSF_FRAMETYPE_RC_CHANNELS {
+            if frame_len < 24 {
+                self.buf.clear();
+                return Some(CrsfResult::Incomplete);
+            }
             let channels = unpack_channels(&self.buf[3..3 + 22]);
             CrsfResult::Channels(channels)
         } else {
@@ -158,6 +162,17 @@ impl CrsfParser {
         }
         let range = (CRSF_CHANNEL_MAX - CRSF_CHANNEL_MIN) as u32;
         ((value - CRSF_CHANNEL_MIN) as u32 * 2047 / range) as u16
+    }
+
+    /// Deliver only a complete, valid channel frame to the shared input state.
+    pub fn dispatch_byte(&mut self, byte: u8, shared: &crate::shared_state::SharedState) {
+        if let Some(CrsfResult::Channels(channels)) = self.feed(byte) {
+            shared.set_newinput(Self::channel_to_throttle(channels[THROTTLE_CHANNEL]));
+            shared.set_signal_timeout(0);
+            if !shared.input_set() {
+                shared.set_input_set(true);
+            }
+        }
     }
 }
 
