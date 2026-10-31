@@ -43,6 +43,7 @@ impl<P: crate::constants::Timing> SystemTick<P> {
         // Cheap (a few comparisons) and ensures mode stays in sync with config.
         self.input_state.mode =
             crate::input_mapping::InputMode::from_config(&main.config, shared.dshot());
+        self.input_state.reverse_speed_threshold = main.reverse_speed_threshold();
         input::process_input(
             shared,
             &main.config,

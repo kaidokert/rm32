@@ -71,7 +71,9 @@ pub fn brushed_tick(
                 state.direction = BrushedDirection::Reverse;
                 state.direction_set = true;
             }
-            let duty = map(input as i32, 1047, 48, 0, max_duty as i32) as u16;
+            // Falling line: reverse the output range, not the input range
+            // (AM32's map() turns a reversed input range into a step).
+            let duty = map(input as i32, 48, 1047, max_duty as i32, 0) as u16;
             BrushedOutput {
                 duty,
                 direction: BrushedDirection::Reverse,

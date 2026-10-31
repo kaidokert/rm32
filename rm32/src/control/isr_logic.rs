@@ -261,13 +261,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.hal.bridge().com_step(2);
             ctx.duty.active_brake_on = true;
         }
-        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        // AM32 main.c:1936.
         let brake_duty =
-            crate::fast_math::div2000_pwm(ctx.config.active_brake_power as u32 * tim1_arr as u32)
+            crate::fast_math::div2000_u32(ctx.config.active_brake_power as u32 * tim1_arr as u32)
                 * 10;
-        #[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
-        let brake_duty =
-            (ctx.config.active_brake_power as u32 * tim1_arr as u32 / DUTY_SCALE_MAX as u32) * 10;
         ctx.hal
             .bridge()
             .set_duty_all(brake_duty.min(tim1_arr as u32) as u16);
