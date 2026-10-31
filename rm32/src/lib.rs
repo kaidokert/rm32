@@ -18,6 +18,8 @@ pub mod current;
 pub mod dshot;
 pub mod dshot_commands;
 pub mod edt;
+#[cfg(any(feature = "m0-exact-arithmetic", test))]
+pub(crate) mod fast_math;
 pub mod filter;
 pub mod fixed_mode;
 pub mod functions;

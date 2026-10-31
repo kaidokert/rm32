@@ -83,8 +83,24 @@ impl DutyState {
         } else {
             (crate::constants::THROTTLE_MIN_SIGNAL, self.minimum)
         };
+        let input = input.clamp(input_min, crate::constants::DSHOT_MAX_THROTTLE);
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let input_span = (input - input_min) as u32;
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let duty_span = (crate::constants::DUTY_SCALE_MAX - duty_min) as u32;
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let scaled = input_span * duty_span;
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let mapped_span = if sine_start {
+            crate::fast_math::div1910_sine(scaled)
+        } else {
+            crate::fast_math::div2000_pwm(scaled)
+        };
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let setpoint = (duty_min as u32 + mapped_span) as u16;
+        #[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
         let setpoint = crate::functions::map(
-            input.clamp(input_min, crate::constants::DSHOT_MAX_THROTTLE) as i32,
+            input as i32,
             input_min as i32,
             crate::constants::DSHOT_MAX_THROTTLE as i32,
             duty_min as i32,
@@ -111,6 +127,16 @@ impl DutyState {
         if self.ramp_count > self.ramp_divider as u16 {
             self.ramp_count = 0;
             if voltage_based {
+                #[cfg(any(feature = "m0-exact-arithmetic", test))]
+                let v_change = {
+                    let cv = (battery_voltage.0 as u32)
+                        .clamp(RAMP_VOLTAGE_LOW_CV as u32, RAMP_VOLTAGE_HIGH_CV as u32);
+                    let numerator = (cv - RAMP_VOLTAGE_LOW_CV as u32)
+                        * (RAMP_VOLTAGE_CHANGE_MAX - RAMP_VOLTAGE_CHANGE_MIN) as u32;
+                    (RAMP_VOLTAGE_CHANGE_MAX as u32 - crate::fast_math::div1400_ramp(numerator))
+                        as u8
+                };
+                #[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
                 let v_change = crate::functions::map(
                     battery_voltage.0 as i32,
                     RAMP_VOLTAGE_LOW_CV,
@@ -195,15 +221,24 @@ impl DutyState {
 
     /// Compute PWM compare value from duty cycle and timer auto-reload.
     pub(crate) fn pwm_compare(&self, tim1_arr: u16) -> u16 {
-        ((self.cycle as u32 * tim1_arr as u32) / crate::constants::DUTY_SCALE_MAX as u32 + 1) as u16
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let scaled = crate::fast_math::div2000_pwm(self.cycle as u32 * tim1_arr as u32);
+        #[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
+        let scaled = self.cycle as u32 * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32;
+        (scaled + 1) as u16
     }
 
     /// Compute PWM compare value for proportional brake mode.
     pub(crate) fn brake_compare(drag_brake_strength: u8, tim1_arr: u16) -> u16 {
-        let brake_duty = drag_brake_strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
-        tim1_arr.saturating_sub(
-            (brake_duty * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32) as u16,
-        )
+        #[cfg(any(feature = "m0-exact-arithmetic", test))]
+        let scaled =
+            crate::fast_math::div10_u8_timer_product(drag_brake_strength as u32 * tim1_arr as u32);
+        #[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
+        let scaled = {
+            let brake_duty = drag_brake_strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
+            brake_duty * tim1_arr as u32 / crate::constants::DUTY_SCALE_MAX as u32
+        };
+        tim1_arr.saturating_sub(scaled as u16)
     }
 
     /// Finalize tick: store last duty, return current cycle for PWM output.
@@ -1003,6 +1038,112 @@ mod tests {
         d.set_ramp_divider(0); // ramp_count=0 > divider=0 → triggers profile
         d.increment_ramp_count(); // ramp_count=1 > 0
         d
+    }
+
+    #[test]
+    #[cfg(any(feature = "m0-exact-arithmetic", test))]
+    fn constant_divisor_duty_map_matches_the_existing_map_for_all_inputs() {
+        for minimum in [0, 5, 400, 1_900, 1_960, 2_000] {
+            for sine_start in [false, true] {
+                let mut duty = DutyState::default();
+                duty.set_duty_limits(minimum, 0, crate::constants::DUTY_SCALE_MAX);
+                for input in 0..=u16::MAX {
+                    let (input_min, duty_min) = if sine_start {
+                        (
+                            crate::constants::SINE_SLOW_STEP_THROTTLE,
+                            minimum
+                                .saturating_add(40)
+                                .min(crate::constants::DUTY_SCALE_MAX),
+                        )
+                    } else {
+                        (crate::constants::THROTTLE_MIN_SIGNAL, minimum)
+                    };
+                    let expected = crate::functions::map(
+                        input.clamp(input_min, crate::constants::DSHOT_MAX_THROTTLE) as i32,
+                        input_min as i32,
+                        crate::constants::DSHOT_MAX_THROTTLE as i32,
+                        duty_min as i32,
+                        crate::constants::DUTY_SCALE_MAX as i32,
+                    ) as u16;
+                    assert_eq!(
+                        duty.compute_setpoint(input, u32::MAX, 0, sine_start),
+                        expected,
+                        "minimum={minimum}, sine_start={sine_start}, input={input}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "m0-exact-arithmetic", test))]
+    fn voltage_ramp_and_pwm_outputs_match_the_existing_integer_formulas() {
+        for voltage in 0..=u16::MAX {
+            for commutation_interval in [
+                crate::platform::TestPlatform::RAMP_FAST_COMMUTATION_THRESHOLD,
+                crate::platform::TestPlatform::RAMP_FAST_COMMUTATION_THRESHOLD + 1,
+            ] {
+                let mut duty = ramp_test_duty(400, 500);
+                duty.ramp_limit::<crate::platform::TestPlatform>(
+                    crate::units::CentiVolts(voltage),
+                    commutation_interval,
+                    u32::MAX,
+                    0,
+                    true,
+                );
+                let expected_change = crate::functions::map(
+                    voltage as i32,
+                    RAMP_VOLTAGE_LOW_CV,
+                    RAMP_VOLTAGE_HIGH_CV,
+                    RAMP_VOLTAGE_CHANGE_MAX,
+                    RAMP_VOLTAGE_CHANGE_MIN,
+                ) as u8;
+                let expected_change = if commutation_interval
+                    > crate::platform::TestPlatform::RAMP_FAST_COMMUTATION_THRESHOLD
+                {
+                    expected_change
+                } else {
+                    expected_change.saturating_mul(3)
+                };
+                assert_eq!(duty.max_change, expected_change, "voltage={voltage}");
+                assert_eq!(
+                    duty.cycle(),
+                    400 + expected_change as u16,
+                    "voltage={voltage}"
+                );
+            }
+        }
+
+        for cycle in 0..=crate::constants::DUTY_SCALE_MAX {
+            for arr in [0, 1, 1_999, 8_028, 10_021, u16::MAX] {
+                let mut duty = DutyState::default();
+                duty.set_cycle(cycle);
+                assert_eq!(
+                    duty.pwm_compare(arr),
+                    ((cycle as u32 * arr as u32 / crate::constants::DUTY_SCALE_MAX as u32 + 1)
+                        as u16),
+                    "cycle={cycle}, arr={arr}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(any(feature = "m0-exact-arithmetic", test))]
+    fn brake_compare_matches_the_existing_formula_over_all_strengths_and_timer_values() {
+        for strength in 0..=u8::MAX {
+            for arr in 0..=u16::MAX {
+                let brake_duty = strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
+                let expected = arr.saturating_sub(
+                    (brake_duty * arr as u32 / crate::constants::DUTY_SCALE_MAX as u32) as u16,
+                );
+                assert_eq!(
+                    DutyState::brake_compare(strength, arr),
+                    expected,
+                    "strength={strength}, arr={arr}"
+                );
+            }
+        }
     }
 
     /// Low RPM (average_interval > 500) selects max_ramp_low_rpm.

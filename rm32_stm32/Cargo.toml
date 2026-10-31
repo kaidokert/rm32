@@ -23,8 +23,8 @@ path = "src/bin/main.rs"
 
 [features]
 default = ["stm32g071"]
-stm32g071 = ["dep:stm32g0xx-hal"]
-stm32f051 = ["dep:stm32f0xx-hal"]
+stm32g071 = ["dep:stm32g0xx-hal", "rm32/m0-exact-arithmetic"]
+stm32f051 = ["dep:stm32f0xx-hal", "rm32/m0-exact-arithmetic"]
 stm32l431 = ["dep:stm32l4xx-hal"]
 stm32g431 = ["dep:stm32g4xx-hal"]
 
