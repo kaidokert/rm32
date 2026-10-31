@@ -161,6 +161,12 @@ impl DutyState {
         self.last = self.min_startup;
     }
 
+    /// Lower the ramp origin after desynchronization so recovery restarts
+    /// from half the configured startup duty at most.
+    pub(crate) fn kick_down(&mut self) {
+        self.last = self.last.min(self.min_startup / 2);
+    }
+
     /// Increment ramp counter (called each ISR tick).
     pub(crate) fn increment_ramp_count(&mut self) {
         self.ramp_count += 1;
@@ -866,6 +872,19 @@ mod tests {
         assert_eq!(d.minimum, 100);
         assert_eq!(d.min_startup, 200);
         assert_eq!(d.startup_max, 300);
+    }
+
+    #[test]
+    fn desync_kick_down_caps_ramp_origin_at_half_startup_duty() {
+        let mut duty = DutyState::default();
+        duty.set_duty_limits(5, 201, 300);
+        duty.set_last(900);
+        duty.kick_down();
+        assert_eq!(duty.last(), 100);
+
+        duty.set_last(50);
+        duty.kick_down();
+        assert_eq!(duty.last(), 50);
     }
 
     #[test]

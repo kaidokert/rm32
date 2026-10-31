@@ -170,6 +170,11 @@ pub trait MainControl {
     fn request_isr_action(&self, _action: IsrAction) {}
     fn clear_isr_action(&self, _action: IsrAction) {}
 
+    /// Request that the next control tick reduce duty after a detected desync.
+    fn request_duty_kick_down(&self);
+    /// Consume a pending desync duty reduction, independently of timer actions.
+    fn take_duty_kick_down(&self) -> bool;
+
     /// Sine changeover step request (0 = none, 1-6 = execute changeover with step).
     fn changeover_step(&self) -> u8;
     fn set_changeover_step(&self, step: u8);

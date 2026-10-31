@@ -38,6 +38,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     let action_interval_count = ctx.hal.interval().count();
     match action {
         IsrAction::AllOff => {
+            ctx.shared.take_duty_kick_down();
             ctx.duty.sine_outputs_on = false;
             ctx.duty.active_brake_on = false;
             ctx.shared.set_changeover_step(0);
@@ -167,6 +168,14 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 ctx.bemf.reset_for_step();
             }
         }
+    }
+
+    // Apply this after startup handling: a desync can stop the motor to Armed,
+    // and `start_motor` must not overwrite the recovery ramp origin.
+    // Keep it separate from the prioritized timer action so both can run.
+    let kick_down = ctx.shared.take_duty_kick_down();
+    if kick_down && ctx.shared.running() {
+        ctx.duty.kick_down();
     }
 
     // Core tick

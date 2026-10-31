@@ -836,6 +836,148 @@ mod tests {
     }
 
     #[test]
+    fn isr_tick_applies_desync_duty_kick_alongside_commutation_kick() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.newinput.set(1000);
+        shared.adjusted_input.set(1000);
+        shared.commutation_interval.set(200);
+        shared.request_isr_action(IsrAction::CommutateKick);
+        shared.request_duty_kick_down();
+        duty.set_duty_limits(5, 200, 300);
+        duty.set_last(900);
+        duty.set_ramp_divider(u8::MAX);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(duty.last(), 100);
+        assert_eq!(hal.com_timer.set_and_enable_count, 1);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+        assert!(!shared.take_duty_kick_down());
+    }
+
+    #[test]
+    fn desync_duty_kick_applies_after_motor_start_resets_ramp_origin() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.newinput.set(1000);
+        shared.adjusted_input.set(1000);
+        shared.request_duty_kick_down();
+        duty.set_duty_limits(5, 200, 300);
+        duty.set_last(900);
+        duty.set_ramp_divider(u8::MAX);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.mode.get(), crate::motor_mode::MotorMode::OldRoutine);
+        assert_eq!(duty.last(), 100);
+        assert!(!shared.take_duty_kick_down());
+    }
+
+    #[test]
+    fn all_off_discards_pending_desync_duty_kick() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.request_isr_action(IsrAction::AllOff);
+        shared.request_duty_kick_down();
+        duty.set_last(900);
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(duty.last(), 900);
+        assert!(!shared.take_duty_kick_down());
+    }
+
+    #[test]
+    fn stopped_tick_discards_desync_kick_before_motor_reentry() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+        duty.set_last(900);
+        duty.set_ramp_divider(u8::MAX);
+        shared.request_duty_kick_down();
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(!shared.take_duty_kick_down());
+
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.newinput.set(1000);
+        shared.adjusted_input.set(1000);
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(duty.last(), 900);
+    }
+
+    #[test]
     fn isr_tick_commutate_kick_saturates_interval_sample() {
         let mut comm = crate::commutation::Commutation::new();
         let mut bemf = crate::control::state::BemfState::default();
