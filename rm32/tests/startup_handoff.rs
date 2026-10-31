@@ -338,12 +338,34 @@ fn entry_threshold_and_direct_start_policy() {
 }
 
 #[test]
-fn sine_duty_map_matches_endpoints_and_linear_reference() {
+fn sine_duty_map_matches_endpoints_and_am32_reference() {
+    fn am32_map(x: i64, in_min: i64, in_max: i64, out_min: i64, out_max: i64) -> i64 {
+        if x >= in_max {
+            return out_max;
+        }
+        if x <= in_min {
+            return out_min;
+        }
+        if out_min == out_max {
+            return out_min;
+        }
+        let in_mid = (in_min + in_max) >> 1;
+        let out_mid = (out_min + out_max) >> 1;
+        if in_min == in_mid {
+            return out_mid;
+        }
+        if x <= in_mid {
+            am32_map(x, in_min, in_mid, out_min, out_mid)
+        } else {
+            am32_map(x, in_mid + 1, in_max, out_mid, out_max)
+        }
+    }
+
     for input in 127..=2047 {
         let mut r = Rig::new();
         r.shared.set_zero_crosses(1000);
         r.tick(input);
-        let expected = 140 + (u32::from(input.max(137) - 137) * 1860 / 1910) as u16;
+        let expected = am32_map(i64::from(input), 137, 2047, 140, 2000) as u16;
         assert_eq!(r.shared.duty_cycle_setpoint(), expected, "input {input}");
     }
 }
