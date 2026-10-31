@@ -70,13 +70,6 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         IsrAction::None => {}
     }
 
-    // This request is separate from the prioritized timer action: a timeout
-    // commutation kick and a desync duty reduction may both be pending.
-    let kick_down = ctx.shared.take_duty_kick_down();
-    if kick_down && ctx.shared.running() {
-        ctx.duty.kick_down();
-    }
-
     // Direction must be current before deriving the handoff comparator edge.
     ctx.commutation.forward = ctx.shared.forward();
     let input = ctx.shared.adjusted_input();
@@ -175,6 +168,14 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 ctx.bemf.reset_for_step();
             }
         }
+    }
+
+    // Apply this after startup handling: a desync can stop the motor to Armed,
+    // and `start_motor` must not overwrite the recovery ramp origin.
+    // Keep it separate from the prioritized timer action so both can run.
+    let kick_down = ctx.shared.take_duty_kick_down();
+    if kick_down && ctx.shared.running() {
+        ctx.duty.kick_down();
     }
 
     // Core tick
