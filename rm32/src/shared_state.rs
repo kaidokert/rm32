@@ -79,6 +79,7 @@ pub struct SharedState {
     auto_advance: AtomicU8,           // commutation timing advance level
     prop_brake_active: AtomicBool,    // proportional brake engaged (main sets, ISR reads)
     isr_action: AtomicU8,             // main requests one-shot ISR-context work
+    duty_kick_down: AtomicBool,       // main requests duty reduction after desync
     changeover_step: AtomicU8,        // sine changeover step (0=none, 1-6=pending)
     desync_check_pending: AtomicBool, // ISR requests main-loop desync handling
     one_khz_counter: AtomicU8,        // incremented by TIM6 ISR, consumed by main
@@ -131,6 +132,7 @@ impl SharedState {
             auto_advance: AtomicU8::new(0),
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
+            duty_kick_down: AtomicBool::new(false),
             changeover_step: AtomicU8::new(0),
             desync_check_pending: AtomicBool::new(false),
             one_khz_counter: AtomicU8::new(0),
@@ -580,6 +582,12 @@ impl SharedState {
             .compare_exchange(action as u8, IsrAction::None as u8, REL, ACQ)
             .ok();
     }
+    pub fn request_duty_kick_down(&self) {
+        self.duty_kick_down.store(true, REL);
+    }
+    pub fn take_duty_kick_down(&self) -> bool {
+        self.duty_kick_down.swap(false, Ordering::AcqRel)
+    }
     pub fn changeover_step(&self) -> u8 {
         self.changeover_step.load(ACQ)
     }
@@ -726,6 +734,12 @@ impl crate::shared_comm::MainControl for SharedState {
     fn clear_isr_action(&self, action: IsrAction) {
         SharedState::clear_isr_action(self, action);
     }
+    fn request_duty_kick_down(&self) {
+        SharedState::request_duty_kick_down(self);
+    }
+    fn take_duty_kick_down(&self) -> bool {
+        SharedState::take_duty_kick_down(self)
+    }
     fn changeover_step(&self) -> u8 {
         SharedState::changeover_step(self)
     }
@@ -865,6 +879,17 @@ mod tests {
         MainControl::clear_isr_action(&shared, IsrAction::ResetIntervalTimer);
 
         assert_eq!(MainControl::isr_action(&shared), IsrAction::AllOff);
+    }
+
+    #[test]
+    fn duty_kick_down_is_independent_of_prioritized_timer_actions() {
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        MainControl::request_duty_kick_down(&shared);
+        MainControl::request_isr_action(&shared, IsrAction::CommutateKick);
+
+        assert!(MainControl::take_duty_kick_down(&shared));
+        assert!(!MainControl::take_duty_kick_down(&shared));
+        assert_eq!(MainControl::isr_action(&shared), IsrAction::CommutateKick);
     }
 
     #[test]

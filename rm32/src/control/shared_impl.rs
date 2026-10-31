@@ -33,6 +33,7 @@ pub struct TestShared {
     pub prop_brake_active: Cell<bool>,
     pub tone_active: Cell<bool>,
     pub isr_action: Cell<IsrAction>,
+    pub duty_kick_down: Cell<bool>,
     pub changeover_step: Cell<u8>,
     pub desync_check_pending: Cell<bool>,
 }
@@ -72,6 +73,7 @@ impl TestShared {
             prop_brake_active: Cell::new(false),
             tone_active: Cell::new(false),
             isr_action: Cell::new(IsrAction::None),
+            duty_kick_down: Cell::new(false),
             changeover_step: Cell::new(0),
             desync_check_pending: Cell::new(false),
         }
@@ -234,6 +236,12 @@ impl MainControl for TestShared {
         if self.isr_action.get() == action {
             self.isr_action.set(IsrAction::None);
         }
+    }
+    fn request_duty_kick_down(&self) {
+        self.duty_kick_down.set(true);
+    }
+    fn take_duty_kick_down(&self) -> bool {
+        self.duty_kick_down.replace(false)
     }
     fn changeover_step(&self) -> u8 {
         self.changeover_step.get()
