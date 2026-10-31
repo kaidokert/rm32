@@ -19,3 +19,4 @@ path = "src/bin/harness.rs"
 [features]
 default = []
 dronecan = ["dep:dronecan"]
+m0-exact-arithmetic = []

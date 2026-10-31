@@ -59,6 +59,18 @@ pub fn six_intervals_to_us<P: Platform>(sum: u32) -> i32 {
 
 /// Electrical period in microseconds to average step interval in timer counts.
 #[inline(always)]
+#[cfg(any(feature = "m0-exact-arithmetic", test))]
+pub fn e_com_us_to_avg_ticks<P: Platform>(e_com_us: i32) -> i32 {
+    if P::TIMER_HZ == 2_000_000 {
+        crate::fast_math::div3_i32(e_com_us)
+    } else {
+        (e_com_us as i64 * P::TIMER_HZ as i64 / 6_000_000) as i32
+    }
+}
+
+/// Electrical period in microseconds to average step interval in timer counts.
+#[inline(always)]
+#[cfg(not(any(feature = "m0-exact-arithmetic", test)))]
 pub fn e_com_us_to_avg_ticks<P: Platform>(e_com_us: i32) -> i32 {
     if P::TIMER_HZ == 2_000_000 {
         e_com_us / 3
