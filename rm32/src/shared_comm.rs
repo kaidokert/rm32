@@ -215,6 +215,12 @@ pub trait MainControl {
     fn set_actual_current(&self, _v: crate::units::CentiAmps) {}
     fn set_battery_voltage(&self, _v: crate::units::CentiVolts) {}
     fn set_degrees_celsius(&self, _v: i16) {}
+
+    /// Whether the ISR tone scheduler owns the bridge PWM until its next
+    /// sequence transition. Motor output and braking take priority.
+    fn tone_active(&self) -> bool {
+        false
+    }
 }
 
 /// Remaining shared state — input detection, flags, protocol.

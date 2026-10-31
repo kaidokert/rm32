@@ -47,6 +47,10 @@ pub struct DutyState {
 }
 
 impl DutyState {
+    /// Whether the active-brake phase pattern currently owns the bridge.
+    pub fn active_brake_on(&self) -> bool {
+        self.active_brake_on
+    }
     /// Set duty limits from motor config. Called during ISR state init.
     pub fn set_duty_limits(&mut self, minimum: u16, min_startup: u16, startup_max: u16) {
         self.minimum = minimum;

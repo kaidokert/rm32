@@ -5,6 +5,23 @@ extern crate self as cortex_m;
 
 use rm32::hal::*;
 use std::cell::UnsafeCell;
+use std::sync::Mutex as HostMutex;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BridgeEvent {
+    Duty(u16),
+    Period(u16),
+    Divider(u16),
+    AllOff,
+    ComStep(u8),
+}
+static BRIDGE_EVENTS: HostMutex<Vec<BridgeEvent>> = HostMutex::new(Vec::new());
+fn event(value: BridgeEvent) {
+    BRIDGE_EVENTS.lock().unwrap().push(value);
+}
+fn take_events() -> Vec<BridgeEvent> {
+    core::mem::take(&mut *BRIDGE_EVENTS.lock().unwrap())
+}
 
 #[path = "../../rm32_stm32/src/bridge.rs"]
 mod bridge;
@@ -117,9 +134,15 @@ impl InputCapture for Input {
 }
 struct Pwm;
 impl bridge::TimerPwm for Pwm {
-    fn set_duty_all(&mut self, _: u16) {}
-    fn set_auto_reload(&mut self, _: u16) {}
-    fn set_prescaler(&mut self, _: u16) {}
+    fn set_duty_all(&mut self, value: u16) {
+        event(BridgeEvent::Duty(value));
+    }
+    fn set_auto_reload(&mut self, value: u16) {
+        event(BridgeEvent::Period(value));
+    }
+    fn set_prescaler(&mut self, value: u16) {
+        event(BridgeEvent::Divider(value));
+    }
     fn set_compare1(&mut self, _: u16) {}
     fn set_compare2(&mut self, _: u16) {}
     fn set_compare3(&mut self, _: u16) {}
@@ -128,8 +151,12 @@ impl bridge::TimerPwm for Pwm {
 }
 struct Phase;
 impl PhaseOutput for Phase {
-    fn com_step(&mut self, _: u8) {}
-    fn all_off(&mut self) {}
+    fn com_step(&mut self, step: u8) {
+        event(BridgeEvent::ComStep(step));
+    }
+    fn all_off(&mut self) {
+        event(BridgeEvent::AllOff);
+    }
     fn full_brake(&mut self) {}
     fn all_pwm(&mut self) {}
     fn proportional_brake(&mut self) {}
@@ -206,6 +233,7 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
             phase: Phase,
         },
         cmd: rm32::dshot_commands::CommandProcessor::default(),
+        tone: rm32::tone::ToneScheduler::default(),
         edt: rm32::edt::EdtScheduler::default(),
         crsf: rm32::crsf::CrsfParser::new(),
         transfer: rm32::transfer::TransferState::default(),
@@ -269,4 +297,65 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     assert_eq!(persisted.dir_reversed, 1);
     assert!(isr_handlers::prepare_input_save(&mut main));
     assert_eq!(main.config.dir_reversed, 0);
+
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    shared.set_tim1_arr(1777);
+    command(1);
+    take_events();
+    isr_handlers::handle_tim6();
+    let start = take_events();
+    assert!(
+        start.windows(4).any(|w| w
+            == [
+                BridgeEvent::Period(1999),
+                BridgeEvent::Divider(50),
+                BridgeEvent::Duty(15),
+                BridgeEvent::ComStep(2),
+            ]),
+        "{start:?}"
+    );
+    assert!(shared.tone_active());
+
+    isr_handlers::handle_tim6();
+    let held = take_events();
+    assert!(!held.iter().any(|e| matches!(
+        e,
+        BridgeEvent::AllOff | BridgeEvent::Duty(_) | BridgeEvent::Period(_)
+    )));
+
+    for _ in 0..6000 {
+        isr_handlers::handle_tim6();
+    }
+    let completed = take_events();
+    assert!(completed.contains(&BridgeEvent::AllOff));
+    assert!(completed.contains(&BridgeEvent::Divider(0)));
+    assert!(completed.contains(&BridgeEvent::Period(1777)));
+    assert!(!shared.tone_active());
+
+    command(2);
+    isr_handlers::handle_tim6();
+    assert!(shared.tone_active());
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::OldRoutine);
+    take_events();
+    isr_handlers::handle_tim6();
+    let interrupted = take_events();
+    assert!(interrupted.contains(&BridgeEvent::Divider(0)));
+    assert!(interrupted.contains(&BridgeEvent::Period(1777)));
+    assert!(
+        !interrupted.contains(&BridgeEvent::AllOff),
+        "aborting a tone must not clear motor phase outputs"
+    );
+    assert!(!shared.tone_active());
+
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    command(2);
+    isr_handlers::handle_tim6();
+    assert!(shared.tone_active());
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Disarmed);
+    take_events();
+    isr_handlers::handle_tim6();
+    let stopped = take_events();
+    assert!(stopped.contains(&BridgeEvent::AllOff));
+    assert!(!stopped.contains(&BridgeEvent::ComStep(2)));
+    assert!(!shared.tone_active());
 }

@@ -78,6 +78,32 @@ mod tests {
         assert!(!hal.phase.all_off_called);
     }
 
+    #[test]
+    fn active_tone_owns_idle_bridge_writes_until_scheduler_releases_it() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.tone_active.set(true);
+        let config = crate::config::EepromConfig::default();
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        hal.pwm.last_duty = 45;
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert_eq!(hal.pwm.last_duty, 45);
+        assert!(!hal.phase.all_off_called);
+    }
+
     #[derive(Default)]
     struct MockOrder {
         next: Cell<u8>,

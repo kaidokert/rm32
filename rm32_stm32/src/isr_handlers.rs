@@ -5,7 +5,7 @@
 //! just clear the flag and call these.
 
 use crate::isr::{self, TargetIsrState};
-use rm32::hal::InputCapture;
+use rm32::hal::{InputCapture, MotorHal};
 use rm32::transfer::CaptureConfig;
 
 /// Single-core ISR-local cell for zero-overhead mutable ISR state.
@@ -117,17 +117,30 @@ pub fn prepare_input_save(
 pub fn handle_tim6() {
     let state = ISR_LOCAL.get();
     let shared = isr::shared();
-    let mut ctx = rm32::control::context::MotorContext {
-        commutation: &mut state.commutation,
-        bemf: &mut state.bemf,
-        duty: &mut state.duty,
-        config: &state.config,
-        armed_timeout_count: &mut state.armed_timeout_count,
-        voltage_based_ramp: state.voltage_based_ramp,
-        shared,
-        hal: &mut state.hal,
-    };
-    rm32::control::isr_logic::ten_khz_tick(&mut ctx);
+    {
+        let mut ctx = rm32::control::context::MotorContext {
+            commutation: &mut state.commutation,
+            bemf: &mut state.bemf,
+            duty: &mut state.duty,
+            config: &state.config,
+            armed_timeout_count: &mut state.armed_timeout_count,
+            voltage_based_ramp: state.voltage_based_ramp,
+            shared,
+            hal: &mut state.hal,
+        };
+        rm32::control::isr_logic::ten_khz_tick(&mut ctx);
+    }
+    let request = shared.take_tone_request();
+    let bridge_busy = rm32::tone::bridge_busy(shared, state.duty.active_brake_on());
+    rm32::tone::step::<crate::platform::StmPlatform, _, _>(
+        &mut state.tone,
+        request,
+        bridge_busy,
+        state.config.beep_volume,
+        shared.tim1_arr(),
+        || state.hal.bridge(),
+    );
+    shared.set_tone_active(state.tone.active());
 }
 
 /// Commutation timer expired (TIM14 ISR body).
@@ -224,7 +237,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
     );
     shared.set_zero_input_count(zic);
 
-    let _result = rm32::transfer::dispatch(
+    let result = rm32::transfer::dispatch(
         &actions,
         shared,
         rm32::transfer::InputContext {
@@ -239,8 +252,9 @@ pub fn handle_exti_frame() -> CaptureConfig {
         },
         |prescaler| state.hal.input.set_output_prescaler(prescaler),
     );
-    // Tone intent remains unsupported here. Do not borrow the bridge or block
-    // an input interrupt to play it; tone ownership is a separate concern.
+    if let Some(tone) = result.tone {
+        shared.set_tone_request(tone);
+    }
     actions.next_capture
 }
 

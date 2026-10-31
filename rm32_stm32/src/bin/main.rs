@@ -95,6 +95,7 @@ fn main() -> ! {
         duty: DutyState::default(),
         hal,
         cmd: rm32::dshot_commands::CommandProcessor::default(),
+        tone: rm32::tone::ToneScheduler::default(),
         edt: rm32::edt::EdtScheduler::default(),
         crsf: rm32::crsf::CrsfParser::new(),
         transfer: rm32::transfer::TransferState::default(),
@@ -241,19 +242,7 @@ fn main() -> ! {
 
         // Arming feedback: cell count beeps + LED
         if main_state.just_armed {
-            // Play motor beeps for cell count (or single beep if no LVC)
-            isr::with_isr_state(|isr| {
-                let sounds = rm32::sounds::Sounds::new(Chip::TIM1_AUTORELOAD);
-                if main_state.cell_count > 0 {
-                    for _ in 0..main_state.cell_count {
-                        sounds.play_input(&mut isr.hal.bridge(), &mut sys);
-                        sys.delay_millis(100);
-                        sys.reload_watchdog();
-                    }
-                } else {
-                    sounds.play_input(&mut isr.hal.bridge(), &mut sys);
-                }
-            });
+            shared.set_arming_tone_request(main_state.cell_count);
 
             if BOARD.has_led {
                 led.set_status(LedStatus::Armed);

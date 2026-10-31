@@ -98,6 +98,18 @@ class TestHarnessAPI:
             assert state["newinput"] == expected
             assert state["signaltimeout"] == 1
 
+    def test_dshot_tone_request_owns_bridge_across_control_ticks(self, harness):
+        harness.config(armed=1, inputSet=1, dshot=1, throttle=0)
+        for _ in range(6):
+            state = harness.tick(transfer=1, dshot_frame=1)
+        assert state["play_tone_flag"] == 1
+        assert state["pwm_duty"] == 15
+        assert state["phase_mode"] == 1
+
+        state = harness.tick()
+        assert state["pwm_duty"] == 15
+        assert state["phase_mode"] == 1
+
     def test_crsf_raw_serial_validation_and_recovery(self, harness):
         def frame(throttle):
             channels = [1811] * 16
