@@ -7,18 +7,22 @@
 //! stretched sine-start steps and tones on F051/G071/G431.
 
 const SYST_MASK: u32 = 0x00FF_FFFF;
+const SYST_CSR_FREE_RUN: u32 = 0b101; // CLKSOURCE = core, TICKINT = 0, ENABLE
 
 /// Start SysTick free-running at the core clock with its interrupt off,
-/// unless it is already running.
+/// reconfiguring it if a bootloader left it stopped or with a different reload
+/// or clock/interrupt configuration.
 pub fn systick_free_run() {
-    // SAFETY: SysTick has no handler in this firmware; this only starts the
-    // counter, and only when it is stopped.
+    // SAFETY: SysTick has no handler in this firmware; this configures the
+    // 24-bit core-clock free-running counter whenever it is not already in
+    // that state.
     unsafe {
         let st = &*cortex_m::peripheral::SYST::PTR;
-        if st.csr.read() & 1 == 0 {
+        if (st.csr.read() & 0b111) != SYST_CSR_FREE_RUN || st.rvr.read() != SYST_MASK {
+            st.csr.write(0);
             st.rvr.write(SYST_MASK);
             st.cvr.write(0);
-            st.csr.write(0b101); // CLKSOURCE = core, TICKINT = 0, ENABLE
+            st.csr.write(SYST_CSR_FREE_RUN);
         }
     }
 }

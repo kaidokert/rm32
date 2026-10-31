@@ -73,15 +73,15 @@ pub fn get_crc8(buf: &[u8]) -> u8 {
 /// reads are less than one counter period apart.
 ///
 /// AM32 compares `(uint16_t)micros`, so a request of 65536 us or more in C
-/// waits `micros % 65536`. This waits the full time; every AM32 and rm32
-/// caller passes less than 65536.
+/// waits `micros % 65536`. This waits the full `u32` microsecond duration;
+/// every AM32 and rm32 caller passes less than 65536.
 pub fn delay_micros_on(us: u32, counts_per_us: u32, mask: u32, mut read_down: impl FnMut() -> u32) {
-    let mut remaining = us.saturating_mul(counts_per_us);
+    let mut remaining = (us as u64) * (counts_per_us as u64);
     let mut prev = read_down();
     // As AM32's `while`, the exit test always follows at least one more read.
     loop {
         let now = read_down();
-        remaining = remaining.saturating_sub(prev.wrapping_sub(now) & mask);
+        remaining = remaining.saturating_sub((prev.wrapping_sub(now) & mask) as u64);
         prev = now;
         if remaining == 0 {
             return;
@@ -434,5 +434,27 @@ mod tests {
             delay_millis_on(ms, |us| rm32 += us);
             assert_eq!(rm32, am32, "ms={ms}");
         }
+    }
+
+    #[test]
+    fn delay_micros_on_handles_products_above_u32_max() {
+        const MHZ: u32 = 170;
+        const SYST_MASK: u32 = 0x00FF_FFFF;
+        const US: u32 = 60_000_000; // 60 s * 170 MHz = 10.2e9 counts (> u32::MAX)
+        const STEP: u32 = 0x0080_0000; // Half-period step per read (< SYST_MASK)
+        let mut cvr = 0u32;
+        let mut elapsed = 0u64;
+        let mut first = true;
+        delay_micros_on(US, MHZ, SYST_MASK, || {
+            if first {
+                first = false;
+            } else {
+                cvr = cvr.wrapping_sub(STEP) & SYST_MASK;
+                elapsed += STEP as u64;
+            }
+            cvr
+        });
+        assert!(elapsed >= (US as u64) * (MHZ as u64));
+        assert!(elapsed < (US as u64) * (MHZ as u64) + STEP as u64);
     }
 }

@@ -128,4 +128,18 @@ mod tests {
             assert_eq!(e_com_us_to_avg_ticks::<TestPlatform>(e), e / 3);
         }
     }
+
+    #[test]
+    fn non_divisor_timer_hz_converts_ticks_without_overflow() {
+        struct FractionalTimerPlatform;
+        impl Platform for FractionalTimerPlatform {
+            const TICK_HZ: u32 = 20_000;
+            const TIMER_HZ: u32 = 1_500_000;
+            const CAPTURE_HZ: u32 = 64_000_000;
+            const GCR_SHIFT: u8 = 7;
+            const PWM_BASE_PERIOD: u16 = 1999;
+        }
+        assert_eq!(ticks_to_am32::<FractionalTimerPlatform>(150), 200);
+        assert_eq!(am32_ticks_to::<FractionalTimerPlatform>(200), 150);
+    }
 }
