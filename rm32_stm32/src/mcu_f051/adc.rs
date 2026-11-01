@@ -9,6 +9,7 @@ crate::define_adc_boilerplate!(
     type_name: F051Adc,
     cal1: 0x1FFF_F7B8, cal2: 0x1FFF_F7C2,
     cal1_temp: 30, cal2_temp: 110,
+    cal_vref_mv: 3300,
 );
 
 pub struct F051AdcOps;

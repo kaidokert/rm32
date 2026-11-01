@@ -67,6 +67,8 @@ impl<A: AdcPeripheral> Adc for GenericAdc<A, 3> {
             self.temp_cal.cal2_val,
             self.temp_cal.cal1_temp,
             self.temp_cal.cal2_temp,
+            3300, // VDDA on all supported boards
+            self.temp_cal.cal_vref_mv,
         )
     }
 }

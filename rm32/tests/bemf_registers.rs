@@ -1,6 +1,7 @@
 //! Run the production comparator adapters against a small PAC register recorder.
 //! Register values and write order are checked; analog behavior and timing are not.
-#![allow(dead_code)] // Included ports expose constructors unused by some cases.
+#![allow(dead_code, unsafe_op_in_unsafe_fn)] // Included ports expose constructors unused by some cases.
+extern crate self as cortex_m;
 
 use rm32::hal::{BemfSensor, Phase};
 use std::sync::{
@@ -8,21 +9,37 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
 };
 
+#[path = "../../rm32_stm32/src/adc_generic.rs"]
+mod adc_generic;
+#[path = "../../rm32_stm32/src/adc_hal.rs"]
+mod adc_hal;
 #[path = "../../rm32_stm32/src/comp_hal.rs"]
 mod comp_hal;
 #[path = "../../rm32_stm32/src/comparator.rs"]
 mod comparator;
+#[path = "../../rm32_stm32/src/dma_buf.rs"]
+mod dma_buf;
 #[path = "../../rm32_stm32/src/mcu_f051/comparator.rs"]
 mod f051;
 #[path = "../../rm32_stm32/src/mcu_g071/comparator.rs"]
 mod g071;
+#[path = "../../rm32_stm32/src/mcu_g071/adc.rs"]
+mod g071_adc;
 #[path = "../../rm32_stm32/src/mcu_g431/comparator.rs"]
 mod g431;
 #[path = "../../rm32_stm32/src/mcu_l431/comparator.rs"]
 mod l431;
+#[path = "../../rm32_stm32/src/regs.rs"]
+mod regs;
+
+pub mod asm {
+    pub fn delay(_: u32) {}
+    pub fn nop() {}
+}
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static WRITES: Mutex<Vec<(&str, u32)>> = Mutex::new(Vec::new());
+static ADC_FAULT: AtomicU32 = AtomicU32::new(0);
 struct Reg {
     name: &'static str,
     value: AtomicU32,
@@ -39,6 +56,13 @@ impl Write {
         self.0 = v;
         self
     }
+    fn en(&mut self) -> &mut Self {
+        self
+    }
+    fn clear_bit(&mut self) -> &mut Self {
+        self.0 = 0;
+        self
+    }
 }
 impl Reg {
     const fn new(name: &'static str) -> Self {
@@ -52,6 +76,9 @@ impl Reg {
     }
     fn seed(&self, v: u32) {
         self.value.store(v, Ordering::Relaxed);
+    }
+    fn as_ptr(&self) -> *const u32 {
+        &self.value as *const AtomicU32 as *const u32
     }
     fn read(&self) -> Read {
         Read(self.get())
@@ -69,8 +96,47 @@ impl Reg {
     fn apply(&self, v: u32) {
         WRITES.lock().unwrap().push((self.name, v));
         match self.name {
-            // EXTI pending bits are write-one-to-clear.
-            "pr" | "pr1" | "rpr1" | "fpr1" => self.seed(self.get() & !v),
+            // EXTI and ADC ISR pending bits are write-one-to-clear.
+            "pr" | "pr1" | "rpr1" | "fpr1" | "isr" => self.seed(self.get() & !v),
+            "cr" => {
+                // RM0444: calibration and enable only complete when ADVREGEN (1 << 28) is set;
+                // ADDIS (1 << 1) disables the ADC and clears ADEN (1 << 0).
+                let advregen = (v & (1 << 28)) != 0;
+                if (v & (1 << 31)) != 0 && advregen {
+                    self.seed(v & !(1 << 31));
+                } else if (v & (1 << 1)) != 0 {
+                    self.seed(v & !((1 << 1) | 1));
+                    BANK.isr.seed(BANK.isr.get() & !1);
+                } else {
+                    self.seed(v);
+                }
+                if (v & 1) != 0 && advregen {
+                    BANK.isr.seed(BANK.isr.get() | 1);
+                }
+            }
+            "cfgr1" => {
+                self.seed(v);
+                // RM0444: setting CHSELRMOD while enabled raises CCRDY (1 << 13).
+                if (v & (1 << 21)) != 0 && (BANK.cr.get() & 1) != 0 {
+                    BANK.isr.seed(BANK.isr.get() | (1 << 13));
+                }
+            }
+            "chselr1" => {
+                // RM0444 §15.3.8: CHSELR1 writes are ignored unless ADEN=1, CHSELRMOD=1,
+                // and the previous CCRDY flag was cleared.
+                let ready = (BANK.cr.get() & 1) != 0
+                    && (BANK.cfgr1.get() & (1 << 21)) != 0
+                    && (BANK.isr.get() & (1 << 13)) == 0;
+                if ready {
+                    let stored = if ADC_FAULT.load(Ordering::Relaxed) == 1 {
+                        v ^ 0xF
+                    } else {
+                        v
+                    };
+                    self.seed(stored);
+                    BANK.isr.seed(BANK.isr.get() | (1 << 13));
+                }
+            }
             _ => self.seed(v),
         }
         // Software triggering is sufficient here to test routing and masking.
@@ -91,19 +157,83 @@ macro_rules! bank {
         static BANK: Bank = Bank { $($name: Reg::new(stringify!($name))),+ };
         impl Bank {
             $(fn $name(&self) -> &Reg { &self.$name })+
-            fn reset(&self) { $(self.$name.seed(0);)+ WRITES.lock().unwrap().clear(); }
+            fn reset(&self) {
+                $(self.$name.seed(0);)+
+                ADC_FAULT.store(0, Ordering::Relaxed);
+                WRITES.lock().unwrap().clear();
+            }
         }
     };
 }
 bank!(
-    csr, comp2_csr, c1csr, c2csr, rtsr, ftsr, imr, pr, swier, rtsr1, ftsr1, imr1, pr1, rpr1, fpr1,
-    swier1
+    csr,
+    comp2_csr,
+    c1csr,
+    c2csr,
+    rtsr,
+    ftsr,
+    imr,
+    pr,
+    swier,
+    rtsr1,
+    ftsr1,
+    imr1,
+    pr1,
+    rpr1,
+    fpr1,
+    swier1,
+    apbenr2,
+    ahbenr,
+    moder,
+    cfgr2,
+    ccr,
+    dr,
+    smpr,
+    cfgr1,
+    chselr1,
+    cr,
+    isr,
+    dmamux_ccr1,
+    dma_cr,
+    par,
+    mar,
+    ndtr
 );
+struct DmaCh2;
+impl DmaCh2 {
+    fn cr(&self) -> &Reg {
+        &BANK.dma_cr
+    }
+    fn par(&self) -> &Reg {
+        &BANK.par
+    }
+    fn mar(&self) -> &Reg {
+        &BANK.mar
+    }
+    fn ndtr(&self) -> &Reg {
+        &BANK.ndtr
+    }
+}
+impl Bank {
+    fn ch2(&self) -> DmaCh2 {
+        DmaCh2
+    }
+}
 mod pac {
     #[allow(clippy::upper_case_acronyms)]
     pub struct COMP;
     #[allow(clippy::upper_case_acronyms)]
     pub struct EXTI;
+    #[allow(clippy::upper_case_acronyms)]
+    pub struct ADC;
+    #[allow(clippy::upper_case_acronyms)]
+    pub struct DMA1;
+    #[allow(clippy::upper_case_acronyms)]
+    pub struct DMAMUX;
+    #[allow(clippy::upper_case_acronyms)]
+    pub struct GPIOA;
+    #[allow(clippy::upper_case_acronyms)]
+    pub struct RCC;
     impl COMP {
         pub const PTR: *const super::Bank = &super::BANK;
         pub fn ptr() -> *const super::Bank {
@@ -111,6 +241,38 @@ mod pac {
         }
     }
     impl EXTI {
+        pub const PTR: *const super::Bank = &super::BANK;
+        pub fn ptr() -> *const super::Bank {
+            Self::PTR
+        }
+    }
+    impl ADC {
+        pub const PTR: *const super::Bank = &super::BANK;
+        pub fn ptr() -> *const super::Bank {
+            Self::PTR
+        }
+    }
+    impl DMA1 {
+        pub const PTR: *const super::Bank = &super::BANK;
+        pub fn ptr() -> *const super::Bank {
+            Self::PTR
+        }
+    }
+    impl DMAMUX {
+        pub fn ptr() -> *const Self {
+            &Self
+        }
+        pub fn ccr(&self, _idx: usize) -> &super::Reg {
+            &super::BANK.dmamux_ccr1
+        }
+    }
+    impl GPIOA {
+        pub const PTR: *const super::Bank = &super::BANK;
+        pub fn ptr() -> *const super::Bank {
+            Self::PTR
+        }
+    }
+    impl RCC {
         pub const PTR: *const super::Bank = &super::BANK;
         pub fn ptr() -> *const super::Bank {
             Self::PTR
@@ -368,4 +530,82 @@ fn l431_irq_lifecycle() {
 #[test]
 fn g431_irq_lifecycle() {
     check_irq(Chip::G431);
+}
+
+#[test]
+fn g071_adc_init_enables_advregen_and_programs_sequence_with_ccrdy_handshake() {
+    use rm32::hal::Adc;
+
+    static BUF: dma_buf::DmaBuf<u16, 3> = dma_buf::DmaBuf::new();
+    let _serial = SERIAL.lock().unwrap();
+    BANK.reset();
+
+    let mut adc = adc_generic::GenericAdc::new(
+        g071_adc::G071AdcOps,
+        &BUF,
+        adc_hal::TempCalibration {
+            cal1_val: 1034,
+            cal2_val: 1381,
+            cal1_temp: 30,
+            cal2_temp: 130,
+            cal_vref_mv: 3000,
+        },
+    );
+
+    assert!(adc.init().is_ok());
+
+    let cr_writes: Vec<u32> = writes()
+        .into_iter()
+        .filter_map(|(name, v)| (name == "cr").then_some(v))
+        .collect();
+    // power_up -> calibrate -> enable: every CR write keeps ADVREGEN (1 << 28) set.
+    assert_eq!(
+        cr_writes,
+        vec![1 << 28, (1 << 28) | (1 << 31), (1 << 28) | 1]
+    );
+    // Sequence 4 | (6 << 4) | (12 << 8) | (0xF << 12) = 0xFC64 latched after CCRDY handshake,
+    // and trailing CCRDY cleared.
+    assert_eq!(BANK.chselr1.get(), 0x0000_FC64);
+    assert_eq!(BANK.isr.get() & (1 << 13), 0);
+
+    adc.start_conversion();
+    assert_eq!(BANK.cr.get(), (1 << 28) | (1 << 2) | 1);
+
+    // 3.0 V factory TS_CAL rescaled from 3.3 V VDDA: raw 912 -> 22 C (3.3 V identity on 3300 mV F051).
+    let g0_temp = adc.calc_temperature(912);
+    assert_eq!(g0_temp, rm32::units::DegreesCelsius(22));
+
+    let f0_adc = adc_generic::GenericAdc::post_init(
+        g071_adc::G071AdcOps,
+        &BUF,
+        adc_hal::TempCalibration {
+            cal1_val: 700,
+            cal2_val: 900,
+            cal1_temp: 30,
+            cal2_temp: 110,
+            cal_vref_mv: 3300,
+        },
+    );
+    assert_eq!(
+        f0_adc.calc_temperature(800),
+        rm32::units::DegreesCelsius(70)
+    );
+}
+
+#[test]
+fn g071_adc_enable_rejects_corrupted_chselr_readback() {
+    use adc_hal::AdcPeripheral;
+
+    let _serial = SERIAL.lock().unwrap();
+    BANK.reset();
+    ADC_FAULT.store(1, Ordering::Relaxed);
+
+    g071_adc::G071AdcOps.power_up();
+    assert!(g071_adc::G071AdcOps.calibrate().is_ok());
+    match g071_adc::G071AdcOps.enable() {
+        Err(regs::InitError::Timeout("ADC CHSELR readback")) => {}
+        other => panic!("expected ADC CHSELR readback timeout, got {:?}", other),
+    }
+    // Failed sequence programming must disable the ADC (ADDIS clears ADEN) while keeping ADVREGEN.
+    assert_eq!(BANK.cr.get(), 1 << 28);
 }
