@@ -10,10 +10,11 @@ impl CompOps for L431Comp {
         comp.comp2_csr.read().bits() & (1 << 30) != 0
     }
     fn set_inmsel(&self, phase: u32) {
-        // L431 COMP2 phase values are packed as (INMESEL << 8) | INMSEL.
-        let comp = unsafe { &*COMP::ptr() };
+        // L431 COMP2: phase is packed as (inmesel << 8) | inmsel_3bit.
+        // INMSEL[2:0] at CSR bits 6:4, INMESEL[1:0] at CSR bits 26:25.
         let inmsel = phase & 0x7;
         let inmesel = (phase >> 8) & 0x3;
+        let comp = unsafe { &*COMP::ptr() };
         let v = comp.comp2_csr.read().bits();
         let cleared = v & !(0x7 << 4 | 0x3 << 25);
         comp.comp2_csr
@@ -46,6 +47,7 @@ impl ExtiOps for L431Exti {
         // L4: PR1 at offset 0x14
         exti.pr1.write(|w| unsafe { w.bits(LINE) });
     }
+    #[inline(always)]
     fn pending(&self) -> bool {
         let exti = unsafe { &*EXTI::ptr() };
         exti.pr1.read().bits() & LINE != 0

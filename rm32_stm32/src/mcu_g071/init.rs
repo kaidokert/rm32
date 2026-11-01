@@ -17,6 +17,15 @@ pub fn init(
     let dp = stm32::Peripherals::take().unwrap();
     let _cp = cortex_m::Peripherals::take().unwrap();
     let mut rcc = dp.RCC.freeze(RccConfig::pll());
+    // Enable Flash prefetch buffer — AM32 Mcu/g071/Src/peripherals.c:29
+    // (`FLASH->ACR |= FLASH_ACR_PRFTEN`). At 64 MHz with 2 wait states,
+    // leaving prefetch disabled forces every sequential line fetch and branch
+    // target to pay full Flash wait-state latency. Use read-modify-write so
+    // ACR bit 18 (DBG_SWEN, reset value 1) is preserved and SWD stays active.
+    unsafe {
+        let flash = &*stm32::FLASH::ptr();
+        flash.acr().modify(|r, w| w.bits(r.bits() | (1 << 8))); // PRFTEN
+    }
     let gpioa = dp.GPIOA.split(&mut rcc);
     let _gpiob = dp.GPIOB.split(&mut rcc);
 
@@ -64,8 +73,21 @@ pub fn init(
         tim6.cr1().write(|w| w.cen().set_bit());
     }
 
+    // NVIC priorities — AM32 G071-matched (Mcu/g071/Src/peripherals.c:
+    // COMP 0, COM timer 0, input DMA 1, tenKhzRoutine TIM6 2, EXTI4_15 2).
+    // Cortex-M0+ implements 2 priority bits in the upper bits [7:6] of each
+    // IPR byte; cortex_m's `set_priority` writes the raw byte, so level N is
+    // `N << 6` (CMSIS NVIC_SetPriority shifts internally). Without this, all
+    // IRQs remain at priority 0 and TIM6's 20 kHz control tick blocks BEMF
+    // zero-crossing and commutation interrupts until it returns.
     unsafe {
         use stm32::{Interrupt, NVIC};
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(Interrupt::ADC_COMP, 0 << 6);
+        nvic.set_priority(Interrupt::TIM14, 0 << 6);
+        nvic.set_priority(Interrupt::DMA1_CHANNEL1, 1 << 6);
+        nvic.set_priority(Interrupt::TIM6_DAC_LPTIM1, 2 << 6);
+        nvic.set_priority(Interrupt::EXTI4_15, 2 << 6);
         NVIC::unmask(Interrupt::TIM6_DAC_LPTIM1);
         NVIC::unmask(Interrupt::TIM14);
         NVIC::unmask(Interrupt::ADC_COMP);

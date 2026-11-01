@@ -111,6 +111,9 @@ impl ExtiOps for G431Exti {
             exti!().pr1().write(|w| w.bits(LINE_21 | LINE_22));
         }
     }
+    // Pending / clear cover both comparator lines (the old ack-at-entry
+    // cleared both); the software re-trigger targets the active one.
+    #[inline(always)]
     fn pending(&self) -> bool {
         unsafe { exti!().pr1().read().bits() & (LINE_21 | LINE_22) != 0 }
     }

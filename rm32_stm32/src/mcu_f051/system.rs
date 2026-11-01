@@ -1,14 +1,13 @@
 //! System control (IRQ, watchdog, reset) for STM32F051.
 
-/// Snapshot reset-cause flags and clear them. F0 has POR/PDR (`porrstf`)
-/// instead of BOR, which maps to `BROWNOUT` as the closest portable flag.
+/// Snapshot reset-cause flags and clear them. See `mcu_l431::system` for
+/// rationale. F0 has POR/PDR (`porrstf`) instead of BOR — mapped to
+/// `BROWNOUT` as the closest portable equivalent. No firewall flag.
 pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     use rm32::reset_cause::ResetCause;
-
     let rcc = unsafe { &*crate::pac::RCC::ptr() };
     let csr = rcc.csr.read();
     let mut r = ResetCause::empty();
-
     if csr.lpwrrstf().bit_is_set() {
         r |= ResetCause::LOW_POWER;
     }
@@ -21,6 +20,7 @@ pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     if csr.sftrstf().bit_is_set() {
         r |= ResetCause::SOFTWARE;
     }
+    // F0 has POR/PDR rather than BOR; mapped to BROWNOUT.
     if csr.porrstf().bit_is_set() {
         r |= ResetCause::BROWNOUT;
     }
@@ -30,7 +30,6 @@ pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     if csr.oblrstf().bit_is_set() {
         r |= ResetCause::OPTION_BYTE;
     }
-
     rcc.csr.modify(|_, w| w.rmvf().set_bit());
     r
 }

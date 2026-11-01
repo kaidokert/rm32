@@ -138,6 +138,7 @@ pub fn init_g071() {
         .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 1)) });
 
     gpiob.moder().modify(|_, w| w.moder4().alternate());
+    gpiob.pupdr().modify(|_, w| w.pupdr4().pull_up());
     gpiob.afrl().modify(|_, w| w.afr(4).af1());
 
     dmamux
@@ -147,5 +148,5 @@ pub fn init_g071() {
 
 /// Create a new G071 DshotCapture instance.
 pub fn new_capture() -> DshotCapture {
-    GenericCapture::new(G071Dma, G071Timer { prescaler: 64 / 6 }, G071Pin)
+    GenericCapture::new(G071Dma, G071Timer { prescaler: 1 }, G071Pin)
 }

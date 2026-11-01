@@ -30,11 +30,14 @@ fn COMP() {
 fn DMA1_CH5() {
     let dma = unsafe { &*pac::DMA1::PTR };
     let dma_isr = dma.isr.read().bits();
+    // Clear all CH5 flags unconditionally (CGIF5 = bit 16 clears GIF5/TCIF5/HTIF5/TEIF5).
+    // If TEIF5 ever fires without TCIF5, failing to clear CGIF5 here would re-enter
+    // DMA1_CH5 indefinitely.
+    unsafe {
+        dma.ifcr.write(|w| w.bits(1 << 16));
+    }
     // Channel 5 TC flag = bit 17
     if dma_isr & (1 << 17) != 0 {
-        unsafe {
-            dma.ifcr.write(|w| w.bits(1 << 16));
-        } // CGIF5
         // Disable DMA CH5
         unsafe {
             dma.ccr5.modify(|r, w| w.bits(r.bits() & !1));

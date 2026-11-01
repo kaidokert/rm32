@@ -116,11 +116,17 @@ pub fn init_l431() {
     rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
     rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
+    gpioa.ospeedr.modify(|_, w| w.ospeedr2().bits(0b10)); // High speed (AM32 uses HIGH)
+    gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) }); // Pull-up (idle-high for DShot)
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
-    dma.cselr
-        .modify(|r, w| unsafe { w.bits((r.bits() & !(0xF << 16)) | (7 << 16)) });
+    // C4S=2 (USART1_TX for telemetry), C5S=7 (TIM15_CH1 for DShot capture).
+    dma.cselr.modify(|_, w| w.c4s().bits(2).c5s().bits(7));
 }
 
 pub fn new_capture() -> L431DshotCapture {
-    GenericCapture::new(L431Dma, L431Timer { prescaler: 80 / 6 }, L431Pin)
+    // Default prescaler = 1 (DShot600 at 80 MHz: ~133 ticks/bit, matching AM32
+    // boot state where `ic_timer_prescaler = CPU_FREQUENCY_MHZ / 60`).
+    // Once EXTI detects the frame type, `compute_prescaler` sets the final value,
+    // and `configure_capture` reuses `self.prescaler` after bidirectional DShot TX.
+    GenericCapture::new(L431Dma, L431Timer { prescaler: 1 }, L431Pin)
 }

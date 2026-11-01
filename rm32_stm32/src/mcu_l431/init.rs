@@ -10,20 +10,53 @@ pub fn init(
     bemf_pins: rm32::board::BemfPins,
 ) -> InitResult<super::system::System, super::adc::L431Adc, super::telemetry_uart::L431TelemUart> {
     use stm32l4xx_hal::pac;
-    use stm32l4xx_hal::prelude::*;
 
     let dp = pac::Peripherals::take().unwrap();
     let _cp = cortex_m::Peripherals::take().unwrap();
 
-    // Clock: 80MHz from MSI via PLL
-    let mut flash = dp.FLASH.constrain();
-    let mut rcc = dp.RCC.constrain();
-    let mut pwr = dp.PWR.constrain(&mut rcc.apb1r1);
-    let clocks = rcc
-        .cfgr
-        .sysclk(80_000_000u32.Hz())
-        .freeze(&mut flash.acr, &mut pwr);
-    let _ = clocks;
+    // Clock tree: AM32-matched 80 MHz SYSCLK = HSI16 / 2 * 20 / 2 (M=2, N=20, R=2).
+    // Configure 4 Flash wait states, prefetch, and instruction/data caches before
+    // raising SYSCLK above 16 MHz so high-speed ISR instruction fetches remain
+    // deterministic across code alignments.
+    dp.FLASH.acr.write(|w| unsafe {
+        w.latency()
+            .bits(4)
+            .prften()
+            .set_bit()
+            .icen()
+            .set_bit()
+            .dcen()
+            .set_bit()
+    });
+    while dp.FLASH.acr.read().latency().bits() != 4 {}
+
+    dp.RCC.cr.modify(|_, w| w.hsion().set_bit());
+    while dp.RCC.cr.read().hsirdy().bit_is_clear() {}
+
+    dp.RCC.pllcfgr.write(|w| unsafe {
+        w.pllsrc()
+            .bits(2) // HSI16
+            .pllm()
+            .bits(1) // /2
+            .plln()
+            .bits(20)
+            .pllr()
+            .bits(0) // /2
+            .pllren()
+            .set_bit()
+    });
+
+    dp.RCC.cr.modify(|_, w| w.pllon().set_bit());
+    while dp.RCC.cr.read().pllrdy().bit_is_clear() {}
+
+    dp.RCC.cfgr.modify(|_, w| unsafe { w.sw().bits(0b11) });
+    while dp.RCC.cfgr.read().sws().bits() != 0b11 {}
+
+    // NVIC priority grouping = 3 (4 bits preempt / 0 subpriority on Cortex-M4),
+    // matching AM32's HAL_NVIC_SetPriorityGrouping configuration.
+    unsafe {
+        core::ptr::write_volatile(0xE000_ED0C as *mut u32, 0x05FA_0300);
+    }
 
     let rcc_pac = unsafe { &*pac::RCC::ptr() };
     unsafe {
@@ -45,19 +78,71 @@ pub fn init(
         gpioa.afrh.modify(|r, w| {
             w.bits((r.bits() & !(0xFFF)) | (1 | 1 << 4 | 1 << 8)) // AF1
         });
+        // PA7 = TIM1_CH1N (AF1); MODER stays output-low until armed.
+        gpioa.afrl.modify(|_, w| w.afrl7().bits(1));
+        // PB0 = TIM1_CH2N (AF1), PB1 = TIM1_CH3N (AF1), PB6 = USART1_TX (AF7, pull-up).
+        // Clear PB4's reset NJTRST pull-up so COMP2 INP is unbiased.
+        let gpiob = &*pac::GPIOB::ptr();
+        gpiob
+            .afrl
+            .modify(|_, w| w.afrl0().bits(1).afrl1().bits(1).afrl6().bits(7));
+        gpiob.moder.modify(|_, w| w.moder6().bits(0b10));
+        gpiob
+            .pupdr
+            .modify(|_, w| w.pupdr4().bits(0b00).pupdr6().bits(0b01));
     }
 
-    // TIM1 PWM: 80MHz / (ARR+1) = 24kHz -> ARR = 3332
+    // TIM1 PWM: 80MHz / (ARR+1) = 24kHz -> ARR = 3332, AM32-matched fields:
+    // - CCMR1/CCMR2 = 0x6868 (OC1..OC4 PWM mode 1 with OCxPE preload)
+    // - CCER = 0x1555 (CC1..CC3 complementary + CC4E for OC4REF trigger)
+    // - CCR4 = 0x64 (100)
+    // - BDTR = DTG | BKP | MOE
+    // - CR1  = ARPE | CEN
     unsafe {
         let tim1 = &*pac::TIM1::ptr();
-        tim1.psc.write(|w| w.bits(0));
+        tim1.psc.write(|w| w.psc().bits(0));
         tim1.arr
-            .write(|w| w.bits(super::chip::Chip::TIM1_AUTORELOAD as u32));
-        tim1.ccmr1_output().write(|w| w.bits(0x6868)); // OC1/2 PWM mode 1
-        tim1.ccmr2_output().write(|w| w.bits(0x0068)); // OC3 PWM mode 1
-        tim1.ccer.write(|w| w.bits(0x555)); // CC1-3 + CC1N-3N enable
-        tim1.bdtr.write(|w| w.bits(dead_time as u32 | (1 << 15))); // DT + MOE
-        tim1.cr1.write(|w| w.cen().set_bit());
+            .write(|w| w.arr().bits(super::chip::Chip::TIM1_AUTORELOAD));
+        tim1.ccmr1_output().write(|w| {
+            w.oc1m()
+                .bits(0b110)
+                .oc1pe()
+                .set_bit()
+                .oc2m()
+                .bits(0b110)
+                .oc2pe()
+                .set_bit()
+        });
+        tim1.ccmr2_output().write(|w| {
+            w.oc3m()
+                .bits(0b110)
+                .oc3pe()
+                .set_bit()
+                .oc4m()
+                .bits(0b110)
+                .oc4pe()
+                .set_bit()
+        });
+        tim1.ccer.write(|w| {
+            w.cc1e()
+                .set_bit()
+                .cc1ne()
+                .set_bit()
+                .cc2e()
+                .set_bit()
+                .cc2ne()
+                .set_bit()
+                .cc3e()
+                .set_bit()
+                .cc3ne()
+                .set_bit()
+                .cc4e()
+                .set_bit()
+        });
+        tim1.ccr4.write(|w| w.ccr().bits(0x64));
+        tim1.bdtr
+            .write(|w| w.moe().set_bit().bkp().set_bit().dtg().bits(dead_time));
+        tim1.cr1.write(|w| w.arpe().set_bit().cen().set_bit());
     }
     let pwm = super::pwm::Pwm::new();
     let phase = G0APhaseDriver::new(false); // same pins for L4_N
@@ -98,9 +183,23 @@ pub fn init(
         tim6.cr1.write(|w| w.cen().set_bit());
     }
 
-    // NVIC
+    // NVIC priorities — AM32-matched. STM32L4 implements 4 priority bits in the
+    // upper nibble of each IPR byte (PRIGROUP = 3: 4 preempt bits, 0 subpriority).
+    // `cortex_m::peripheral::NVIC::set_priority` writes the raw byte, so priority
+    // level N must be passed as `N << 4`:
+    //   COMP             0  — BEMF zero-cross, must preempt tenKhzRoutine
+    //   TIM1_UP_TIM16    0  — commutation timer, same urgency as COMP
+    //   DMA1_CH5         1  — DShot/PWM input capture
+    //   EXTI15_10        2  — software-triggered frame processing
+    //   TIM6_DACUNDER    3  — 20 kHz control loop (lowest priority)
     unsafe {
         use pac::{Interrupt, NVIC};
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(Interrupt::COMP, 0 << 4);
+        nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0 << 4);
+        nvic.set_priority(Interrupt::DMA1_CH5, 1 << 4);
+        nvic.set_priority(Interrupt::EXTI15_10, 2 << 4);
+        nvic.set_priority(Interrupt::TIM6_DACUNDER, 3 << 4);
         NVIC::unmask(Interrupt::TIM6_DACUNDER);
         NVIC::unmask(Interrupt::TIM1_UP_TIM16);
         NVIC::unmask(Interrupt::COMP);
