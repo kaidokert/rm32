@@ -1,14 +1,13 @@
 //! System control (IRQ, watchdog, reset) for STM32G431.
 
-/// Snapshot reset-cause flags and clear them. G4's RCC_CSR has no firewall
-/// reset flag, so that portable flag is never set here.
+/// Snapshot reset-cause flags and clear them. See `mcu_l431::system` for
+/// rationale. Unlike L4, G4's RCC_CSR has no firewall flag — the G4 PAC
+/// doesn't expose `firewallrstf` (RM0440 §7.4.27 marks bit 24 reserved).
 pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     use rm32::reset_cause::ResetCause;
-
     let rcc = unsafe { &*crate::pac::RCC::PTR };
     let csr = rcc.csr().read();
     let mut r = ResetCause::empty();
-
     if csr.lpwrrstf().bit_is_set() {
         r |= ResetCause::LOW_POWER;
     }
@@ -30,7 +29,6 @@ pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     if csr.oblrstf().bit_is_set() {
         r |= ResetCause::OPTION_BYTE;
     }
-
     rcc.csr().modify(|_, w| w.rmvf().set_bit());
     r
 }

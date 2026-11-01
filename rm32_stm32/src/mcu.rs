@@ -19,21 +19,19 @@ pub trait ChipConfig {
     const WDG_RELOAD: u16;
 }
 
-// Re-export pac, hal_impl, and Chip from the active MCU directory.
+// Single point where the active MCU module is selected. Everything below
+// this block goes through `active` and stays cfg-free, so new re-exports
+// from MCU submodules don't add another fan-out of cfg lines.
 #[cfg(feature = "stm32f051")]
-pub use crate::mcu_f051::chip::*;
+pub use crate::mcu_f051 as active;
 #[cfg(feature = "stm32g071")]
-pub use crate::mcu_g071::chip::*;
+pub use crate::mcu_g071 as active;
 #[cfg(feature = "stm32g431")]
-pub use crate::mcu_g431::chip::*;
+pub use crate::mcu_g431 as active;
 #[cfg(feature = "stm32l431")]
-pub use crate::mcu_l431::chip::*;
+pub use crate::mcu_l431 as active;
 
-#[cfg(feature = "stm32f051")]
-pub use crate::mcu_f051::system::read_and_clear_reset_cause;
-#[cfg(feature = "stm32g071")]
-pub use crate::mcu_g071::system::read_and_clear_reset_cause;
-#[cfg(feature = "stm32g431")]
-pub use crate::mcu_g431::system::read_and_clear_reset_cause;
-#[cfg(feature = "stm32l431")]
-pub use crate::mcu_l431::system::read_and_clear_reset_cause;
+// pac, hal_impl, Chip (ChipConfig impl), interrupts, etc.
+pub use active::chip::*;
+// Portable reset-cause reader (chip-specific RCC_CSR decode → ResetCause).
+pub use active::system::read_and_clear_reset_cause;

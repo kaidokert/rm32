@@ -60,6 +60,9 @@ impl TimerOps for L431Timer {
         tim.egr.write(|w| unsafe { w.bits(1) });
         tim.cnt.write(|w| unsafe { w.bits(0) });
     }
+    fn set_capture_prescaler(&mut self, prescaler: u8) {
+        self.prescaler = prescaler;
+    }
     fn configure_output(&self, prescaler: u16) {
         let tim = unsafe { &*TIM15::ptr() };
         tim.ccmr1_output().write(|w| unsafe { w.bits(0x60) });
@@ -116,11 +119,17 @@ pub fn init_l431() {
     rcc.ahb1enr.modify(|_, w| w.dma1en().set_bit());
     rcc.ahb2enr.modify(|_, w| w.gpioaen().set_bit());
     gpioa.moder.modify(|_, w| w.moder2().bits(0b10));
+    gpioa.ospeedr.modify(|_, w| w.ospeedr2().bits(0b10)); // High speed (AM32 uses HIGH)
+    gpioa.pupdr.modify(|_, w| unsafe { w.pupdr2().bits(0b01) }); // Pull-up (idle-high for DShot)
     gpioa.afrl.modify(|_, w| w.afrl2().bits(14));
-    dma.cselr
-        .modify(|r, w| unsafe { w.bits((r.bits() & !(0xF << 16)) | (7 << 16)) });
+    // C4S=2 (USART1_TX for telemetry), C5S=7 (TIM15_CH1 for DShot capture).
+    dma.cselr.modify(|_, w| w.c4s().bits(2).c5s().bits(7));
 }
 
 pub fn new_capture() -> L431DshotCapture {
+    // Start at the ~6 MHz detection prescaler (`80 / 6`, matching `CaptureConfig::dshot_detection`).
+    // Once EXTI detects the frame type, `handle_exti_frame` caches the selected capture prescaler
+    // (`0` for DShot600, `1` for DShot300, `3` for DShot150, `79` for Servo) so `configure_capture`
+    // restores it after bidirectional DShot telemetry TX.
     GenericCapture::new(L431Dma, L431Timer { prescaler: 80 / 6 }, L431Pin)
 }

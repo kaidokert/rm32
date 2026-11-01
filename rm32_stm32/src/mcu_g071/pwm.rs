@@ -51,8 +51,45 @@ impl Tim1Pwm {
         let tim = unsafe { &*TIM1::ptr() };
         tim.bdtr()
             .modify(|_, w| unsafe { w.dtg().bits(dead_time).moe().set_bit() });
-        tim.ccer()
-            .modify(|_, w| w.cc1ne().set_bit().cc2ne().set_bit().cc3ne().set_bit());
+        // Complete TIM1 output-compare setup not performed by `stm32g0xx-hal`'s
+        // `bind_pin` (which leaves CCMR1/CCMR2 at 0 = Frozen and only sets
+        // complementary CCxNE bits in CCER, preventing the high-side channels
+        // from switching). Matches AM32 G071 MX_TIM1_Init: PWM mode 1 + OCxPE
+        // on CH1..CH4, ARPE enabled, and CCxE + CCxNE on CH1..CH3.
+        tim.ccmr1_output().write(|w| unsafe { w.bits(0x6868) });
+        tim.ccmr2_output().write(|w| unsafe { w.bits(0x6868) });
+        tim.ccer().write(|w| unsafe { w.bits(0x0555) });
+        tim.cr1()
+            .modify(|r, w| unsafe { w.bits(r.bits() | (1 << 7)) }); // ARPE
+        tim.egr().write(|w| w.ug().set_bit()); // load preloaded ARR/CCR
+
+        // Low-side pins PA7 (CH1N), PB0 (CH2N), PB1 (CH3N): select AF2
+        // (TIM1) in AFRL. The phase driver only flips MODER between output
+        // and alternate per step — without this the "alternate" low side
+        // would route AF0 (SPI1/TIM14) to the gate input. Then park all six
+        // gate pins as push-pull outputs driven low until the first step.
+        // SAFETY: boot-time single-owner GPIOA/GPIOB configuration.
+        unsafe {
+            let gpioa = &*crate::pac::GPIOA::ptr();
+            let gpiob = &*crate::pac::GPIOB::ptr();
+            gpioa
+                .afrl()
+                .modify(|r, w| w.bits((r.bits() & !(0xF << 28)) | (2 << 28)));
+            gpiob
+                .afrl()
+                .modify(|r, w| w.bits((r.bits() & !0xFF) | 2 | (2 << 4)));
+            gpioa.bsrr().write(|w| {
+                w.bits((1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16)))
+            });
+            gpiob.bsrr().write(|w| w.bits((1 << 16) | (1 << 17)));
+            gpioa.moder().modify(|r, w| {
+                let m = (0b11 << 14) | (0b11 << 16) | (0b11 << 18) | (0b11 << 20);
+                w.bits((r.bits() & !m) | (0b01 << 14) | (0b01 << 16) | (0b01 << 18) | (0b01 << 20))
+            });
+            gpiob
+                .moder()
+                .modify(|r, w| w.bits((r.bits() & !0b1111) | 0b0101));
+        }
 
         Self {
             _pwm: pwm,
@@ -61,6 +98,22 @@ impl Tim1Pwm {
             ch3,
         }
     }
+}
+
+/// TIM1 main output enable (BDTR.MOE) state.
+#[inline]
+pub fn moe() -> bool {
+    let tim = unsafe { &*TIM1::ptr() };
+    tim.bdtr().read().moe().bit_is_set()
+}
+
+/// Set/clear TIM1 BDTR.MOE. With MOE = 0 (OSSI = 0) every TIM1 output is
+/// disabled regardless of CCER, so a pin left in alternate mode cannot
+/// switch a gate.
+#[inline]
+pub fn set_moe(on: bool) {
+    let tim = unsafe { &*TIM1::ptr() };
+    tim.bdtr().modify(|_, w| w.moe().bit(on));
 }
 
 impl TimerPwm for Tim1Pwm {

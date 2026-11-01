@@ -84,6 +84,9 @@ impl TimerOps for F051Timer {
         tim.egr.write(|w| w.ug().set_bit());
         tim.cnt.write(|w| unsafe { w.bits(0) });
     }
+    fn set_capture_prescaler(&mut self, prescaler: u8) {
+        self.prescaler = prescaler;
+    }
     fn configure_output(&self, prescaler: u16) {
         let tim = unsafe { &*TIM15::ptr() };
         tim.ccmr1_output().write(|w| unsafe { w.bits(0x60) });

@@ -1,7 +1,7 @@
 //! Portable reset-cause bitflags.
 //!
 //! Each MCU's `read_and_clear_reset_cause()` impl translates its native
-//! RCC reset-flag register into this set, so callers (e.g. the firmware
+//! reset-flag register into this set, so callers (e.g. the firmware
 //! main loop) can print or react to reset reasons without #[cfg]-gated
 //! peripheral access in shared code.
 //!
@@ -11,7 +11,7 @@
 
 /// Set of reset-cause flags reported by an MCU on power-up.
 ///
-/// Mirrors the common bits across STM32 RCC_CSR registers (and analogous
+/// Mirrors the common bits of MCU reset-flag registers (and analogous
 /// registers on other MCU families). Multiple flags can be set at once
 /// (e.g. `software | NRST_pin` is typical for a probe-rs flash sequence).
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]

@@ -158,6 +158,9 @@ pub trait InputCapture {
     /// Set the timer prescaler for bidir DShot output.
     /// Called during protocol detection. DShot600=0, DShot300=1, DShot150=3.
     fn set_output_prescaler(&mut self, prescaler: DshotOutputPrescaler);
+    /// Record the active capture timer prescaler selected by protocol detection
+    /// so `receive_dshot_dma()` restores it after bidirectional DShot TX.
+    fn set_capture_prescaler(&mut self, _prescaler: u16) {}
 }
 
 /// ADC readings (voltage, current, temperature)

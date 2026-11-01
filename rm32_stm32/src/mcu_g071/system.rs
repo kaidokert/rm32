@@ -4,15 +4,14 @@ use rm32::hal::System;
 use stm32g0xx_hal::stm32::IWDG;
 use stm32g0xx_hal::watchdog::{IWDGExt, IndependedWatchdog};
 
-/// Snapshot reset-cause flags and clear them. G0 has no firewall flag; its
-/// power reset flag maps to `BROWNOUT` as the closest portable flag.
+/// Snapshot reset-cause flags and clear them. See `mcu_l431::system` for
+/// rationale. G0 has no firewall flag; its "brownout" bit is named
+/// `pwrrstf` (power reset flag — RM0444 §5.4.30).
 pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     use rm32::reset_cause::ResetCause;
-
     let rcc = unsafe { &*stm32g0xx_hal::stm32::RCC::ptr() };
     let csr = rcc.csr().read();
     let mut r = ResetCause::empty();
-
     if csr.lpwrrstf().bit_is_set() {
         r |= ResetCause::LOW_POWER;
     }
@@ -34,7 +33,6 @@ pub fn read_and_clear_reset_cause() -> rm32::reset_cause::ResetCause {
     if csr.oblrstf().bit_is_set() {
         r |= ResetCause::OPTION_BYTE;
     }
-
     rcc.csr().modify(|_, w| w.rmvf().set_bit());
     r
 }
@@ -70,12 +68,20 @@ impl System for SystemControl {
 
     fn start_watchdog(&mut self, prescaler: u8, reload: u16) {
         let iwdg = unsafe { &*stm32g0xx_hal::stm32::IWDG::PTR };
+        // Start FIRST (KR=0xCCCC also starts LSI): with the IWDG stopped,
+        // SR.PVU/RVU never clear after the PR/RLR writes, so unlocking and
+        // polling SR before starting the watchdog hangs boot indefinitely.
+        // Bounded wait ensures a wedged IWDG cannot hang firmware init.
         unsafe {
-            iwdg.kr().write(|w| w.bits(0x5555)); // unlock
+            iwdg.kr().write(|w| w.bits(0xCCCC)); // start (and LSI)
+            iwdg.kr().write(|w| w.bits(0x5555)); // unlock PR/RLR
             iwdg.pr().write(|w| w.pr().bits(prescaler));
             iwdg.rlr().write(|w| w.rl().bits(reload));
-            while iwdg.sr().read().bits() & 0x03 != 0 {}
-            iwdg.kr().write(|w| w.bits(0xCCCC)); // start
+            let _ = crate::regs::wait_for(
+                || iwdg.sr().read().bits() & 0x03 == 0,
+                1_000_000,
+                "IWDG update",
+            );
             iwdg.kr().write(|w| w.bits(0xAAAA)); // reload
         }
     }

@@ -47,6 +47,7 @@ impl ExtiOps for G071Exti {
         exti.rpr1().write(|w| unsafe { w.bits(LINE) });
         exti.fpr1().write(|w| unsafe { w.bits(LINE) });
     }
+    #[inline(always)]
     fn pending(&self) -> bool {
         let exti = unsafe { &*EXTI::ptr() };
         (exti.rpr1().read().bits() | exti.fpr1().read().bits()) & LINE != 0

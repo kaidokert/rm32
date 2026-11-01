@@ -9,8 +9,10 @@
 /// needs no division on any core. AM32's `in_min > in_max` swap branch is
 /// unreachable (passing both clamps implies `in_min < x < in_max`), so a
 /// reversed input range returns `out_max` for `x >= in_max`, else `out_min`.
-/// Kept for AM32 parity; callers wanting a falling line reverse the *output*
-/// range instead.
+/// Callers wanting a falling line reverse the *output* range instead.
+///
+/// TODO(AM32 flaw, public #105): the dead swap branch means AM32 never maps a
+/// reversed input range as a line. Kept for parity; no AM32 call relies on it.
 pub fn map(x: i32, in_min: i32, in_max: i32, out_min: i32, out_max: i32) -> i32 {
     let (mut in_min, mut in_max, mut out_min, mut out_max) = (in_min, in_max, out_min, out_max);
     loop {
@@ -72,9 +74,9 @@ pub fn get_crc8(buf: &[u8]) -> u8 {
 /// reads, so the counter may wrap any number of times as long as consecutive
 /// reads are less than one counter period apart.
 ///
-/// AM32 compares `(uint16_t)micros`, so a request of 65536 us or more in C
-/// waits `micros % 65536`. This waits the full `u32` microsecond duration;
-/// every AM32 and rm32 caller passes less than 65536.
+/// TODO(AM32 flaw, public #105): AM32 compares `(uint16_t)micros`, so a
+/// request of 65536 us or more waits `micros % 65536`. This waits the full
+/// time; every AM32 and rm32 caller passes less than 65536.
 pub fn delay_micros_on(us: u32, counts_per_us: u32, mask: u32, mut read_down: impl FnMut() -> u32) {
     let mut remaining = (us as u64) * (counts_per_us as u64);
     let mut prev = read_down();

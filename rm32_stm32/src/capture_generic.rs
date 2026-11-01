@@ -82,4 +82,7 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, 
     fn set_output_prescaler(&mut self, prescaler: DshotOutputPrescaler) {
         self.output_prescaler = prescaler;
     }
+    fn set_capture_prescaler(&mut self, prescaler: u16) {
+        self.timer.set_capture_prescaler(prescaler as u8);
+    }
 }

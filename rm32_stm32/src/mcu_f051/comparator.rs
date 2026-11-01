@@ -39,6 +39,7 @@ impl ExtiOps for F051Exti {
         exti.imr.modify(|r, w| unsafe { w.bits(r.bits() & !LINE) });
         exti.pr.write(|w| unsafe { w.bits(LINE) });
     }
+    #[inline(always)]
     fn pending(&self) -> bool {
         let exti = unsafe { &*EXTI::ptr() };
         exti.pr.read().bits() & LINE != 0
