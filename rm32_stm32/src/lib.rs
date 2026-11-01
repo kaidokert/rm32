@@ -24,6 +24,7 @@ pub mod capture_generic;
 pub mod capture_hal;
 pub mod comp_hal;
 pub mod comparator;
+pub mod delay;
 pub mod dma_buf;
 pub mod emergency;
 pub mod flash;

@@ -170,11 +170,7 @@ pub trait Timing: Platform + Sized {
 
     const FILTER_SLOW_INTERVAL: u32 = us_to_ticks::<Self>(250);
     const FILTER_FAST_INTERVAL: u32 = us_to_ticks::<Self>(25);
-    const FILTER_MAP_LO_INTERVAL: u32 = us_to_ticks::<Self>(50);
-    const FILTER_MAP_HI_INTERVAL: u32 = us_to_ticks::<Self>(250);
 
-    const VARIABLE_PWM1_LO: u32 = us_to_ticks::<Self>(48);
-    const VARIABLE_PWM1_HI: u32 = us_to_ticks::<Self>(100);
     const VARIABLE_PWM2_LO: u32 = us_to_ticks::<Self>(50);
     const VARIABLE_PWM2_HI: u32 = us_to_ticks::<Self>(125);
 

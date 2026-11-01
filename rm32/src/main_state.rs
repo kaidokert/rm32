@@ -17,17 +17,21 @@ use crate::shared_state::SharedState;
 
 const DESYNC_SETTLED_CHECKS: u8 = 3;
 
+/// Commutation interval above which a bidirectional input may reverse:
+/// AM32 `loadEEpromSettings` (main.c:818), in its 2 MHz ticks, converted to
+/// platform ticks. AM32's initial 1500 (main.c:388) is always overwritten.
+pub(crate) fn reverse_speed_threshold<P: Timing>(motor_kv: u16) -> u16 {
+    let am32 = crate::functions::map(motor_kv as i32, 300, 3000, 1000, 500) as u32;
+    crate::platform::am32_ticks_to::<P>(am32) as u16
+}
+
 /// Compute variable PWM auto-reload value for mode 1 (interval-scaled).
 pub(crate) fn variable_pwm_mode1<P: Timing>(commutation_interval: u32, timer1_max_arr: u16) -> u16 {
     let half = timer1_max_arr as i32 / 2;
     let full = timer1_max_arr as i32;
-    let result = crate::functions::map(
-        commutation_interval as i32,
-        P::VARIABLE_PWM1_LO as i32,
-        P::VARIABLE_PWM1_HI as i32,
-        half,
-        full,
-    );
+    // AM32 main.c:2362, interval range in its 2 MHz ticks.
+    let interval = crate::platform::ticks_to_am32::<P>(commutation_interval);
+    let result = crate::functions::map(interval.min(i32::MAX as u32) as i32, 96, 200, half, full);
     result.clamp(half, full) as u16
 }
 
@@ -124,6 +128,8 @@ pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
     pub(crate) cpu_mhz: u8,
     pub cell_count: u8,
     pub(crate) motor_kv: u16,
+    /// Bidirectional reversal gate, platform ticks (AM32 main.c:818).
+    pub(crate) reverse_speed_threshold: u16,
     pub(crate) minimum_duty: u16,
     pub(crate) target_min_bemf_counts: u8,
     pub(crate) low_cell_volt_cutoff: u16,
@@ -188,6 +194,7 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             cpu_mhz: chip.cpu_mhz,
             cell_count: 0,
             motor_kv: 2000,
+            reverse_speed_threshold: reverse_speed_threshold::<P>(2000),
             minimum_duty: 0,
             target_min_bemf_counts: board.min_bemf_counts,
             low_cell_volt_cutoff: 330,
@@ -265,6 +272,12 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
     /// Set motor_kv.
     pub fn set_motor_kv(&mut self, v: u16) {
         self.motor_kv = v;
+        self.reverse_speed_threshold = reverse_speed_threshold::<P>(v);
+    }
+
+    /// Bidirectional reversal gate in platform ticks.
+    pub fn reverse_speed_threshold(&self) -> u16 {
+        self.reverse_speed_threshold
     }
 
     /// Read desync_check flag.
@@ -288,7 +301,7 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             motor_cfg.current_ki,
             motor_cfg.current_kd,
         );
-        self.motor_kv = motor_cfg.motor_kv;
+        self.set_motor_kv(motor_cfg.motor_kv);
         self.minimum_duty = motor_cfg.minimum_duty;
         self.low_cell_volt_cutoff = motor_cfg.low_cell_volt_cutoff;
         self.timer1_max_arr = motor_cfg.timer1_max_arr;
@@ -606,13 +619,9 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
         } else if shared.commutation_interval() < P::FILTER_FAST_INTERVAL {
             2
         } else {
-            crate::functions::map(
-                self.timing.average_interval as i32,
-                P::FILTER_MAP_LO_INTERVAL as i32,
-                P::FILTER_MAP_HI_INTERVAL as i32,
-                3,
-                12,
-            ) as u8
+            // AM32 main.c:2634, interval range in its 2 MHz ticks.
+            let avg = crate::platform::ticks_to_am32::<P>(self.timing.average_interval);
+            crate::functions::map(avg.min(i32::MAX as u32) as i32, 100, 500, 3, 12) as u8
         };
         shared.set_filter_level(filter);
 
@@ -713,7 +722,11 @@ mod tests {
 
     #[test]
     fn duty_ceiling_matches_am32_rpm_limit_shape() {
-        assert_eq!(duty_ceiling(1446, 2220, 14, 25, 141), 992);
+        // main.c:2611-2619: k_erpm = 600000 / e_com_time / 10 = 41,
+        // levels kv/100/(32/poles) = 11 and kv/12/(32/poles) = 92.
+        let am32 = crate::functions::am32_c::map(41, 11, 92, 400, 2000);
+        assert_eq!(am32, 1000);
+        assert_eq!(duty_ceiling(1446, 2220, 14, 25, 141) as i64, am32);
         assert_eq!(duty_ceiling(600, 2220, 14, 25, 141), 2000);
     }
 
