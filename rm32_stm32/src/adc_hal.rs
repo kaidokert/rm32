@@ -43,6 +43,10 @@ pub struct TempCalibration {
     pub cal2_val: u16,
     pub cal1_temp: i32,
     pub cal2_temp: i32,
+    /// Supply the factory TS_CAL points were measured at (per-family:
+    /// L4/G0/G4 3000 mV, F0 3300 mV). Raw readings taken at VDDA must
+    /// be rescaled into this frame before interpolating.
+    pub cal_vref_mv: i32,
 }
 
 impl TempCalibration {
@@ -51,7 +55,13 @@ impl TempCalibration {
     /// # Safety
     /// `cal1_addr` and `cal2_addr` must point to valid, aligned, read-only
     /// factory calibration u16 values in ROM (per STM32 datasheet).
-    pub unsafe fn from_rom(cal1_addr: u32, cal2_addr: u32, cal1_temp: i32, cal2_temp: i32) -> Self {
+    pub unsafe fn from_rom(
+        cal1_addr: u32,
+        cal2_addr: u32,
+        cal1_temp: i32,
+        cal2_temp: i32,
+        cal_vref_mv: i32,
+    ) -> Self {
         // SAFETY: Caller guarantees cal1_addr and cal2_addr point to valid,
         // aligned, read-only factory calibration data in ROM (system memory).
         // These addresses are fixed per STM32 datasheet and always readable.
@@ -60,6 +70,7 @@ impl TempCalibration {
             cal2_val: *(cal2_addr as *const u16),
             cal1_temp,
             cal2_temp,
+            cal_vref_mv,
         }
     }
 }
@@ -71,14 +82,15 @@ macro_rules! define_adc_boilerplate {
         ops: $ops:ident,
         type_name: $type_name:ident,
         cal1: $cal1:expr, cal2: $cal2:expr,
-        cal1_temp: $ct1:expr, cal2_temp: $ct2:expr $(,)?
+        cal1_temp: $ct1:expr, cal2_temp: $ct2:expr,
+        cal_vref_mv: $cv:expr $(,)?
     ) => {
         static ADC_DMA_BUF: $crate::dma_buf::DmaBuf<u16, 3> = $crate::dma_buf::DmaBuf::new();
 
         fn temp_cal() -> $crate::adc_hal::TempCalibration {
-            let (a1, a2, t1, t2) = ($cal1, $cal2, $ct1, $ct2);
+            let (a1, a2, t1, t2, cv) = ($cal1, $cal2, $ct1, $ct2, $cv);
             // SAFETY: ROM calibration addresses are const per STM32 datasheet.
-            unsafe { $crate::adc_hal::TempCalibration::from_rom(a1, a2, t1, t2) }
+            unsafe { $crate::adc_hal::TempCalibration::from_rom(a1, a2, t1, t2, cv) }
         }
 
         pub type $type_name = $crate::adc_generic::GenericAdc<$ops>;

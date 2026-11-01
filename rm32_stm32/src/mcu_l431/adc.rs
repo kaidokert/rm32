@@ -9,6 +9,7 @@ crate::define_adc_boilerplate!(
     type_name: L431Adc,
     cal1: 0x1FFF_75A8, cal2: 0x1FFF_75CA,
     cal1_temp: 30, cal2_temp: 130,
+    cal_vref_mv: 3000,
 );
 
 pub struct L431AdcOps;

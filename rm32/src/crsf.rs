@@ -378,4 +378,31 @@ mod tests {
             other => panic!("expected Channels, got {:?}", other),
         }
     }
+
+    /// A channels frame sets throttle, feeds the timeout, and marks input.
+    #[test]
+    fn dispatch_byte_sets_throttle() {
+        let shared = crate::shared_state::SharedState::new::<crate::platform::TestPlatform>();
+        shared.set_signal_timeout(77);
+        let mut payload = [0u8; 22];
+        for bit in 0..11u32 {
+            let pos = 22 + bit;
+            payload[(pos / 8) as usize] |= (((1000u32 >> bit) & 1) as u8) << (pos % 8);
+        }
+        let mut frame = [0u8; 26];
+        frame[0] = CRSF_SYNC;
+        frame[1] = 24;
+        frame[2] = CRSF_FRAMETYPE_RC_CHANNELS;
+        frame[3..25].copy_from_slice(&payload);
+        frame[25] = crc8_dvb_s2(&frame[2..25]);
+        let mut parser = CrsfParser::new();
+        for &b in &frame[..25] {
+            parser.dispatch_byte(b, &shared);
+        }
+        assert!(!shared.input_set());
+        parser.dispatch_byte(frame[25], &shared);
+        assert_eq!(shared.newinput(), CrsfParser::channel_to_throttle(1000));
+        assert_eq!(shared.signal_timeout(), 0);
+        assert!(shared.input_set());
+    }
 }

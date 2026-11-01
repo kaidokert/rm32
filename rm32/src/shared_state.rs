@@ -58,7 +58,10 @@ pub struct SharedState {
 
     // Telemetry (main computes, ISR reads for speed PID)
     e_com_time: AtomicU32, // stored as u32, interpreted as i32
-    gate_avg: AtomicU32,   // COMP acceptance-gate average, latched by control tick
+    // core (not portable_atomic): plain load/store exist on every target,
+    // and portable_atomic wraps even a relaxed M0 load in PRIMASK -- a
+    // critical section on the priority-0 COMP path.
+    gate_avg: core::sync::atomic::AtomicU32,
 
     // Stall protection (main computes, ISR applies to duty)
     stall_protection_adjust: AtomicU16,
@@ -120,7 +123,7 @@ impl SharedState {
             signal_timeout: AtomicU32::new(0),
             zero_input_count: AtomicU16::new(0),
             e_com_time: AtomicU32::new(0),
-            gate_avg: AtomicU32::new(0),
+            gate_avg: core::sync::atomic::AtomicU32::new(0),
             interval_timer_count: AtomicU32::new(0),
             stall_protection_adjust: AtomicU16::new(0),
             current_limit_adjust: AtomicU16::new(2000),
@@ -430,13 +433,14 @@ impl SharedState {
         self.e_com_time.store(v as u32, REL);
     }
 
-    /// See `IsrTiming::gate_avg`. Relaxed: single word, no ordering dependency
-    /// with other fields.
+    /// See `IsrTiming::gate_avg`. Relaxed: one word, no ordering with
+    /// other fields.
     pub fn gate_avg(&self) -> u32 {
-        self.gate_avg.load(Ordering::Relaxed)
+        self.gate_avg.load(core::sync::atomic::Ordering::Relaxed)
     }
     pub fn set_gate_avg(&self, v: u32) {
-        self.gate_avg.store(v, Ordering::Relaxed);
+        self.gate_avg
+            .store(v, core::sync::atomic::Ordering::Relaxed);
     }
 
     // --- U16 accessors ---
@@ -1027,5 +1031,21 @@ mod tests {
         assert!(shared.tone_active());
         shared.set_tone_active(false);
         assert!(!shared.tone_active());
+    }
+
+    #[test]
+    fn gate_avg_roundtrips_via_core_atomic() {
+        use crate::shared_comm::IsrTiming;
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        assert_eq!(shared.gate_avg(), 0);
+        assert_eq!(IsrTiming::gate_avg(&shared), 0);
+
+        shared.set_gate_avg(1234);
+        assert_eq!(shared.gate_avg(), 1234);
+        assert_eq!(IsrTiming::gate_avg(&shared), 1234);
+
+        IsrTiming::set_gate_avg(&shared, 5678);
+        assert_eq!(shared.gate_avg(), 5678);
+        assert_eq!(IsrTiming::gate_avg(&shared), 5678);
     }
 }
