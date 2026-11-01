@@ -1787,15 +1787,17 @@ mod tests {
         );
         shared_split.clear_isr_action(IsrAction::AllOff);
 
-        // Unlatched gate_avg == 0 must keep the half-average gate closed.
+        // Unlatched gate_avg == 0 must clear pending without re-pending (avoiding
+        // priority-0 livelock while keeping the half-average gate closed).
         let shared_zero_gate = TestShared::new();
         shared_zero_gate.gate_avg.set(0);
-        let mut comp = GateSensor::new(true, &[false]);
+        let mut comp = GateSensor::new(true, &[]);
         assert_eq!(
             isr_logic::on_bemf_irq(&shared_zero_gate, &mut comp, &GateTimer(50), true, || {}),
-            isr_logic::BemfIrq::Camp,
-            "unlatched gate_avg == 0 must not open the half-average gate"
+            isr_logic::BemfIrq::Noise,
+            "unlatched gate_avg == 0 must clear pending without opening or camping"
         );
+        assert_eq!(&comp.log[..comp.n_log], b"c");
     }
 
     #[test]

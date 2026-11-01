@@ -478,7 +478,11 @@ where
     }
     entered();
     let gate_avg = shared.gate_avg();
-    if gate_avg > 0 && interval.count() > gate_avg >> 1 {
+    if gate_avg == 0 {
+        sensor.clear_pending();
+        return BemfIrq::Noise;
+    }
+    if interval.count() > gate_avg >> 1 {
         sensor.clear_pending();
         BemfIrq::Open
     } else if sensor.level() == rising {
