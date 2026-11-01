@@ -24,6 +24,8 @@ pub trait TimerOps {
     fn reset(&self);
     /// Configure for input capture: CCMR1=IC, both edges, prescaler, ARR=0xFFFF.
     fn configure_capture(&self, prescaler: u8);
+    /// Update the cached capture prescaler restored by `configure_capture`.
+    fn set_capture_prescaler(&mut self, prescaler: u8);
     /// Configure for PWM output: CCMR1=PWM1, output enable.
     /// `prescaler`: timer clock divider (0 = no division).
     /// The backend selects the MCU-specific DShot output ARR.

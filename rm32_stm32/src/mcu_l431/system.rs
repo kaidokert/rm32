@@ -68,7 +68,11 @@ impl rm32::hal::System for System {
         // unless LSI is up. Enable LSI explicitly first.
         let rcc = unsafe { &*crate::pac::RCC::PTR };
         rcc.csr.modify(|_, w| w.lsion().set_bit());
-        while rcc.csr.read().lsirdy().bit_is_clear() {}
+        let _ = crate::regs::wait_for(
+            || rcc.csr.read().lsirdy().bit_is_set(),
+            1_000_000,
+            "LSI ready",
+        );
 
         let iwdg = unsafe { &*crate::pac::IWDG::PTR };
         unsafe {
@@ -78,7 +82,11 @@ impl rm32::hal::System for System {
             iwdg.kr.write(|w| w.bits(0x5555));
             iwdg.pr.write(|w| w.bits(prescaler as u32));
             iwdg.rlr.write(|w| w.bits(reload as u32));
-            while iwdg.sr.read().bits() & 0x03 != 0 {}
+            let _ = crate::regs::wait_for(
+                || iwdg.sr.read().bits() & 0x03 == 0,
+                1_000_000,
+                "IWDG update",
+            );
             iwdg.kr.write(|w| w.bits(0xAAAA));
         }
     }

@@ -131,6 +131,9 @@ impl InputCapture for Input {
     fn set_output_prescaler(&mut self, _: DshotOutputPrescaler) {
         assert!(interrupt::masked());
     }
+    fn set_capture_prescaler(&mut self, _: u16) {
+        assert!(interrupt::masked());
+    }
 }
 struct Pwm;
 impl bridge::TimerPwm for Pwm {
@@ -302,7 +305,14 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     shared.set_tim1_arr(1777);
     command(1);
     take_events();
+    let entries = interrupt::entries();
     isr_handlers::handle_tim6();
+    assert_eq!(
+        interrupt::entries(),
+        entries + 2,
+        "handle_tim6 must open a preemption window between ten_khz_tick and tone::step"
+    );
+    assert!(!interrupt::masked());
     let start = take_events();
     assert!(
         start.windows(4).any(|w| w

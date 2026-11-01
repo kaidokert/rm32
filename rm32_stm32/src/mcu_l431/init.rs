@@ -15,9 +15,17 @@ pub fn init(
     let _cp = cortex_m::Peripherals::take().unwrap();
 
     // Clock tree: AM32-matched 80 MHz SYSCLK = HSI16 / 2 * 20 / 2 (M=2, N=20, R=2).
-    // Configure 4 Flash wait states, prefetch, and instruction/data caches before
-    // raising SYSCLK above 16 MHz so high-speed ISR instruction fetches remain
-    // deterministic across code alignments.
+    // Ensure PWR regulator is in Range 1 (VOS = 0b01, required for up to 80 MHz per
+    // RM0394 §5.1.8) and configure 4 Flash wait states, prefetch, and instruction/data
+    // caches before raising SYSCLK above 16 MHz.
+    dp.RCC.apb1enr1.modify(|_, w| w.pwren().set_bit());
+    dp.PWR.cr1.modify(|_, w| unsafe { w.vos().bits(0b01) });
+    let _ = crate::regs::wait_for(
+        || dp.PWR.sr2.read().vosf().bit_is_clear(),
+        1_000_000,
+        "PWR VOS1",
+    );
+
     dp.FLASH.acr.write(|w| unsafe {
         w.latency()
             .bits(4)
@@ -28,11 +36,21 @@ pub fn init(
             .dcen()
             .set_bit()
     });
-    while dp.FLASH.acr.read().latency().bits() != 4 {}
+    let _ = crate::regs::wait_for(
+        || dp.FLASH.acr.read().latency().bits() == 4,
+        1_000_000,
+        "FLASH latency",
+    );
 
     dp.RCC.cr.modify(|_, w| w.hsion().set_bit());
-    while dp.RCC.cr.read().hsirdy().bit_is_clear() {}
+    let _ = crate::regs::wait_for(
+        || dp.RCC.cr.read().hsirdy().bit_is_set(),
+        1_000_000,
+        "HSI16 ready",
+    );
 
+    // RM0394 §6.4.4: STM32L4 RCC_PLLCFGR has no PLLRGE field (bits [3:2] are reserved);
+    // VCO input frequency is HSI16 / PLLM = 16 MHz / 2 = 8 MHz (within L4's 4–16 MHz spec).
     dp.RCC.pllcfgr.write(|w| unsafe {
         w.pllsrc()
             .bits(2) // HSI16
@@ -47,10 +65,20 @@ pub fn init(
     });
 
     dp.RCC.cr.modify(|_, w| w.pllon().set_bit());
-    while dp.RCC.cr.read().pllrdy().bit_is_clear() {}
-
-    dp.RCC.cfgr.modify(|_, w| unsafe { w.sw().bits(0b11) });
-    while dp.RCC.cfgr.read().sws().bits() != 0b11 {}
+    if crate::regs::wait_for(
+        || dp.RCC.cr.read().pllrdy().bit_is_set(),
+        1_000_000,
+        "PLL ready",
+    )
+    .is_ok()
+    {
+        dp.RCC.cfgr.modify(|_, w| unsafe { w.sw().bits(0b11) });
+        let _ = crate::regs::wait_for(
+            || dp.RCC.cfgr.read().sws().bits() == 0b11,
+            1_000_000,
+            "SYSCLK PLL switch",
+        );
+    }
 
     // NVIC priority grouping = 3 (4 bits preempt / 0 subpriority on Cortex-M4),
     // matching AM32's HAL_NVIC_SetPriorityGrouping configuration.
@@ -67,26 +95,35 @@ pub fn init(
         // Enable TIM1 (APB2ENR bit 11)
         rcc_pac.apb2enr.modify(|_, w| w.tim1en().set_bit());
 
-        // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2)
+        // PA8/9/10 as AF1 (TIM1_CH1/2/3 on L4 = AF1, not AF2);
+        // PA7 = TIM1_CH1N (AF1), parked output-low until the first commutation step.
         let gpioa = &*pac::GPIOA::ptr();
-        gpioa.moder.modify(|r, w| {
-            w.bits(
-                (r.bits() & !(0b11 << 16 | 0b11 << 18 | 0b11 << 20))
-                    | (0b10 << 16 | 0b10 << 18 | 0b10 << 20),
-            )
-        });
+        gpioa.bsrr.write(|w| w.bits(1 << (7 + 16)));
+        gpioa.afrl.modify(|_, w| w.afrl7().bits(1));
         gpioa.afrh.modify(|r, w| {
             w.bits((r.bits() & !(0xFFF)) | (1 | 1 << 4 | 1 << 8)) // AF1
         });
-        // PA7 = TIM1_CH1N (AF1); MODER stays output-low until armed.
-        gpioa.afrl.modify(|_, w| w.afrl7().bits(1));
-        // PB0 = TIM1_CH2N (AF1), PB1 = TIM1_CH3N (AF1), PB6 = USART1_TX (AF7, pull-up).
-        // Clear PB4's reset NJTRST pull-up so COMP2 INP is unbiased.
+        gpioa.moder.modify(|r, w| {
+            w.bits(
+                (r.bits() & !(0b11 << 14 | 0b11 << 16 | 0b11 << 18 | 0b11 << 20))
+                    | (0b01 << 14 | 0b10 << 16 | 0b10 << 18 | 0b10 << 20),
+            )
+        });
+        // PB0 = TIM1_CH2N (AF1), PB1 = TIM1_CH3N (AF1), parked output-low until armed;
+        // PB6 = USART1_TX (AF7, pull-up). Clear PB4's reset NJTRST pull-up so COMP2 INP is unbiased.
         let gpiob = &*pac::GPIOB::ptr();
+        gpiob.bsrr.write(|w| w.bits((1 << 16) | (1 << 17)));
         gpiob
             .afrl
             .modify(|_, w| w.afrl0().bits(1).afrl1().bits(1).afrl6().bits(7));
-        gpiob.moder.modify(|_, w| w.moder6().bits(0b10));
+        gpiob.moder.modify(|_, w| {
+            w.moder0()
+                .bits(0b01)
+                .moder1()
+                .bits(0b01)
+                .moder6()
+                .bits(0b10)
+        });
         gpiob
             .pupdr
             .modify(|_, w| w.pupdr4().bits(0b00).pupdr6().bits(0b01));

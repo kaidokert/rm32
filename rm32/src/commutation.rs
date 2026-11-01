@@ -76,8 +76,9 @@ impl Commutation {
         self.step
     }
 
-    /// Set current step.
+    /// Set current step (clamped to valid six-step sector `1..=6`).
     pub fn set_step(&mut self, v: u8) {
+        let v = v.clamp(1, 6);
         self.step = v;
         self.rising = if self.forward {
             !v.is_multiple_of(2)
@@ -239,5 +240,24 @@ mod tests {
             let expected = crate::platform::six_intervals_to_us::<TestPlatform>(expected_sum);
             assert_eq!(got, expected, "idx={idx}, step={}", c.step());
         }
+
+        // Out-of-range set_step inputs clamp to 1..=6 so slots 6..8 are never touched.
+        c.set_step(0);
+        assert_eq!(c.step(), 1);
+        ref_slots[0] = 500;
+        let expected_sum: u32 = ref_slots.iter().map(|&v| v as u32).sum();
+        assert_eq!(
+            c.record_interval::<TestPlatform>(500),
+            crate::platform::six_intervals_to_us::<TestPlatform>(expected_sum)
+        );
+
+        c.set_step(7);
+        assert_eq!(c.step(), 6);
+        ref_slots[5] = 700;
+        let expected_sum: u32 = ref_slots.iter().map(|&v| v as u32).sum();
+        assert_eq!(
+            c.record_interval::<TestPlatform>(700),
+            crate::platform::six_intervals_to_us::<TestPlatform>(expected_sum)
+        );
     }
 }

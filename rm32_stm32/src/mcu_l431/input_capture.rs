@@ -60,6 +60,9 @@ impl TimerOps for L431Timer {
         tim.egr.write(|w| unsafe { w.bits(1) });
         tim.cnt.write(|w| unsafe { w.bits(0) });
     }
+    fn set_capture_prescaler(&mut self, prescaler: u8) {
+        self.prescaler = prescaler;
+    }
     fn configure_output(&self, prescaler: u16) {
         let tim = unsafe { &*TIM15::ptr() };
         tim.ccmr1_output().write(|w| unsafe { w.bits(0x60) });
@@ -124,9 +127,9 @@ pub fn init_l431() {
 }
 
 pub fn new_capture() -> L431DshotCapture {
-    // Default prescaler = 1 (DShot600 at 80 MHz: ~133 ticks/bit, matching AM32
-    // boot state where `ic_timer_prescaler = CPU_FREQUENCY_MHZ / 60`).
-    // Once EXTI detects the frame type, `compute_prescaler` sets the final value,
-    // and `configure_capture` reuses `self.prescaler` after bidirectional DShot TX.
-    GenericCapture::new(L431Dma, L431Timer { prescaler: 1 }, L431Pin)
+    // Start at the ~6 MHz detection prescaler (`80 / 6`, matching `CaptureConfig::dshot_detection`).
+    // Once EXTI detects the frame type, `handle_exti_frame` caches the selected capture prescaler
+    // (`0` for DShot600, `1` for DShot300, `3` for DShot150, `79` for Servo) so `configure_capture`
+    // restores it after bidirectional DShot telemetry TX.
+    GenericCapture::new(L431Dma, L431Timer { prescaler: 80 / 6 }, L431Pin)
 }

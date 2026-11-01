@@ -68,6 +68,9 @@ impl TimerOps for G431Timer {
             tim.cnt().write(|w| w.cnt().bits(0));
         }
     }
+    fn set_capture_prescaler(&mut self, prescaler: u8) {
+        self.prescaler = prescaler;
+    }
     fn configure_output(&self, prescaler: u16) {
         let tim = unsafe { &*pac::TIM15::PTR };
         unsafe {
