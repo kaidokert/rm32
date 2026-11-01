@@ -106,6 +106,14 @@ pub trait IsrTiming {
     fn set_commutation_interval(&self, v: u32);
     fn e_com_time(&self) -> i32;
     fn set_e_com_time(&self, _v: i32) {}
+    /// COMP acceptance-gate average (interval-timer ticks), latched by the
+    /// control tick at 20 kHz and read by the COMP ISR (matching AM32's
+    /// slow-loop `average_interval` read in `COMP_IRQHandler`).
+    /// 0 = not latched yet.
+    fn gate_avg(&self) -> u32 {
+        0
+    }
+    fn set_gate_avg(&self, _v: u32) {}
     fn interval_timer_count(&self) -> u32 {
         0
     }

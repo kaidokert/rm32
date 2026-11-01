@@ -29,6 +29,8 @@ mod bridge;
 mod isr;
 #[path = "../../rm32_stm32/src/isr_handlers.rs"]
 mod isr_handlers;
+#[path = "../../rm32_stm32/src/timer.rs"]
+mod timer;
 
 // Model single-core interrupt exclusion, including nested critical sections.
 pub mod interrupt {
@@ -85,6 +87,8 @@ mod platform {
     }
 }
 mod mcu {
+    use std::sync::Mutex as HostMutex;
+
     pub type TargetIsrHal = super::isr::IsrHal<
         super::Pwm,
         super::Input,
@@ -93,12 +97,139 @@ mod mcu {
         super::Com,
         super::Phase,
     >;
-}
-mod timer {
-    pub fn take_commutation_interrupt() -> bool {
-        false
+
+    pub trait ChipConfig {
+        const TIMER_PSC: u16;
+    }
+    pub struct Chip;
+    impl ChipConfig for Chip {
+        const TIMER_PSC: u16 = 31;
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct MockTimerRegs {
+        pub cr1: u32,
+        pub cnt: u32,
+        pub psc: u32,
+        pub arr: u32,
+        pub egr: u32,
+        pub sr: u32,
+        pub dier: u32,
+        pub cr1_writes: u32,
+        pub egr_writes: u32,
+    }
+
+    pub static TIM2_REGS: HostMutex<MockTimerRegs> = HostMutex::new(MockTimerRegs {
+        cr1: 0,
+        cnt: 0,
+        psc: 0,
+        arr: 0,
+        egr: 0,
+        sr: 0,
+        dier: 0,
+        cr1_writes: 0,
+        egr_writes: 0,
+    });
+    pub static COM_REGS: HostMutex<MockTimerRegs> = HostMutex::new(MockTimerRegs {
+        cr1: 0,
+        cnt: 0,
+        psc: 0,
+        arr: 0,
+        egr: 0,
+        sr: 0,
+        dier: 0,
+        cr1_writes: 0,
+        egr_writes: 0,
+    });
+
+    pub fn enable_tim2_clock() {}
+    pub fn enable_com_timer_clock() {}
+
+    pub struct Tim2Raw;
+    impl super::timer::RawTimer for Tim2Raw {
+        fn read_cr1(&self) -> u32 {
+            TIM2_REGS.lock().unwrap().cr1
+        }
+        fn write_cr1(&self, v: u32) {
+            let mut r = TIM2_REGS.lock().unwrap();
+            r.cr1 = v;
+            r.cr1_writes += 1;
+        }
+        fn read_cnt(&self) -> u32 {
+            TIM2_REGS.lock().unwrap().cnt
+        }
+        fn write_cnt(&self, v: u32) {
+            TIM2_REGS.lock().unwrap().cnt = v;
+        }
+        fn write_psc(&self, v: u32) {
+            TIM2_REGS.lock().unwrap().psc = v;
+        }
+        fn write_arr(&self, v: u32) {
+            TIM2_REGS.lock().unwrap().arr = v;
+        }
+        fn write_egr(&self, v: u32) {
+            let mut r = TIM2_REGS.lock().unwrap();
+            r.egr = v;
+            r.egr_writes += 1;
+        }
+        fn read_sr(&self) -> u32 {
+            TIM2_REGS.lock().unwrap().sr
+        }
+        fn write_sr(&self, v: u32) {
+            TIM2_REGS.lock().unwrap().sr = v;
+        }
+        fn read_dier(&self) -> u32 {
+            TIM2_REGS.lock().unwrap().dier
+        }
+        fn write_dier(&self, v: u32) {
+            TIM2_REGS.lock().unwrap().dier = v;
+        }
+    }
+
+    pub struct ComTimerRaw;
+    impl super::timer::RawTimer for ComTimerRaw {
+        fn read_cr1(&self) -> u32 {
+            COM_REGS.lock().unwrap().cr1
+        }
+        fn write_cr1(&self, v: u32) {
+            let mut r = COM_REGS.lock().unwrap();
+            r.cr1 = v;
+            r.cr1_writes += 1;
+        }
+        fn read_cnt(&self) -> u32 {
+            COM_REGS.lock().unwrap().cnt
+        }
+        fn write_cnt(&self, v: u32) {
+            COM_REGS.lock().unwrap().cnt = v;
+        }
+        fn write_psc(&self, v: u32) {
+            COM_REGS.lock().unwrap().psc = v;
+        }
+        fn write_arr(&self, v: u32) {
+            COM_REGS.lock().unwrap().arr = v;
+        }
+        fn write_egr(&self, v: u32) {
+            let mut r = COM_REGS.lock().unwrap();
+            r.egr = v;
+            r.egr_writes += 1;
+        }
+        fn read_sr(&self) -> u32 {
+            COM_REGS.lock().unwrap().sr
+        }
+        fn write_sr(&self, v: u32) {
+            COM_REGS.lock().unwrap().sr = v;
+        }
+        fn read_dier(&self) -> u32 {
+            COM_REGS.lock().unwrap().dier
+        }
+        fn write_dier(&self, v: u32) {
+            COM_REGS.lock().unwrap().dier = v;
+        }
     }
 }
+
+static RECEIVE_DMA_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static LAST_PWM_MASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 struct Dma(UnsafeCell<[u32; 64]>);
 // Only one test uses this DMA substitute, and every read/write is inside free().
@@ -109,7 +240,9 @@ struct Input {
     gcr: [u32; 37],
 }
 impl InputCapture for Input {
-    fn receive_dshot_dma(&mut self) {}
+    fn receive_dshot_dma(&mut self) {
+        RECEIVE_DMA_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
     fn send_dshot_dma(&mut self) {}
     fn input_pin_state(&self) -> bool {
         false
@@ -138,9 +271,11 @@ impl InputCapture for Input {
 struct Pwm;
 impl bridge::TimerPwm for Pwm {
     fn set_duty_all(&mut self, value: u16) {
+        LAST_PWM_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
         event(BridgeEvent::Duty(value));
     }
     fn set_auto_reload(&mut self, value: u16) {
+        LAST_PWM_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
         event(BridgeEvent::Period(value));
     }
     fn set_prescaler(&mut self, value: u16) {
@@ -164,30 +299,65 @@ impl PhaseOutput for Phase {
     fn all_pwm(&mut self) {}
     fn proportional_brake(&mut self) {}
 }
+#[derive(Default)]
+struct CompState {
+    level: bool,
+    pending: bool,
+    masked: bool,
+    repended: bool,
+    last_armed_delay: Option<u16>,
+    interval_count: u32,
+}
+static COMP_STATE: HostMutex<CompState> = HostMutex::new(CompState {
+    level: false,
+    pending: false,
+    masked: false,
+    repended: false,
+    last_armed_delay: None,
+    interval_count: 0,
+});
+
 struct Comp;
 impl BemfSensor for Comp {
     fn select_phase(&mut self, _: rm32::hal::Phase, _: bool) {}
-    fn enable_irq(&mut self) {}
-    fn mask_irq(&mut self) {}
+    fn enable_irq(&mut self) {
+        COMP_STATE.lock().unwrap().masked = false;
+    }
+    fn mask_irq(&mut self) {
+        let mut s = COMP_STATE.lock().unwrap();
+        s.masked = true;
+        s.pending = false;
+    }
     fn level(&self) -> bool {
-        false
+        assert!(!interrupt::masked() || COMP_STATE.lock().is_ok());
+        COMP_STATE.lock().unwrap().level
     }
     fn pending(&self) -> bool {
-        false
+        COMP_STATE.lock().unwrap().pending
     }
-    fn clear_pending(&mut self) {}
-    fn repend(&mut self) {}
+    fn clear_pending(&mut self) {
+        COMP_STATE.lock().unwrap().pending = false;
+    }
+    fn repend(&mut self) {
+        let mut s = COMP_STATE.lock().unwrap();
+        s.pending = true;
+        s.repended = true;
+    }
 }
 struct Interval;
 impl IntervalTimer for Interval {
     fn count(&self) -> u32 {
-        0
+        COMP_STATE.lock().unwrap().interval_count
     }
-    fn set_count(&mut self, _: u32) {}
+    fn set_count(&mut self, v: u32) {
+        COMP_STATE.lock().unwrap().interval_count = v;
+    }
 }
 struct Com;
 impl ComTimer for Com {
-    fn set_and_enable(&mut self, _: u16) {}
+    fn set_and_enable(&mut self, delay: u16) {
+        COMP_STATE.lock().unwrap().last_armed_delay = Some(delay);
+    }
     fn disable_interrupt(&mut self) {}
     fn enable_interrupt(&mut self) {}
 }
@@ -260,7 +430,13 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
     shared.set_input_set(true);
     shared.set_dshot(true);
+    RECEIVE_DMA_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
     raw_frame(0); // First interrupt moves state out of the initialization cell.
+    assert_eq!(
+        RECEIVE_DMA_CALLS.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "first ISR transfer must re-arm DMA at the live INPUT_LOCAL buffer address"
+    );
     let mut visited = false;
     isr::with_isr_state(|_| visited = true);
     assert!(
@@ -368,4 +544,124 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     assert!(stopped.contains(&BridgeEvent::AllOff));
     assert!(!stopped.contains(&BridgeEvent::ComStep(2)));
     assert!(!shared.tone_active());
+
+    // Steady-state Running interrupt-mode tick executes PWM compare/period
+    // updates with interrupts unmasked (PRIMASK = 0) and enters interrupt::free
+    // only once for the brief priority-0 COM_LOCAL sync.
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Running);
+    shared.set_adjusted_input(500);
+    shared.set_e_com_time(3_000);
+    shared.set_commutation_interval(500);
+    shared.set_tim1_arr(1999);
+    take_events();
+    let entries = interrupt::entries();
+    isr_handlers::handle_tim6();
+    assert_eq!(
+        interrupt::entries(),
+        entries + 1,
+        "steady-state Running tick must enter interrupt::free only once for COM_LOCAL sync"
+    );
+    assert!(
+        !LAST_PWM_MASKED.load(std::sync::atomic::Ordering::SeqCst),
+        "steady-state Running tick must update TIM1 PWM with interrupts unmasked"
+    );
+    assert_eq!(shared.gate_avg(), 1_000);
+
+    // Priority-0 handle_comp_irq and handle_tim14 run without entering
+    // interrupt::free (zero PRIMASK overhead on priority 0).
+    {
+        let mut cs = COMP_STATE.lock().unwrap();
+        cs.pending = true;
+        cs.level = true; // rising=true at step 1 -> pre-ZC noise
+        cs.interval_count = 200; // <= gate_avg / 2 (500) -> gate closed
+        cs.last_armed_delay = None;
+    }
+    let entries = interrupt::entries();
+    isr_handlers::handle_comp_irq();
+    assert_eq!(interrupt::entries(), entries);
+    assert!(
+        !COMP_STATE.lock().unwrap().pending,
+        "pre-ZC noise blip must be cleared"
+    );
+    assert_eq!(COMP_STATE.lock().unwrap().last_armed_delay, None);
+
+    {
+        let mut cs = COMP_STATE.lock().unwrap();
+        cs.pending = true;
+        cs.level = false; // post-ZC edge
+        cs.interval_count = 200; // gate still closed -> Camp
+    }
+    isr_handlers::handle_comp_irq();
+    assert_eq!(interrupt::entries(), entries);
+    assert!(
+        COMP_STATE.lock().unwrap().pending,
+        "early post-ZC edge must camp with EXTI pending until gate opens"
+    );
+
+    {
+        let mut cs = COMP_STATE.lock().unwrap();
+        cs.interval_count = 600; // > gate_avg / 2 (500) -> gate open
+    }
+    isr_handlers::handle_comp_irq();
+    assert_eq!(interrupt::entries(), entries);
+    assert!(!COMP_STATE.lock().unwrap().pending);
+    assert!(
+        COMP_STATE.lock().unwrap().last_armed_delay.is_some(),
+        "open gate + passing persistence filter must arm commutation timer"
+    );
+
+    // Priority-0 handle_tim14 checks take_commutation_interrupt() and advances
+    // commutation without entering interrupt::free.
+    {
+        let mut r = mcu::COM_REGS.lock().unwrap();
+        r.sr = 1;
+        r.dier = 1;
+    }
+    take_events();
+    let entries = interrupt::entries();
+    isr_handlers::handle_tim14();
+    assert_eq!(interrupt::entries(), entries);
+    assert_eq!(mcu::COM_REGS.lock().unwrap().sr, !1);
+    assert!(
+        take_events()
+            .iter()
+            .any(|e| matches!(e, BridgeEvent::ComStep(_)))
+    );
+}
+
+#[test]
+fn timer_init_and_set_and_enable_match_free_running_am32_contract() {
+    *mcu::TIM2_REGS.lock().unwrap() = mcu::MockTimerRegs::default();
+    *mcu::COM_REGS.lock().unwrap() = mcu::MockTimerRegs::default();
+
+    let _interval = timer::Tim2Interval::new();
+    let tim2 = *mcu::TIM2_REGS.lock().unwrap();
+    assert_eq!(tim2.psc, 31);
+    assert_eq!(tim2.arr, 0xFFFF, "Tim2Interval must wrap at 16 bits");
+    assert_eq!(tim2.cr1 & 1, 1);
+
+    let mut com = timer::Tim14Com::new();
+    let init_com = *mcu::COM_REGS.lock().unwrap();
+    assert_eq!(init_com.psc, 31);
+    assert_eq!(init_com.arr, 0xFFFF);
+    assert_eq!(init_com.egr, 1);
+    assert_eq!(
+        init_com.cr1, 1,
+        "Tim14Com::new must start free-running with CEN=1 and ARPE=0"
+    );
+
+    com.set_and_enable(345);
+    let armed_com = *mcu::COM_REGS.lock().unwrap();
+    assert_eq!(armed_com.cnt, 0);
+    assert_eq!(armed_com.arr, 345);
+    assert_eq!(armed_com.sr, 0);
+    assert_eq!(armed_com.dier & 1, 1);
+    assert_eq!(
+        armed_com.cr1_writes, init_com.cr1_writes,
+        "set_and_enable must not toggle CR1.CEN"
+    );
+    assert_eq!(
+        armed_com.egr_writes, init_com.egr_writes,
+        "set_and_enable must not fire EGR.UG"
+    );
 }

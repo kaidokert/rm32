@@ -21,7 +21,7 @@ fn TIM14() {
 
 #[interrupt]
 fn ADC_COMP() {
-    isr_handlers::handle_comp();
+    isr_handlers::handle_comp_irq();
 }
 
 // F051 uses DMA1_CH4_5 for TIM15 input capture

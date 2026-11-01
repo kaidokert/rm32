@@ -19,6 +19,7 @@ pub struct TestShared {
     pub zero_crosses: Cell<u32>,
     pub commutation_interval: Cell<u32>,
     pub e_com_time: Cell<i32>,
+    pub gate_avg: Cell<u32>,
     pub signal_timeout: Cell<u32>,
     pub send_telemetry: Cell<bool>,
     // Main→ISR published state
@@ -60,6 +61,7 @@ impl TestShared {
             zero_crosses: Cell::new(0),
             commutation_interval: Cell::new(12500),
             e_com_time: Cell::new(0),
+            gate_avg: Cell::new(0),
             signal_timeout: Cell::new(0),
             send_telemetry: Cell::new(false),
             tim1_arr: Cell::new(1999),
@@ -120,6 +122,12 @@ impl IsrTiming for TestShared {
     }
     fn set_e_com_time(&self, v: i32) {
         self.e_com_time.set(v);
+    }
+    fn gate_avg(&self) -> u32 {
+        self.gate_avg.get()
+    }
+    fn set_gate_avg(&self, v: u32) {
+        self.gate_avg.set(v);
     }
     fn interval_timer_count(&self) -> u32 {
         self.interval_timer_count.get()

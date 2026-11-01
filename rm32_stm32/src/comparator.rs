@@ -26,6 +26,27 @@ impl<C: CompOps, E: ExtiOps> BemfSensor for BemfComparator<C, E> {
         self.comp.output()
     }
 
+    #[allow(unexpected_cfgs)]
+    fn filter_read(&self) -> bool {
+        // STM32G071: match AM32's persistence-filter sampling window. AM32's
+        // non-inlined `interruptRoutine` -> `getCompOutputLevel` loop takes
+        // ~30.6 CPU cycles per sample at 64 MHz (with `FLASH.ACR.PRFTEN` set),
+        // whereas an inlined `COMP2.CSR` read takes ~12.6 cycles, halving the
+        // filter time window and letting sub-1.5 us switching-noise pulses pass.
+        // 14 single-cycle NOPs pad only the persistence-filter reads (`level()`
+        // stays unpadded for fast gate/camping and polling checks).
+        #[cfg(all(feature = "stm32g071", target_arch = "arm"))]
+        unsafe {
+            core::arch::asm!(
+                ".rept 14",
+                "nop",
+                ".endr",
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+        self.comp.output()
+    }
+
     #[inline(always)]
     fn select_phase(&mut self, phase: Phase, rising: bool) {
         let pin = match phase {

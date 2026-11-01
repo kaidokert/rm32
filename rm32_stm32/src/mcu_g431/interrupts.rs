@@ -22,7 +22,7 @@ fn TIM1_UP_TIM16() {
 
 #[interrupt]
 fn COMP1_2_3() {
-    isr_handlers::handle_comp();
+    isr_handlers::handle_comp_irq();
 }
 
 // DMA1 Channel 1: input capture transfer complete
