@@ -196,7 +196,11 @@ impl Tim2Interval {
         let raw = Tim2Raw;
         raw.modify_cr1(|v| v & !(1 << 0)); // CEN=0
         raw.write_psc(crate::mcu::Chip::TIMER_PSC as u32);
-        raw.write_arr(0xFFFF_FFFF);
+        // ARR = 0xFFFF (16-bit wrap, AM32-matched). TIM2 is 32-bit on L4/G4,
+        // but AM32's HAL_TIM_Base_Init writes only the low 16 bits, leaving
+        // the upper half at 0. Commutation interval measurement uses u16
+        // anyway. Matching this avoids any cross-wrap arithmetic surprises.
+        raw.write_arr(0xFFFF);
         raw.write_egr(1); // UG
         raw.write_cnt(0);
         raw.modify_cr1(|v| v | (1 << 0)); // CEN=1
@@ -214,7 +218,14 @@ impl IntervalTimer for Tim2Interval {
     }
 }
 
-/// One-shot commutation timer (TIM14 on G071/F051, TIM16 on L431/G431).
+/// Free-running commutation timer (`TIM14` on G071/F051, `TIM16` on L431/G431).
+///
+/// The counter runs continuously from boot with `CR1 = CEN` (`ARPE = 0`) so
+/// `set_and_enable` never stops or restarts `CEN`, eliminating stop/start
+/// prescaler jitter. Keeping `ARPE = 0` ensures each arm's `ARR = timeout`
+/// takes effect immediately for the current countdown (whereas `ARPE = 1`
+/// without `UG` leaves the new `ARR` in preload until the previous reload
+/// value wraps, which would stall startup on the `0xFFFF` boot reload).
 pub struct Tim14Com {
     raw: ComTimerRaw,
 }
@@ -232,19 +243,24 @@ impl Tim14Com {
         let raw = ComTimerRaw;
         raw.write_psc(crate::mcu::Chip::TIMER_PSC as u32);
         raw.write_arr(0xFFFF);
-        raw.write_egr(1);
+        raw.write_egr(1); // UG — latch PSC into active registers
+        raw.modify_cr1(|v| v | (1 << 0)); // CEN=1, ARPE=0 (free-running)
         Self { raw }
     }
 }
 
 impl ComTimer for Tim14Com {
     fn set_and_enable(&mut self, timeout: u16) {
-        self.raw.modify_cr1(|v| v & !(1 << 0));
+        // AM32-matched SET_AND_ENABLE_COM_INT (peripherals.h:19-21):
+        // CNT=0, ARR=timeout, SR=0, UIE on, with no EGR.UG and no CR1.CEN
+        // stop/start toggle. Firing EGR.UG here would assert UIF in the
+        // prescaled timer clock domain after a back-to-back CPU `SR = 0`
+        // write completes, leaving UIF set when UIE is enabled and firing
+        // the commutation ISR prematurely.
         self.raw.write_cnt(0);
         self.raw.write_arr(timeout as u32);
         self.raw.write_sr(0);
-        self.raw.modify_dier(|v| v | 1);
-        self.raw.modify_cr1(|v| v | (1 << 0));
+        self.raw.modify_dier(|v| v | 1); // UIE
     }
 
     fn disable_interrupt(&mut self) {

@@ -54,24 +54,29 @@ pub fn adjust_irq_priorities(interval: u32, dshot_telem: bool) {
     // level N must be passed as `N << 4` (writing unshifted `1` lands in the
     // unimplemented low nibble and reads back as `0`, making all three IRQs equal
     // priority).
-    let nvic =
-        unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
-    if dshot_telem && interval > DSHOT_PRIORITY_THRESHOLD {
-        // SAFETY: Setting valid priority values (0-1) for valid interrupt numbers.
-        // Priority changes take effect atomically per-interrupt in the NVIC.
-        unsafe {
-            nvic.set_priority(Interrupt::DMA1_CH5, 0 << 4);
-            nvic.set_priority(Interrupt::TIM1_UP_TIM16, 1 << 4);
-            nvic.set_priority(Interrupt::COMP, 1 << 4);
+    // Mask interrupts across the multi-vector priority update so `TIM1_UP_TIM16`
+    // and `COMP` never observe transiently different preemption priorities (which
+    // would allow one to preempt the other while borrowing `COM_LOCAL`).
+    cortex_m::interrupt::free(|_| {
+        let nvic =
+            unsafe { &mut *(cortex_m::peripheral::NVIC::PTR as *mut cortex_m::peripheral::NVIC) };
+        if dshot_telem && interval > DSHOT_PRIORITY_THRESHOLD {
+            // SAFETY: Setting valid priority values (0-1) for valid interrupt numbers
+            // inside a critical section.
+            unsafe {
+                nvic.set_priority(Interrupt::DMA1_CH5, 0 << 4);
+                nvic.set_priority(Interrupt::TIM1_UP_TIM16, 1 << 4);
+                nvic.set_priority(Interrupt::COMP, 1 << 4);
+            }
+        } else {
+            // SAFETY: Same as above — valid priority values for valid interrupt numbers.
+            unsafe {
+                nvic.set_priority(Interrupt::DMA1_CH5, 1 << 4);
+                nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0 << 4);
+                nvic.set_priority(Interrupt::COMP, 0 << 4);
+            }
         }
-    } else {
-        // SAFETY: Same as above — valid priority values for valid interrupt numbers.
-        unsafe {
-            nvic.set_priority(Interrupt::DMA1_CH5, 1 << 4);
-            nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0 << 4);
-            nvic.set_priority(Interrupt::COMP, 0 << 4);
-        }
-    }
+    });
 }
 
 pub type TargetIsrHal = crate::isr::IsrHal<

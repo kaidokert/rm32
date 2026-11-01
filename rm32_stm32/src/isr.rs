@@ -5,6 +5,7 @@
 
 use core::cell::RefCell;
 use cortex_m::interrupt::Mutex;
+use portable_atomic::{AtomicBool, Ordering};
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::state::{BemfState, DutyState};
@@ -86,6 +87,122 @@ where
     }
 }
 
+/// Decomposes `IsrHal` into its peripheral components so `isr_handlers` can
+/// partition live state into priority-disjoint cells without per-MCU aliases.
+pub trait IsrHalParts {
+    type Pwm: crate::bridge::TimerPwm;
+    type Input: hal::InputCapture;
+    type Comp: hal::BemfSensor;
+    type Interval: hal::IntervalTimer;
+    type Com: hal::ComTimer;
+    type Phase: hal::PhaseOutput;
+
+    #[allow(clippy::type_complexity)]
+    fn into_parts(
+        self,
+    ) -> (
+        Self::Pwm,
+        Self::Input,
+        Self::Comp,
+        Self::Interval,
+        Self::Com,
+        Self::Phase,
+    );
+}
+
+impl<P, I, C, IT, CT, PH> IsrHalParts for IsrHal<P, I, C, IT, CT, PH>
+where
+    P: crate::bridge::TimerPwm,
+    I: hal::InputCapture,
+    C: hal::BemfSensor,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    type Pwm = P;
+    type Input = I;
+    type Comp = C;
+    type Interval = IT;
+    type Com = CT;
+    type Phase = PH;
+
+    #[inline]
+    fn into_parts(self) -> (P, I, C, IT, CT, PH) {
+        (
+            self.pwm,
+            self.input,
+            self.comp,
+            self.interval,
+            self.com_timer,
+            self.phase,
+        )
+    }
+}
+
+/// Reborrowed motor HAL combining `TickIsrState`'s PWM timer with
+/// `ComIsrState`'s comparator, timers, and phase driver inside a masked
+/// critical section.
+pub struct SplitMotorHal<'a, P, C, IT, CT, PH> {
+    pub pwm: &'a mut P,
+    pub comp: &'a mut C,
+    pub interval: &'a mut IT,
+    pub com_timer: &'a mut CT,
+    pub phase: &'a mut PH,
+}
+
+impl<P, C, IT, CT, PH> rm32::platform::Platform for SplitMotorHal<'_, P, C, IT, CT, PH>
+where
+    P: crate::bridge::TimerPwm,
+    C: hal::BemfSensor,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    const TICK_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ;
+    const TIMER_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TIMER_HZ;
+    const CAPTURE_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::CAPTURE_HZ;
+    const GCR_SHIFT: u8 = <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT;
+    const PWM_BASE_PERIOD: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
+}
+
+impl<P, C, IT, CT, PH> hal::MotorHal for SplitMotorHal<'_, P, C, IT, CT, PH>
+where
+    P: crate::bridge::TimerPwm,
+    C: hal::BemfSensor,
+    IT: hal::IntervalTimer,
+    CT: hal::ComTimer,
+    PH: hal::PhaseOutput,
+{
+    type Bridge<'b>
+        = crate::bridge::StmBridge<'b, P, PH>
+    where
+        Self: 'b;
+    type Bemf = C;
+    type Interval = IT;
+    type Com = CT;
+
+    #[inline(always)]
+    fn bridge(&mut self) -> Self::Bridge<'_> {
+        crate::bridge::StmBridge {
+            pwm: self.pwm,
+            phase: self.phase,
+        }
+    }
+    #[inline(always)]
+    fn bemf(&mut self) -> &mut C {
+        self.comp
+    }
+    #[inline(always)]
+    fn interval(&mut self) -> &mut IT {
+        self.interval
+    }
+    #[inline(always)]
+    fn com_timer(&mut self) -> &mut CT {
+        self.com_timer
+    }
+}
+
 /// ISR-exclusive state — generic over hardware.
 pub struct IsrState<H> {
     pub commutation: Commutation,
@@ -117,7 +234,9 @@ pub type TargetIsrState = IsrState<TargetIsrHal>;
 // Global state + accessors
 // ============================================================
 
-static ISR_STATE: Mutex<RefCell<Option<TargetIsrState>>> = Mutex::new(RefCell::new(None));
+static ISR_STATE: Mutex<RefCell<core::mem::MaybeUninit<TargetIsrState>>> =
+    Mutex::new(RefCell::new(core::mem::MaybeUninit::uninit()));
+static ISR_STATE_STAGED: AtomicBool = AtomicBool::new(false);
 static SHARED: SharedState = SharedState::new::<crate::platform::StmPlatform>();
 
 pub fn shared() -> &'static SharedState {
@@ -126,19 +245,42 @@ pub fn shared() -> &'static SharedState {
 
 pub fn init_isr_state(state: TargetIsrState) {
     cortex_m::interrupt::free(|cs| {
-        ISR_STATE.borrow(cs).replace(Some(state));
+        let mut slot = ISR_STATE.borrow(cs).borrow_mut();
+        if ISR_STATE_STAGED.load(Ordering::Relaxed) {
+            // SAFETY: `ISR_STATE_STAGED` is only set after `slot.write(state)`
+            // and cleared before `assume_init_read()`.
+            unsafe { slot.assume_init_drop() };
+        }
+        slot.write(state);
+        ISR_STATE_STAGED.store(true, Ordering::Release);
     });
 }
 
+#[inline(always)]
+pub fn is_isr_state_staged() -> bool {
+    ISR_STATE_STAGED.load(Ordering::Acquire)
+}
+
 pub fn take_isr_state() -> Option<TargetIsrState> {
-    cortex_m::interrupt::free(|cs| ISR_STATE.borrow(cs).borrow_mut().take())
+    cortex_m::interrupt::free(|cs| {
+        if ISR_STATE_STAGED.swap(false, Ordering::AcqRel) {
+            let slot = ISR_STATE.borrow(cs).borrow_mut();
+            // SAFETY: `ISR_STATE_STAGED` was true and has just been atomically
+            // cleared inside `interrupt::free`, transferring ownership out.
+            Some(unsafe { slot.assume_init_read() })
+        } else {
+            None
+        }
+    })
 }
 
 /// Access ISR state in a critical section (before interrupts take it).
 pub fn with_isr_state(f: impl FnOnce(&mut TargetIsrState)) {
     cortex_m::interrupt::free(|cs| {
-        if let Some(ref mut state) = *ISR_STATE.borrow(cs).borrow_mut() {
-            f(state);
+        if ISR_STATE_STAGED.load(Ordering::Acquire) {
+            let mut slot = ISR_STATE.borrow(cs).borrow_mut();
+            // SAFETY: `ISR_STATE_STAGED` is true and interrupts are masked.
+            f(unsafe { slot.assume_init_mut() });
         }
     });
 }

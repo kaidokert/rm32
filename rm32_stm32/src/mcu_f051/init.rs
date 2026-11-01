@@ -90,9 +90,18 @@ pub fn init(
         tim6.cr1.write(|w| w.cen().set_bit());
     }
 
-    // NVIC
+    // NVIC priorities — Cortex-M0 implements 2 priority bits in the upper bits
+    // [7:6] of each IPR byte (`N << 6`). Set `ADC_COMP` and `TIM14` to priority 0
+    // and `TIM6_DAC` / `EXTI4_15` to priority 2 so BEMF zero-cross and commutation
+    // interrupts can preempt the steady-state 20 kHz control tick.
     unsafe {
         use pac::{Interrupt, NVIC};
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(Interrupt::ADC_COMP, 0 << 6);
+        nvic.set_priority(Interrupt::TIM14, 0 << 6);
+        nvic.set_priority(Interrupt::DMA1_CH4_5_6_7_DMA2_CH3_4_5, 1 << 6);
+        nvic.set_priority(Interrupt::TIM6_DAC, 2 << 6);
+        nvic.set_priority(Interrupt::EXTI4_15, 2 << 6);
         NVIC::unmask(Interrupt::TIM6_DAC);
         NVIC::unmask(Interrupt::TIM14);
         NVIC::unmask(Interrupt::ADC_COMP);

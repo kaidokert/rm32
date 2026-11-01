@@ -17,7 +17,7 @@ fn TIM14() {
 
 #[interrupt]
 fn ADC_COMP() {
-    isr_handlers::handle_comp();
+    isr_handlers::handle_comp_irq();
 }
 
 #[interrupt]
