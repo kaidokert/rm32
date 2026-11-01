@@ -99,10 +99,14 @@ impl Reg {
             // EXTI and ADC ISR pending bits are write-one-to-clear.
             "pr" | "pr1" | "rpr1" | "fpr1" | "isr" => self.seed(self.get() & !v),
             "cr" => {
-                // RM0444: calibration and enable only complete when ADVREGEN (1 << 28) is set.
+                // RM0444: calibration and enable only complete when ADVREGEN (1 << 28) is set;
+                // ADDIS (1 << 1) disables the ADC and clears ADEN (1 << 0).
                 let advregen = (v & (1 << 28)) != 0;
                 if (v & (1 << 31)) != 0 && advregen {
                     self.seed(v & !(1 << 31));
+                } else if (v & (1 << 1)) != 0 {
+                    self.seed(v & !((1 << 1) | 1));
+                    BANK.isr.seed(BANK.isr.get() & !1);
                 } else {
                     self.seed(v);
                 }
@@ -567,9 +571,9 @@ fn g071_adc_init_enables_advregen_and_programs_sequence_with_ccrdy_handshake() {
     adc.start_conversion();
     assert_eq!(BANK.cr.get(), (1 << 28) | (1 << 2) | 1);
 
-    // 3.0 V factory TS_CAL rescaled from 3.3 V VDDA: raw 912 -> ~21 C (3.3 V identity on 3300 mV F051).
+    // 3.0 V factory TS_CAL rescaled from 3.3 V VDDA: raw 912 -> 22 C (3.3 V identity on 3300 mV F051).
     let g0_temp = adc.calc_temperature(912);
-    assert!((18..=25).contains(&g0_temp.0), "got {}", g0_temp.0);
+    assert_eq!(g0_temp, rm32::units::DegreesCelsius(22));
 
     let f0_adc = adc_generic::GenericAdc::post_init(
         g071_adc::G071AdcOps,
@@ -602,4 +606,6 @@ fn g071_adc_enable_rejects_corrupted_chselr_readback() {
         Err(regs::InitError::Timeout("ADC CHSELR readback")) => {}
         other => panic!("expected ADC CHSELR readback timeout, got {:?}", other),
     }
+    // Failed sequence programming must disable the ADC (ADDIS clears ADEN) while keeping ADVREGEN.
+    assert_eq!(BANK.cr.get(), 1 << 28);
 }

@@ -12,7 +12,7 @@ crate::define_adc_boilerplate!(
     ops: G431AdcOps,
     type_name: G431Adc,
     cal1: 0x1FFF_75A8, cal2: 0x1FFF_75CA,
-    cal1_temp: 30, cal2_temp: 110,
+    cal1_temp: 30, cal2_temp: 130,
     cal_vref_mv: 3000,
 );
 
@@ -251,6 +251,6 @@ impl rm32::hal::Adc for G431DualAdc {
         // SAFETY: Reading ROM calibration values at known addresses.
         let cal1 = unsafe { *(0x1FFF_75A8u32 as *const u16) };
         let cal2 = unsafe { *(0x1FFF_75CAu32 as *const u16) };
-        rm32::units::calc_temperature_pure(raw, cal1, cal2, 30, 110, 3300, 3000)
+        rm32::units::calc_temperature_pure(raw, cal1, cal2, 30, 130, 3300, 3000)
     }
 }

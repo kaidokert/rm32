@@ -118,7 +118,7 @@ pub fn calc_temperature_pure(
 ) -> DegreesCelsius {
     let c1 = ts_cal1 as i32;
     let c2 = ts_cal2 as i32;
-    if c2 == c1 || cal_vref_mv == 0 {
+    if c2 == c1 || cal_vref_mv <= 0 || vdda_mv <= 0 {
         return DegreesCelsius(25);
     }
     let raw_scaled = raw as i32 * vdda_mv / cal_vref_mv;
@@ -270,6 +270,14 @@ mod tests {
             calc_temperature_pure(1234, 1000, 1500, 30, 130, 3300, 0),
             DegreesCelsius(25)
         );
+        assert_eq!(
+            calc_temperature_pure(1234, 1000, 1500, 30, 130, 3300, -3000),
+            DegreesCelsius(25)
+        );
+        assert_eq!(
+            calc_temperature_pure(1234, 1000, 1500, 30, 130, 0, 3000),
+            DegreesCelsius(25)
+        );
     }
 
     #[test]
@@ -282,17 +290,13 @@ mod tests {
     /// L431/G071/G431 TS_CAL points are measured at 3.0 V while VDDA is 3.3 V.
     /// With typical L431 calibration values (cal1=1034 @30 C, cal2=1381 @130 C),
     /// a ~21 C die produces raw=912 at 3.3 V. Unscaled interpolation reads ~-5 C;
-    /// rescaling by VDDA/3000 matches ST's `__LL_ADC_CALC_TEMPERATURE` (~21 C).
+    /// rescaling by VDDA/3000 matches ST's `__LL_ADC_CALC_TEMPERATURE` (22 C).
     #[test]
     fn temp_l431_vdda_rescale_matches_am32() {
         let unscaled = calc_temperature_pure(912, 1034, 1381, 30, 130, 3000, 3000);
         let scaled = calc_temperature_pure(912, 1034, 1381, 30, 130, 3300, 3000);
-        assert!(unscaled.0 < 5, "unscaled reads cold: {}", unscaled.0);
-        assert!(
-            (18..=25).contains(&scaled.0),
-            "rescaled should read ~21 C, got {}",
-            scaled.0
-        );
+        assert_eq!(unscaled, DegreesCelsius(-5));
+        assert_eq!(scaled, DegreesCelsius(22));
         // Exact 30 C die at 3.3 V VDDA produces 1000 counts when cal1 = 1100 at 3.0 V.
         assert_eq!(
             calc_temperature_pure(1000, 1100, 1500, 30, 130, 3300, 3000),

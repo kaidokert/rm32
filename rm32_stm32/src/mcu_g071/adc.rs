@@ -146,7 +146,11 @@ impl AdcPeripheral for G071AdcOps {
             100_000,
             "ADC ready",
         )?;
-        program_sequence()
+        if let Err(e) = program_sequence() {
+            adc.cr().write(|w| unsafe { w.bits(ADVREGEN | (1 << 1)) }); // ADDIS
+            return Err(e);
+        }
+        Ok(())
     }
 
     fn start_conversion(&self) {

@@ -1037,6 +1037,7 @@ mod tests {
     fn gate_avg_roundtrips_via_core_atomic() {
         use crate::shared_comm::IsrTiming;
         let shared = SharedState::new::<crate::platform::TestPlatform>();
+        let _: &core::sync::atomic::AtomicU32 = &shared.gate_avg;
         assert_eq!(shared.gate_avg(), 0);
         assert_eq!(IsrTiming::gate_avg(&shared), 0);
 

@@ -62,6 +62,7 @@ impl TempCalibration {
         cal2_temp: i32,
         cal_vref_mv: i32,
     ) -> Self {
+        debug_assert!(cal_vref_mv > 0);
         // SAFETY: Caller guarantees cal1_addr and cal2_addr point to valid,
         // aligned, read-only factory calibration data in ROM (system memory).
         // These addresses are fixed per STM32 datasheet and always readable.
