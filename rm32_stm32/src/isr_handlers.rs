@@ -162,6 +162,7 @@ static COM_LOCAL: IsrTierCell<TargetComIsrState> = IsrTierCell::new();
 static TICK_LOCAL: IsrTierCell<TargetTickIsrState> = IsrTierCell::new();
 static INPUT_LOCAL: IsrTierCell<TargetInputIsrState> = IsrTierCell::new();
 
+static CFG_COMP_PWM: AtomicBool = AtomicBool::new(false);
 static CFG_BIDIR: AtomicBool = AtomicBool::new(false);
 static CFG_STRICT_CHANGEOVER: AtomicBool = AtomicBool::new(false);
 static CONFIG_DIRTY: AtomicBool = AtomicBool::new(false);
@@ -178,6 +179,7 @@ fn install_staged_isr_state() {
     cortex_m::interrupt::free(|_| {
         if let Some(state) = isr::take_isr_state() {
             let (pwm, input, comp, interval, com_timer, phase) = state.hal.into_parts();
+            CFG_COMP_PWM.store(state.config.use_comp_pwm(), Ordering::Relaxed);
             CFG_BIDIR.store(state.config.is_bidirectional(), Ordering::Relaxed);
             CFG_STRICT_CHANGEOVER.store(state.config.use_strict_changeover(), Ordering::Relaxed);
             CONFIG_DIRTY.store(false, Ordering::Release);
@@ -292,8 +294,8 @@ struct LockedComPhase;
 
 impl rm32::hal::PhaseOutput for LockedComPhase {
     #[inline]
-    fn com_step(&mut self, step: u8) {
-        COM_LOCAL.with_masked(|com| com.phase.com_step(step));
+    fn com_step(&mut self, step: u8, complementary: bool) {
+        COM_LOCAL.with_masked(|com| com.phase.com_step(step, complementary));
     }
     #[inline]
     fn all_off(&mut self) {
@@ -304,8 +306,8 @@ impl rm32::hal::PhaseOutput for LockedComPhase {
         COM_LOCAL.with_masked(|com| com.phase.full_brake());
     }
     #[inline]
-    fn all_pwm(&mut self) {
-        COM_LOCAL.with_masked(|com| com.phase.all_pwm());
+    fn all_pwm(&mut self, complementary: bool) {
+        COM_LOCAL.with_masked(|com| com.phase.all_pwm(complementary));
     }
     #[inline]
     fn proportional_brake(&mut self) {
@@ -442,6 +444,7 @@ pub fn handle_tim14() {
         &mut com.com_timer,
         &mut com.comp,
         &mut com.phase,
+        CFG_COMP_PWM.load(Ordering::Relaxed),
         CFG_BIDIR.load(Ordering::Relaxed),
         CFG_STRICT_CHANGEOVER.load(Ordering::Relaxed),
     );
@@ -568,6 +571,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
             |prescaler| inp.input.set_output_prescaler(prescaler),
         );
         if prev_config.is_some_and(|prev| prev.as_bytes() != inp.config.as_bytes()) {
+            CFG_COMP_PWM.store(inp.config.use_comp_pwm(), Ordering::Relaxed);
             CFG_BIDIR.store(inp.config.is_bidirectional(), Ordering::Relaxed);
             CFG_STRICT_CHANGEOVER.store(inp.config.use_strict_changeover(), Ordering::Relaxed);
             CONFIG_DIRTY.store(true, Ordering::Release);

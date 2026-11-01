@@ -61,8 +61,8 @@ pub trait Bridge: PhaseOutput {
 /// A `&mut` to a bridge is a bridge (lets a HAL hand out `&mut` its own).
 impl<B: PhaseOutput + ?Sized> PhaseOutput for &mut B {
     #[inline(always)]
-    fn com_step(&mut self, step: u8) {
-        (**self).com_step(step);
+    fn com_step(&mut self, step: u8, complementary: bool) {
+        (**self).com_step(step, complementary);
     }
     #[inline(always)]
     fn all_off(&mut self) {
@@ -73,8 +73,8 @@ impl<B: PhaseOutput + ?Sized> PhaseOutput for &mut B {
         (**self).full_brake();
     }
     #[inline(always)]
-    fn all_pwm(&mut self) {
-        (**self).all_pwm();
+    fn all_pwm(&mut self, complementary: bool) {
+        (**self).all_pwm(complementary);
     }
     #[inline(always)]
     fn proportional_brake(&mut self) {

@@ -14,6 +14,7 @@ enum BridgeEvent {
     Divider(u16),
     AllOff,
     ComStep(u8),
+    ComStepComp(u8, bool),
 }
 static BRIDGE_EVENTS: HostMutex<Vec<BridgeEvent>> = HostMutex::new(Vec::new());
 fn event(value: BridgeEvent) {
@@ -305,14 +306,15 @@ impl bridge::TimerPwm for Pwm {
 }
 struct Phase;
 impl PhaseOutput for Phase {
-    fn com_step(&mut self, step: u8) {
+    fn com_step(&mut self, step: u8, complementary: bool) {
         event(BridgeEvent::ComStep(step));
+        event(BridgeEvent::ComStepComp(step, complementary));
     }
     fn all_off(&mut self) {
         event(BridgeEvent::AllOff);
     }
     fn full_brake(&mut self) {}
-    fn all_pwm(&mut self) {}
+    fn all_pwm(&mut self, _: bool) {}
     fn proportional_brake(&mut self) {}
 }
 #[derive(Default)]
@@ -651,7 +653,8 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     );
 
     // Priority-0 handle_tim14 checks take_commutation_interrupt() and advances
-    // commutation without entering interrupt::free.
+    // commutation without entering interrupt::free, passing the configured
+    // comp_pwm setting (initially 0 -> false).
     {
         let mut r = mcu::COM_REGS.lock().unwrap();
         r.sr = 1;
@@ -662,10 +665,54 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     isr_handlers::handle_tim14();
     assert_eq!(interrupt::entries(), entries);
     assert_eq!(mcu::COM_REGS.lock().unwrap().sr, !1);
+    let tim14_events = take_events();
     assert!(
-        take_events()
+        tim14_events
             .iter()
-            .any(|e| matches!(e, BridgeEvent::ComStep(_)))
+            .any(|e| matches!(e, BridgeEvent::ComStepComp(_, false))),
+        "handle_tim14 must pass initial comp_pwm=false to PhaseOutput::com_step"
+    );
+
+    // Mutate comp_pwm (EEPROM byte 20) via DShot programming while Armed, and
+    // verify CFG_COMP_PWM updates for priority-0 handle_tim14 while tones still
+    // drive diode (complementary = false).
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    shared.set_adjusted_input(0);
+    command(36);
+    raw_frame(20);
+    raw_frame(1);
+    raw_frame(37);
+    rm32::system::SystemTick::<platform::StmPlatform>::sync_config_writes(shared, &mut main);
+    assert_eq!(main.config.comp_pwm, 1);
+
+    command(1);
+    take_events();
+    isr_handlers::handle_tim6();
+    let tone_events = take_events();
+    assert!(
+        tone_events.contains(&BridgeEvent::ComStepComp(2, false)),
+        "tone::step must pass complementary=false even when comp_pwm=1"
+    );
+    for _ in 0..6000 {
+        isr_handlers::handle_tim6();
+    }
+
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Running);
+    {
+        let mut r = mcu::COM_REGS.lock().unwrap();
+        r.sr = 1;
+        r.dier = 1;
+    }
+    take_events();
+    let entries = interrupt::entries();
+    isr_handlers::handle_tim14();
+    assert_eq!(interrupt::entries(), entries);
+    let tim14_comp_events = take_events();
+    assert!(
+        tim14_comp_events
+            .iter()
+            .any(|e| matches!(e, BridgeEvent::ComStepComp(_, true))),
+        "handle_tim14 must pass updated comp_pwm=true after config mutation"
     );
 }
 

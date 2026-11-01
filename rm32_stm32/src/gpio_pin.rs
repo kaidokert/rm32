@@ -13,6 +13,8 @@ pub trait GpioPin {
     type Port: GpioPort;
     /// Pin number (0..15).
     const PIN: u8;
+    /// True when this pin belongs to `PortB` (`false` for `PortA`).
+    const PORT_B: bool;
 
     /// Precomputed MODER bit offset (pin * 2).
     const MODER_OFFSET: u32 = Self::PIN as u32 * 2;
@@ -46,19 +48,20 @@ pub trait GpioPin {
 // --- Pin definitions ---
 
 macro_rules! gpio_pin {
-    ($name:ident, $port:ty, $pin:literal) => {
+    ($name:ident, $port:ty, $pin:literal, $port_b:literal) => {
         pub struct $name;
         impl GpioPin for $name {
             type Port = $port;
             const PIN: u8 = $pin;
+            const PORT_B: bool = $port_b;
         }
     };
 }
 
-gpio_pin!(PA7, PortA, 7);
-gpio_pin!(PA8, PortA, 8);
-gpio_pin!(PA9, PortA, 9);
-gpio_pin!(PA10, PortA, 10);
-gpio_pin!(PB0, PortB, 0);
-gpio_pin!(PB1, PortB, 1);
-gpio_pin!(PB10, PortB, 10);
+gpio_pin!(PA7, PortA, 7, false);
+gpio_pin!(PA8, PortA, 8, false);
+gpio_pin!(PA9, PortA, 9, false);
+gpio_pin!(PA10, PortA, 10, false);
+gpio_pin!(PB0, PortB, 0, true);
+gpio_pin!(PB1, PortB, 1, true);
+gpio_pin!(PB10, PortB, 10, true);

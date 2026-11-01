@@ -38,7 +38,7 @@ pub fn init(
         &mut rcc,
         dead_time,
     );
-    let phase = G0APhaseDriver::new(false);
+    let phase = G0APhaseDriver::new();
     let sys = super::system::SystemControl::new(dp.IWDG);
     super::comp_init::init_comp2();
     let comp = super::comparator::new_comparator(bemf_pins);

@@ -245,7 +245,7 @@ pub fn step<P, B, M>(
             bridge.set_period(P::PWM_BASE_PERIOD);
             bridge.set_tone_divider(note.prescaler);
             bridge.set_duty_all(tone.duty(beep_volume));
-            bridge.com_step(note.step);
+            bridge.com_step(note.step, false);
         }
         ToneAction::Silence => {
             let mut bridge = bridge();

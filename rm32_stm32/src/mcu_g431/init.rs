@@ -80,7 +80,7 @@ pub fn init(
         tim1.cr1().write(|w| w.cen().set_bit());
     }
     let pwm = super::pwm::Pwm::new();
-    let phase = G0APhaseDriver::new(false);
+    let phase = G0APhaseDriver::new();
 
     // COMP1+COMP2 init
     super::comp_init::init_comp();

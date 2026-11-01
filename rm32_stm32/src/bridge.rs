@@ -26,8 +26,8 @@ pub struct StmBridge<'a, P, PH> {
 
 impl<P: TimerPwm, PH: rm32::hal::PhaseOutput> rm32::hal::PhaseOutput for StmBridge<'_, P, PH> {
     #[inline(always)]
-    fn com_step(&mut self, step: u8) {
-        self.phase.com_step(step);
+    fn com_step(&mut self, step: u8, complementary: bool) {
+        self.phase.com_step(step, complementary);
     }
     #[inline(always)]
     fn all_off(&mut self) {
@@ -38,8 +38,8 @@ impl<P: TimerPwm, PH: rm32::hal::PhaseOutput> rm32::hal::PhaseOutput for StmBrid
         self.phase.full_brake();
     }
     #[inline(always)]
-    fn all_pwm(&mut self) {
-        self.phase.all_pwm();
+    fn all_pwm(&mut self, complementary: bool) {
+        self.phase.all_pwm(complementary);
     }
     #[inline(always)]
     fn proportional_brake(&mut self) {

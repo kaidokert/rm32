@@ -44,7 +44,7 @@ impl Sounds {
         bridge.set_period(self.tim1_autoreload);
         bridge.set_tone_divider(prescaler);
         bridge.set_duty_all(self.volume as u16);
-        bridge.com_step(step);
+        bridge.com_step(step, false);
         sys.delay_millis(duration_ms);
         sys.reload_watchdog();
     }
@@ -102,7 +102,7 @@ impl Sounds {
         cpu_mhz: u32,
     ) {
         let mut full_time_count = 0u32;
-        bridge.com_step(3);
+        bridge.com_step(3, false);
 
         let mut i = 4;
         while i < 126 {
@@ -238,7 +238,7 @@ impl Sounds {
         bridge.set_period(reload);
         let scaled_vol = self.volume as u32 * reload as u32 / self.tim1_autoreload as u32;
         bridge.set_duty_all(scaled_vol as u16);
-        bridge.com_step(3);
+        bridge.com_step(3, false);
         sys.delay_millis(duration_ms as u32);
     }
 }

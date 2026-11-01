@@ -122,6 +122,36 @@ fn pwm(r: &mut Registers, phase: usize, complementary: bool, enable: bool) {
     }
     mode(r, HIGH[phase], 2);
 }
+fn atomic_step(r: &mut Registers, float: usize, low: usize, driven: usize, complementary: bool) {
+    let mut bsrr = [0u32; 2];
+    let mut moder_mask = [0u32; 2];
+    let mut moder_val = [0u32; 2];
+    let mut apply_pin = |(port, pin): (usize, u8), pin_mode: u32, pin_level: Option<bool>| {
+        moder_mask[port] |= 3 << (pin * 2);
+        moder_val[port] |= pin_mode << (pin * 2);
+        if let Some(high) = pin_level {
+            bsrr[port] |= 1 << (pin + if high { 0 } else { 16 });
+        }
+    };
+    apply_pin(HIGH[float], 1, Some(false));
+    apply_pin(LOW[float], 1, Some(false));
+    apply_pin(HIGH[low], 1, Some(false));
+    apply_pin(LOW[low], 1, Some(true));
+    apply_pin(HIGH[driven], 2, None);
+    if complementary {
+        apply_pin(LOW[driven], 2, None);
+    } else {
+        apply_pin(LOW[driven], 1, Some(false));
+    }
+    for port in [0, 1] {
+        r.writes.push(Write::Bsrr(port, bsrr[port]));
+        r.odr[port] = (r.odr[port] & !(bsrr[port] >> 16)) | (bsrr[port] & 0xffff);
+    }
+    for port in [0, 1] {
+        r.mode[port] = (r.mode[port] & !moder_mask[port]) | moder_val[port];
+        r.writes.push(Write::Mode(port, r.mode[port]));
+    }
+}
 fn assert_registers(expected: &Registers) {
     REGS.with_borrow(|actual| {
         assert_eq!(actual.writes, expected.writes);
@@ -139,10 +169,11 @@ fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
             for forward in [false, true] {
                 REGS.set(Registers::default());
                 let mut expected = Registers::default();
+                let mut sequential_final = Registers::default();
                 let mut driver = if enable {
-                    phase::G0APhaseDriver::new_bridge(complementary)
+                    phase::G0APhaseDriver::new_bridge()
                 } else {
-                    phase::G0APhaseDriver::new(complementary)
+                    phase::G0APhaseDriver::new()
                 };
                 // Exercise consecutive GPIO states in each rotation direction.
                 let sequence = if forward {
@@ -152,14 +183,25 @@ fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
                 };
                 for step in sequence {
                     let [float, low, driven] = ORDER[usize::from(step - 1)];
-                    solid(&mut expected, float, false);
-                    solid(&mut expected, low, true);
-                    pwm(&mut expected, driven, complementary, enable);
-                    driver.com_step(step);
+                    solid(&mut sequential_final, float, false);
+                    solid(&mut sequential_final, low, true);
+                    pwm(&mut sequential_final, driven, complementary, enable);
+                    if enable {
+                        solid(&mut expected, float, false);
+                        solid(&mut expected, low, true);
+                        pwm(&mut expected, driven, complementary, enable);
+                    } else {
+                        atomic_step(&mut expected, float, low, driven, complementary);
+                    }
+                    driver.com_step(step, complementary);
                     assert_registers(&expected);
+                    // Final MODER/ODR state on the batched path must match the
+                    // sequential per-pin reference bit-for-bit.
+                    assert_eq!(expected.mode, sequential_final.mode);
+                    assert_eq!(expected.odr, sequential_final.odr);
                 }
                 for invalid in (0..=255).filter(|s| !(1..=6).contains(s)) {
-                    driver.com_step(invalid);
+                    driver.com_step(invalid, complementary);
                     assert_registers(&expected); // Invalid steps remain no-ops.
                 }
             }
@@ -174,9 +216,9 @@ fn off_brake_sine_and_reentry_preserve_write_order() {
             REGS.set(Registers::default());
             let mut expected = Registers::default();
             let mut driver = if enable {
-                phase::G0APhaseDriver::new_bridge(complementary)
+                phase::G0APhaseDriver::new_bridge()
             } else {
-                phase::G0APhaseDriver::new(complementary)
+                phase::G0APhaseDriver::new()
             };
             driver.all_off();
             for p in 0..3 {
@@ -203,7 +245,7 @@ fn off_brake_sine_and_reentry_preserve_write_order() {
             for p in 0..3 {
                 solid(&mut expected, p, false);
             }
-            driver.all_pwm();
+            driver.all_pwm(complementary);
             for p in 0..3 {
                 pwm(&mut expected, p, complementary, enable);
             }
@@ -216,7 +258,7 @@ fn off_brake_sine_and_reentry_preserve_write_order() {
 fn pulse_output_only_toggles_on_sectors_one_and_four() {
     REGS.set(Registers::default());
     let mut expected = Registers::default();
-    let mut driver = phase::G0APhaseDriver::new(false);
+    let mut driver = phase::G0APhaseDriver::new();
     driver.pulse_toggle(1);
     assert_registers(&expected);
     driver.enable_pulse_output::<gpio_pin::PB10>();
@@ -275,7 +317,7 @@ fn compare(p: usize, v: u16) {
 fn borrowed_bridge_keeps_compare_order_and_explicit_latch_boundary() {
     REGS.set(Registers::default());
     let mut timer = Timer;
-    let mut driver = phase::G0APhaseDriver::new(false);
+    let mut driver = phase::G0APhaseDriver::new();
     let mut b = bridge::StmBridge {
         pwm: &mut timer,
         phase: &mut driver,
@@ -360,51 +402,61 @@ impl rm32::hal::System for System {
 
 #[test]
 fn firmware_tones_keep_gpio_timer_and_irq_sequence() {
-    for input_tune in [false, true] {
-        REGS.set(Registers::default());
-        let mut expected = Registers::default();
-        let mut timer = Timer;
-        let mut driver = phase::G0APhaseDriver::new(false);
-        let mut b = bridge::StmBridge {
-            pwm: &mut timer,
-            phase: &mut driver,
-        };
-        let mut sys = System { irq: input_tune };
-        let sounds = rm32::sounds::Sounds::new(1999);
-        let notes = if input_tune {
-            sounds.play_input(&mut b, &mut sys);
-            expected.writes.push(Write::Irq(false));
-            [(80, 3, 100), (70, 3, 100), (40, 3, 100)]
-        } else {
-            sounds.play_startup(&mut b, &mut sys);
-            [(55, 3, 200), (40, 5, 200), (25, 6, 200)]
-        };
-        for (divider, step, delay) in notes {
-            expected
-                .writes
-                .extend([Write::Period(1999), Write::Divider(divider)]);
-            for p in 0..3 {
-                expected.writes.push(Write::Compare(p, 15));
+    for enable in [false, true] {
+        for input_tune in [false, true] {
+            REGS.set(Registers::default());
+            let mut expected = Registers::default();
+            let mut timer = Timer;
+            let mut driver = if enable {
+                phase::G0APhaseDriver::new_bridge()
+            } else {
+                phase::G0APhaseDriver::new()
+            };
+            let mut b = bridge::StmBridge {
+                pwm: &mut timer,
+                phase: &mut driver,
+            };
+            let mut sys = System { irq: input_tune };
+            let sounds = rm32::sounds::Sounds::new(1999);
+            let notes = if input_tune {
+                sounds.play_input(&mut b, &mut sys);
+                expected.writes.push(Write::Irq(false));
+                [(80, 3, 100), (70, 3, 100), (40, 3, 100)]
+            } else {
+                sounds.play_startup(&mut b, &mut sys);
+                [(55, 3, 200), (40, 5, 200), (25, 6, 200)]
+            };
+            for (divider, step, delay) in notes {
+                expected
+                    .writes
+                    .extend([Write::Period(1999), Write::Divider(divider)]);
+                for p in 0..3 {
+                    expected.writes.push(Write::Compare(p, 15));
+                }
+                expected.queued = [15; 3];
+                let [float, low, driven] = ORDER[step - 1];
+                if enable {
+                    solid(&mut expected, float, false);
+                    solid(&mut expected, low, true);
+                    pwm(&mut expected, driven, false, true);
+                } else {
+                    atomic_step(&mut expected, float, low, driven, false);
+                }
+                expected
+                    .writes
+                    .extend([Write::DelayMs(delay), Write::Watchdog]);
             }
-            expected.queued = [15; 3];
-            let [float, low, driven] = ORDER[step - 1];
-            solid(&mut expected, float, false);
-            solid(&mut expected, low, true);
-            pwm(&mut expected, driven, false, false);
+            for p in 0..3 {
+                solid(&mut expected, p, false);
+            }
             expected
                 .writes
-                .extend([Write::DelayMs(delay), Write::Watchdog]);
+                .extend([Write::Divider(0), Write::Period(1999)]);
+            if input_tune {
+                expected.writes.push(Write::Irq(true));
+            }
+            assert_eq!(sys.irq, input_tune);
+            assert_registers(&expected);
         }
-        for p in 0..3 {
-            solid(&mut expected, p, false);
-        }
-        expected
-            .writes
-            .extend([Write::Divider(0), Write::Period(1999)]);
-        if input_tune {
-            expected.writes.push(Write::Irq(true));
-        }
-        assert_eq!(sys.irq, input_tune);
-        assert_registers(&expected);
     }
 }

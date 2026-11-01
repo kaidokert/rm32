@@ -23,17 +23,32 @@ pub enum Phase {
     C,
 }
 
+const FLOATING_PHASE_TABLE: [Phase; 8] = {
+    let mut table = [Phase::C; 8];
+    let mut step = 1u8;
+    while step <= 6 {
+        let legs = crate::bridge::step_legs(step, false);
+        table[step as usize] = if matches!(legs[0], crate::bridge::LegRole::Float) {
+            Phase::A
+        } else if matches!(legs[1], crate::bridge::LegRole::Float) {
+            Phase::B
+        } else {
+            Phase::C
+        };
+        step += 1;
+    }
+    table
+};
+
 /// Floating phase for six-step commutation. Invalid steps retain the
 /// established comparator fallback to C; they do not wrap into valid steps.
+///
+/// Uses a compile-time lookup table so Cortex-M0 targets emit a direct indexed
+/// load instead of a multi-branch bit-test chain on every commutation.
+#[inline(always)]
 pub const fn floating_phase(step: u8) -> Phase {
-    let legs = crate::bridge::step_legs(step, false);
-    if step < 1 || step > 6 {
-        return Phase::C;
-    }
-    if matches!(legs[0], crate::bridge::LegRole::Float) {
-        Phase::A
-    } else if matches!(legs[1], crate::bridge::LegRole::Float) {
-        Phase::B
+    if step < 8 {
+        FLOATING_PHASE_TABLE[step as usize]
     } else {
         Phase::C
     }
@@ -68,13 +83,14 @@ pub trait PulseOutput {
     fn toggle(&mut self);
 }
 
-/// Motor phase output control. The port retains its configured drive mode.
-/// Invalid commutation steps leave outputs unchanged.
+/// Motor phase output control. Callers supply the active drive mode
+/// (`complementary` vs diode) explicitly; invalid commutation steps leave
+/// outputs unchanged.
 pub trait PhaseOutput {
-    fn com_step(&mut self, step: u8);
+    fn com_step(&mut self, step: u8, complementary: bool);
     fn all_off(&mut self);
     fn full_brake(&mut self);
-    fn all_pwm(&mut self);
+    fn all_pwm(&mut self, complementary: bool);
     fn proportional_brake(&mut self);
     /// Toggle pulse output on commutation step 1/4 (debug RPM measurement).
     /// Default no-op — override for boards with pulse output pin.

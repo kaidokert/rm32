@@ -214,7 +214,9 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.bridge().set_duty_all(0);
         ctx.hal.bridge().latch();
         ctx.commutation.set_step(changeover);
-        ctx.hal.bridge().com_step(changeover);
+        ctx.hal
+            .bridge()
+            .com_step(changeover, ctx.config.use_comp_pwm());
         let ci = ctx.shared.commutation_interval();
         ctx.hal.interval().set_count(ci);
         ctx.bemf.reset_for_step();
@@ -277,7 +279,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                     .commutation
                     .record_interval::<H>(ctx.shared.commutation_interval() as u16);
                 ctx.shared.set_e_com_time(e_com);
-                ctx.hal.bridge().com_step(step);
+                ctx.hal.bridge().com_step(step, ctx.config.use_comp_pwm());
                 route_bemf(ctx.hal.bemf(), ctx.commutation);
                 ctx.shared
                     .set_commutation_interval(H::STARTUP_COMMUTATION_INTERVAL);
@@ -386,7 +388,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.hal.bemf().mask_irq();
             ctx.hal.bridge().set_duty_all(0);
             ctx.hal.bridge().latch();
-            ctx.hal.bridge().com_step(2);
+            ctx.hal.bridge().com_step(2, ctx.config.use_comp_pwm());
             ctx.duty.active_brake_on = true;
         }
         // AM32 main.c:1936.
@@ -518,7 +520,7 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 .commutation
                 .record_interval::<H>(ctx.shared.commutation_interval() as u16);
             ctx.shared.set_e_com_time(e_com);
-            ctx.hal.bridge().com_step(step);
+            ctx.hal.bridge().com_step(step, ctx.config.use_comp_pwm());
             ctx.hal.bridge().pulse_toggle(step);
             route_bemf(ctx.hal.bemf(), ctx.commutation);
             ctx.bemf.reset_for_step();
@@ -540,6 +542,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     com_timer: &mut T,
     comp: &mut C,
     phase: &mut Ph,
+    comp_pwm: bool,
     bidirectional: bool,
     strict_changeover: bool,
 ) where
@@ -562,7 +565,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     let ci0 = shared.commutation_interval();
     let e_com = commutation.record_interval::<P>(ci0 as u16);
     shared.set_e_com_time(e_com);
-    phase.com_step(step);
+    phase.com_step(step, comp_pwm);
     phase.pulse_toggle(step);
     route_bemf(comp, commutation);
 
