@@ -288,14 +288,52 @@ pub fn prepare_input_save(
     })
 }
 
+struct LockedComPhase;
+
+impl rm32::hal::PhaseOutput for LockedComPhase {
+    #[inline]
+    fn com_step(&mut self, step: u8) {
+        COM_LOCAL.with_masked(|com| com.phase.com_step(step));
+    }
+    #[inline]
+    fn all_off(&mut self) {
+        COM_LOCAL.with_masked(|com| com.phase.all_off());
+    }
+    #[inline]
+    fn full_brake(&mut self) {
+        COM_LOCAL.with_masked(|com| com.phase.full_brake());
+    }
+    #[inline]
+    fn all_pwm(&mut self) {
+        COM_LOCAL.with_masked(|com| com.phase.all_pwm());
+    }
+    #[inline]
+    fn proportional_brake(&mut self) {
+        COM_LOCAL.with_masked(|com| com.phase.proportional_brake());
+    }
+    #[inline]
+    fn pulse_toggle(&mut self, step: u8) {
+        COM_LOCAL.with_masked(|com| com.phase.pulse_toggle(step));
+    }
+}
+
 /// 20kHz control loop tick (TIM6 ISR body).
 pub fn handle_tim6() {
+    use rm32::hal::{BemfSensor as _, ComTimer as _, PhaseOutput as _};
     ensure_split_init();
     let shared = isr::shared();
     // SAFETY: `TICK_LOCAL` is only accessed by `handle_tim6` (which cannot
     // preempt itself) and `service_sine` (which runs in thread mode with
     // interrupts masked, so `handle_tim6` and `service_sine` never overlap).
     let tick = unsafe { TICK_LOCAL.get_unchecked() };
+
+    if shared.running() && CONFIG_DIRTY.load(Ordering::Acquire) {
+        INPUT_LOCAL.with_masked(|inp| {
+            if CONFIG_DIRTY.swap(false, Ordering::AcqRel) {
+                tick.config = inp.config;
+            }
+        });
+    }
 
     if rm32::control::isr_logic::is_steady_running_tick(shared, &tick.config) {
         let pwm = &mut tick.pwm;
@@ -304,17 +342,28 @@ pub fn handle_tim6() {
             &mut tick.duty,
             &tick.config,
             tick.voltage_based_ramp,
-            |compare, final_duty, period| {
+            |compare, period| {
                 pwm.set_duty_all(compare);
-                shared.set_duty_cycle(final_duty);
                 pwm.set_auto_reload(period);
             },
         );
+        let pwm = &mut tick.pwm;
         COM_LOCAL.with_masked(|com| {
             if CONFIG_DIRTY.swap(false, Ordering::AcqRel) {
                 // SAFETY: Interrupts are masked (`with_masked`), so no input
                 // ISR or main-loop config accessor can overlap this copy.
                 tick.config = unsafe { INPUT_LOCAL.get_unchecked().config };
+            }
+            if shared.isr_action() == rm32::shared_comm::IsrAction::AllOff {
+                shared.take_duty_kick_down();
+                shared.set_changeover_step(0);
+                com.com_timer.disable_interrupt();
+                com.phase.all_off();
+                pwm.set_duty_all(0);
+                pwm.generate_update_event();
+                com.comp.mask_irq();
+                shared.clear_isr_action(rm32::shared_comm::IsrAction::AllOff);
+                return;
             }
             rm32::control::isr_logic::steady_running_tick_sync_com(
                 shared,
@@ -356,21 +405,23 @@ pub fn handle_tim6() {
     if !tick.tone.active() && (request as u8 == 0 || bridge_busy) {
         return;
     }
-    // Separate critical section so any priority-0 COMP/TIM14 interrupt that
-    // pended during `ten_khz_tick` can preempt before tone housekeeping runs.
-    COM_LOCAL.with_masked(|com| {
-        let pwm = &mut tick.pwm;
-        let phase = &mut com.phase;
-        rm32::tone::step::<crate::platform::StmPlatform, _, _>(
-            &mut tick.tone,
-            request,
-            bridge_busy,
-            tick.config.beep_volume,
-            shared.tim1_arr(),
-            || crate::bridge::StmBridge { pwm, phase },
-        );
-        shared.set_tone_active(tick.tone.active());
-    });
+    // Run `tone::step` with interrupts unmasked (`PRIMASK = 0`), acquiring
+    // `COM_LOCAL.with_masked` only inside `LockedComPhase` when a note transition
+    // or silence actually writes the phase driver.
+    let mut locked_phase = LockedComPhase;
+    let pwm = &mut tick.pwm;
+    rm32::tone::step::<crate::platform::StmPlatform, _, _>(
+        &mut tick.tone,
+        request,
+        bridge_busy,
+        tick.config.beep_volume,
+        shared.tim1_arr(),
+        || crate::bridge::StmBridge {
+            pwm,
+            phase: &mut locked_phase,
+        },
+    );
+    shared.set_tone_active(tick.tone.active());
 }
 
 /// Commutation timer expired (TIM14/TIM16 ISR body, priority 0).
@@ -396,21 +447,6 @@ pub fn handle_tim14() {
     );
 }
 
-/// BEMF zero-cross persistence check and commutation arming (COMP ISR body, priority 0).
-pub fn handle_comp() {
-    ensure_split_init();
-    // SAFETY: Same priority-0 invariant as `handle_tim14`.
-    let com = unsafe { COM_LOCAL.get_unchecked() };
-    let _accepted = rm32::control::isr_logic::bemf_zero_cross(
-        isr::shared(),
-        &com.commutation,
-        &mut com.bemf,
-        &mut com.comp,
-        &mut com.interval,
-        &mut com.com_timer,
-    );
-}
-
 /// Comparator interrupt entry point across all MCUs (priority 0): runs the
 /// core's half-average-interval acceptance gate (`on_bemf_irq`, matching AM32
 /// `COMP_IRQHandler`), then delegates to `bemf_zero_cross` when the gate opens.
@@ -424,6 +460,7 @@ pub fn handle_comp_irq() {
     let com = unsafe { COM_LOCAL.get_unchecked() };
     if !shared.running() || shared.old_routine() {
         com.comp.mask_irq();
+        com.comp.clear_pending();
         return;
     }
     if rm32::control::isr_logic::on_bemf_irq(
@@ -508,6 +545,13 @@ pub fn handle_exti_frame() -> CaptureConfig {
         );
         shared.set_zero_input_count(zic);
 
+        let may_mutate_config = inp.cmd.in_programming_mode()
+            || matches!(
+                actions.action,
+                rm32::transfer::TransferAction::DshotCommand { .. }
+                    | rm32::transfer::TransferAction::ServoCalibrationDone { .. }
+            );
+        let prev_config = may_mutate_config.then_some(inp.config);
         let result = rm32::transfer::dispatch(
             &actions,
             shared,
@@ -523,9 +567,11 @@ pub fn handle_exti_frame() -> CaptureConfig {
             },
             |prescaler| inp.input.set_output_prescaler(prescaler),
         );
-        CFG_BIDIR.store(inp.config.is_bidirectional(), Ordering::Relaxed);
-        CFG_STRICT_CHANGEOVER.store(inp.config.use_strict_changeover(), Ordering::Relaxed);
-        CONFIG_DIRTY.store(true, Ordering::Release);
+        if prev_config.is_some_and(|prev| prev.as_bytes() != inp.config.as_bytes()) {
+            CFG_BIDIR.store(inp.config.is_bidirectional(), Ordering::Relaxed);
+            CFG_STRICT_CHANGEOVER.store(inp.config.use_strict_changeover(), Ordering::Relaxed);
+            CONFIG_DIRTY.store(true, Ordering::Release);
+        }
         if let Some(psc) = actions.next_capture.prescaler {
             inp.input.set_capture_prescaler(psc);
         }

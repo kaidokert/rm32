@@ -115,9 +115,18 @@ pub fn init(
         tim6.cr1().write(|w| w.cen().set_bit());
     }
 
-    // NVIC
+    // NVIC priorities — STM32G4 (Cortex-M4) implements 4 priority bits in the
+    // upper nibble of each IPR byte (`N << 4`). Set `COMP1_2_3` and
+    // `TIM1_UP_TIM16` to priority 0 and `TIM6_DACUNDER` to priority 3 so BEMF
+    // zero-cross and commutation interrupts can preempt the 20 kHz control tick.
     unsafe {
         use pac::{Interrupt, NVIC};
+        let mut nvic = cortex_m::Peripherals::steal().NVIC;
+        nvic.set_priority(Interrupt::COMP1_2_3, 0 << 4);
+        nvic.set_priority(Interrupt::TIM1_UP_TIM16, 0 << 4);
+        nvic.set_priority(Interrupt::DMA1_CH1, 1 << 4);
+        nvic.set_priority(Interrupt::EXTI15_10, 2 << 4);
+        nvic.set_priority(Interrupt::TIM6_DACUNDER, 3 << 4);
         NVIC::unmask(Interrupt::TIM6_DACUNDER);
         NVIC::unmask(Interrupt::TIM1_UP_TIM16);
         NVIC::unmask(Interrupt::COMP1_2_3);

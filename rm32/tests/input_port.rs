@@ -228,8 +228,16 @@ mod mcu {
     }
 }
 
+static TEST_SERIAL_LOCK: HostMutex<()> = HostMutex::new(());
 static RECEIVE_DMA_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static LAST_PWM_MASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LAST_RECEIVE_DMA_SELF_ADDR: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static LAST_DMA_BUFFER_SELF_ADDR: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+static LAST_PWM_DUTY_MASKED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+static LAST_PWM_PERIOD_MASKED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 struct Dma(UnsafeCell<[u32; 64]>);
 // Only one test uses this DMA substitute, and every read/write is inside free().
@@ -242,6 +250,10 @@ struct Input {
 impl InputCapture for Input {
     fn receive_dshot_dma(&mut self) {
         RECEIVE_DMA_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        LAST_RECEIVE_DMA_SELF_ADDR.store(
+            self as *const Self as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
     }
     fn send_dshot_dma(&mut self) {}
     fn input_pin_state(&self) -> bool {
@@ -252,6 +264,10 @@ impl InputCapture for Input {
     fn set_pull_none(&mut self) {}
     fn dma_buffer(&self) -> &[u32; 64] {
         assert!(interrupt::masked());
+        LAST_DMA_BUFFER_SELF_ADDR.store(
+            self as *const Self as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
         // See DMA's serialized access contract above.
         unsafe { &*DMA.0.get() }
     }
@@ -271,11 +287,11 @@ impl InputCapture for Input {
 struct Pwm;
 impl bridge::TimerPwm for Pwm {
     fn set_duty_all(&mut self, value: u16) {
-        LAST_PWM_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
+        LAST_PWM_DUTY_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
         event(BridgeEvent::Duty(value));
     }
     fn set_auto_reload(&mut self, value: u16) {
-        LAST_PWM_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
+        LAST_PWM_PERIOD_MASKED.store(interrupt::masked(), std::sync::atomic::Ordering::SeqCst);
         event(BridgeEvent::Period(value));
     }
     fn set_prescaler(&mut self, value: u16) {
@@ -391,6 +407,7 @@ fn command(value: u16) {
 
 #[test]
 fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
+    let _serial = TEST_SERIAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     type Main = rm32::main_state::MainState<platform::StmPlatform>;
     let config = rm32::config::EepromConfig::default();
     isr::init_isr_state(isr::IsrState {
@@ -419,6 +436,11 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
         armed_timeout_count: 0,
         voltage_based_ramp: false,
     });
+    let mut staged_input_addr = 0usize;
+    isr::with_isr_state(|s| {
+        staged_input_addr = &s.hal.input as *const Input as usize;
+    });
+    assert_ne!(staged_input_addr, 0);
     let mut main = Main::new(
         &rm32::board::BoardConfig::DEFAULT,
         rm32::main_state::ChipParams {
@@ -431,11 +453,23 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     shared.set_input_set(true);
     shared.set_dshot(true);
     RECEIVE_DMA_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
+    LAST_RECEIVE_DMA_SELF_ADDR.store(0, std::sync::atomic::Ordering::SeqCst);
+    LAST_DMA_BUFFER_SELF_ADDR.store(0, std::sync::atomic::Ordering::SeqCst);
     raw_frame(0); // First interrupt moves state out of the initialization cell.
     assert_eq!(
         RECEIVE_DMA_CALLS.load(std::sync::atomic::Ordering::SeqCst),
         1,
         "first ISR transfer must re-arm DMA at the live INPUT_LOCAL buffer address"
+    );
+    let rearmed_addr = LAST_RECEIVE_DMA_SELF_ADDR.load(std::sync::atomic::Ordering::SeqCst);
+    let live_addr = LAST_DMA_BUFFER_SELF_ADDR.load(std::sync::atomic::Ordering::SeqCst);
+    assert_ne!(
+        rearmed_addr, staged_input_addr,
+        "receive_dshot_dma must not point at the consumed ISR_STATE staging cell"
+    );
+    assert_eq!(
+        rearmed_addr, live_addr,
+        "receive_dshot_dma must be called on the permanent INPUT_LOCAL instance"
     );
     let mut visited = false;
     isr::with_isr_state(|_| visited = true);
@@ -555,6 +589,8 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     shared.set_tim1_arr(1999);
     take_events();
     let entries = interrupt::entries();
+    LAST_PWM_DUTY_MASKED.store(true, std::sync::atomic::Ordering::SeqCst);
+    LAST_PWM_PERIOD_MASKED.store(true, std::sync::atomic::Ordering::SeqCst);
     isr_handlers::handle_tim6();
     assert_eq!(
         interrupt::entries(),
@@ -562,8 +598,12 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
         "steady-state Running tick must enter interrupt::free only once for COM_LOCAL sync"
     );
     assert!(
-        !LAST_PWM_MASKED.load(std::sync::atomic::Ordering::SeqCst),
-        "steady-state Running tick must update TIM1 PWM with interrupts unmasked"
+        !LAST_PWM_DUTY_MASKED.load(std::sync::atomic::Ordering::SeqCst),
+        "steady-state Running tick must update TIM1 duty compare with interrupts unmasked"
+    );
+    assert!(
+        !LAST_PWM_PERIOD_MASKED.load(std::sync::atomic::Ordering::SeqCst),
+        "steady-state Running tick must update TIM1 auto-reload period with interrupts unmasked"
     );
     assert_eq!(shared.gate_avg(), 1_000);
 
@@ -631,6 +671,7 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
 
 #[test]
 fn timer_init_and_set_and_enable_match_free_running_am32_contract() {
+    let _serial = TEST_SERIAL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     *mcu::TIM2_REGS.lock().unwrap() = mcu::MockTimerRegs::default();
     *mcu::COM_REGS.lock().unwrap() = mcu::MockTimerRegs::default();
 

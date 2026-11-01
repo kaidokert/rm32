@@ -37,6 +37,7 @@ pub fn is_steady_running_tick<S: SharedComm>(
     shared.running()
         && !shared.old_routine()
         && !shared.stepper_sine()
+        && !shared.tone_active()
         && shared.isr_action() == IsrAction::None
         && shared.changeover_step() == 0
         && shared.adjusted_input() >= start_threshold
@@ -57,7 +58,7 @@ pub fn steady_running_tick_unmasked<P, S, F>(
 ) where
     P: Timing,
     S: SharedComm,
-    F: FnOnce(u16, u16, u16),
+    F: FnOnce(u16, u16),
 {
     shared.increment_control_ticks();
     shared.one_khz_counter_inc();
@@ -82,8 +83,7 @@ pub fn steady_running_tick_unmasked<P, S, F>(
     );
     shared.set_duty_cycle_setpoint(setpoint);
 
-    let kick_down = shared.take_duty_kick_down();
-    if kick_down && shared.running() {
+    if shared.take_duty_kick_down() {
         duty.kick_down();
     }
 
@@ -101,13 +101,8 @@ pub fn steady_running_tick_unmasked<P, S, F>(
         voltage_based_ramp,
     );
 
-    let stall_boost = if shared.running() {
-        shared.stall_protection_adjust()
-    } else {
-        0
-    };
     duty.clamp_ceilings(
-        stall_boost,
+        shared.stall_protection_adjust(),
         shared.duty_maximum(),
         shared.current_limit_adjust(),
     );
@@ -116,7 +111,13 @@ pub fn steady_running_tick_unmasked<P, S, F>(
     duty.active_brake_on = false;
     let compare = duty.pwm_compare(tim1_arr);
     let final_duty = duty.finalize();
-    apply_pwm(compare, final_duty, tim1_arr);
+    shared.set_duty_cycle(final_duty);
+    // Re-check `isr_action` and `tone_active` before touching PWM hardware in
+    // case an input ISR preempted the unmasked calculation and published a stop
+    // (`IsrAction::AllOff`) or tone state changed.
+    if !shared.tone_active() && shared.isr_action() == IsrAction::None {
+        apply_pwm(compare, tim1_arr);
+    }
 }
 
 /// Priority-0 state synchronization for a steady-state `Running` control tick.
@@ -441,14 +442,16 @@ pub enum BemfIrq {
     /// (re-raised if the level flipped during the clear).
     Noise,
     /// Gate closed, comparator at the post-ZC level: left pending, so the
-    /// interrupt re-enters until the gate opens. Bounded: the interval
-    /// timer free-runs, so it passes the gate within `gate_avg / 2`.
+    /// interrupt tail-chains at priority 0 until the free-running interval
+    /// timer crosses `gate_avg / 2` (exact AM32 `COMP_IRQHandler` behavior;
+    /// masking EXTI instead would defer re-enable to the 50 us `TIM6` tick
+    /// and add up to 50 us of commutation phase lag).
     Camp,
 }
 
 /// The COMP interrupt's acceptance gate (AM32 `COMP_IRQHandler`,
-/// `stm32l4xx_it.c` / `stm32g0xx_it.c`): the gate opens once the interval
-/// timer has run past half the control tick's latched average
+/// `stm32l4xx_it.c` / `stm32g0xx_it.c`): the gate opens once `gate_avg > 0`
+/// and the interval timer has run past half the control tick's latched average
 /// (`IsrTiming::gate_avg`). Gate open on an edge -> `Open` (the caller then
 /// runs `bemf_zero_cross`, which masks on accept and stays armed on a
 /// persistence reject). Closed -> `Noise` or `Camp`.
@@ -474,7 +477,8 @@ where
         return BemfIrq::Spurious;
     }
     entered();
-    if interval.count() > shared.gate_avg() >> 1 {
+    let gate_avg = shared.gate_avg();
+    if gate_avg > 0 && interval.count() > gate_avg >> 1 {
         sensor.clear_pending();
         BemfIrq::Open
     } else if sensor.level() == rising {
@@ -588,6 +592,10 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
             ci0 < exit_interval
         };
         if changeover_met {
+            if shared.gate_avg() == 0 {
+                let avg = crate::platform::e_com_us_to_avg_ticks::<P>(e_com).max(1) as u32;
+                shared.set_gate_avg(avg);
+            }
             shared.transition(MotorEvent::BemfLocked);
             comp.enable_irq();
         }

@@ -1721,9 +1721,8 @@ mod tests {
             &mut duty_split,
             &config,
             true,
-            |d, final_duty, p| {
+            |d, p| {
                 split_duty = d;
-                shared_split.set_duty_cycle(final_duty);
                 split_period = p;
             },
         );
@@ -1762,6 +1761,40 @@ mod tests {
         assert_eq!(
             shared_split.interval_timer_count.get(),
             shared_full.interval_timer_count.get()
+        );
+
+        // Exercise telemetry threshold wrap and mid-tick AllOff/tone suppression on the split path.
+        let limit = crate::constants::telemetry_interval_ticks::<crate::platform::TestPlatform>(
+            config.telemetry_on_interval,
+        );
+        shared_split.telem_counter.set(limit - 1);
+        shared_split.send_telemetry.set(false);
+        shared_split.request_isr_action(IsrAction::AllOff);
+        let mut pwm_called = false;
+        isr_logic::steady_running_tick_unmasked::<crate::platform::TestPlatform, _, _>(
+            &shared_split,
+            &mut duty_split,
+            &config,
+            false,
+            |_, _| {
+                pwm_called = true;
+            },
+        );
+        assert!(shared_split.send_telemetry.get());
+        assert!(
+            !pwm_called,
+            "mid-tick AllOff must suppress apply_pwm on the unmasked fast path"
+        );
+        shared_split.clear_isr_action(IsrAction::AllOff);
+
+        // Unlatched gate_avg == 0 must keep the half-average gate closed.
+        let shared_zero_gate = TestShared::new();
+        shared_zero_gate.gate_avg.set(0);
+        let mut comp = GateSensor::new(true, &[false]);
+        assert_eq!(
+            isr_logic::on_bemf_irq(&shared_zero_gate, &mut comp, &GateTimer(50), true, || {}),
+            isr_logic::BemfIrq::Camp,
+            "unlatched gate_avg == 0 must not open the half-average gate"
         );
     }
 
