@@ -139,7 +139,7 @@ impl Adc for AdcProbe {
 #[derive(Default)]
 struct Telemetry(Vec<u8>);
 impl TelemetryUart for Telemetry {
-    fn send_dma(&mut self, bytes: &[u8]) {
+    fn send(&mut self, bytes: &[u8]) {
         self.0 = bytes.to_vec();
     }
 }

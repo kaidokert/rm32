@@ -70,7 +70,7 @@ fn EXTI15_10() {
     // Re-enable DMA CH5 for next frame
     let dma = unsafe { &*pac::DMA1::PTR };
     unsafe {
-        dma.cndtr5.write(|w| w.bits(next_capture.ndtr));
+        dma.cndtr5.write(|w| w.bits(next_capture.edges_per_burst));
         dma.ccr5.modify(|r, w| w.bits(r.bits() | 1)); // Enable CH5
     }
     // TIM15 CR1.CEN

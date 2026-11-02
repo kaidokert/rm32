@@ -85,7 +85,7 @@ fn main() -> ! {
     {
         use rm32::hal::InputCapture;
         hal.input.set_inverted(BOARD.inverted_input);
-        hal.input.receive_dshot_dma();
+        hal.input.start_capture();
     }
 
     // --- Build ISR state and move to global ---
@@ -280,7 +280,7 @@ fn main() -> ! {
             shared.set_send_esc_info_flag(false);
             let mut info_pkt = [0u8; 49];
             rm32::telemetry::make_info_packet(&mut info_pkt, main_state.config.as_bytes());
-            telem.send_dma(&info_pkt);
+            telem.send(&info_pkt);
         }
 
         if main_state.needs_reset {

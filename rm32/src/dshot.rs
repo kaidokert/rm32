@@ -73,15 +73,15 @@ pub fn unpack(packet: u16, bidirectional: bool) -> DshotFrame {
 }
 
 /// Decode a DShot frame from a DMA capture buffer using [`unpack`].
-/// `dma_buffer` contains 32 entries (16 pulse pairs).
+/// `edges` contains 32 entries (16 pulse pairs).
 /// `frametime_low`/`frametime_high` define the exclusive valid window.
 pub fn decode_frame(
-    dma_buffer: &[u32; 32],
+    edges: &[u32; 32],
     frametime_low: u16,
     frametime_high: u16,
     bidirectional: bool,
 ) -> DshotFrame {
-    let frametime = (dma_buffer[31].wrapping_sub(dma_buffer[0])) as u16;
+    let frametime = (edges[31].wrapping_sub(edges[0])) as u16;
     let halfpulsetime = frametime >> 5;
 
     if frametime <= frametime_low || frametime >= frametime_high {
@@ -90,7 +90,7 @@ pub fn decode_frame(
 
     let mut packet = 0u16;
     for i in 0..16 {
-        let pdiff = (dma_buffer[i * 2 + 1].wrapping_sub(dma_buffer[i * 2])) as u16;
+        let pdiff = (edges[i * 2 + 1].wrapping_sub(edges[i * 2])) as u16;
         packet = (packet << 1) | u16::from(pdiff > halfpulsetime);
     }
     unpack(packet, bidirectional)

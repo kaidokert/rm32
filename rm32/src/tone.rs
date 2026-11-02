@@ -5,7 +5,10 @@
 //! changes the note, or silences the tone. Starting motor output, braking, or
 //! sine stepping always returns bridge ownership to that path.
 
+/// Word-aligned so Cortex-M0 (`thumbv6m`) copies notes from tune tables with
+/// two 32-bit loads/stores instead of calling `__aeabi_memcpy` in the tick ISR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(C, align(4))]
 pub struct Note {
     pub prescaler: u16,
     pub step: u8,
@@ -429,5 +432,11 @@ mod tests {
         shared.set_motor_mode(crate::motor_mode::MotorMode::Armed);
         shared.set_prop_brake_active(true);
         assert!(bridge_busy(&shared, false));
+    }
+
+    #[test]
+    fn note_layout_is_word_aligned_for_thumbv6m_loads() {
+        assert_eq!(core::mem::size_of::<Note>(), 8);
+        assert_eq!(core::mem::align_of::<Note>(), 4);
     }
 }

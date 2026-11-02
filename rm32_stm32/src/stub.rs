@@ -23,5 +23,5 @@ impl Adc for StubAdc {
 pub struct StubTelem;
 
 impl TelemetryUart for StubTelem {
-    fn send_dma(&mut self, _data: &[u8]) {}
+    fn send(&mut self, _data: &[u8]) {}
 }

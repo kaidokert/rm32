@@ -52,7 +52,7 @@ fn EXTI4_15() {
     let dma = unsafe { &*stm32g0xx_hal::stm32::DMA1::ptr() };
     dma.ch(0)
         .ndtr()
-        .write(|w| unsafe { w.bits(next_capture.ndtr) });
+        .write(|w| unsafe { w.bits(next_capture.edges_per_burst) });
     dma.ch(0).cr().modify(|_, w| w.en().set_bit());
     tim3.cr1().modify(|_, w| w.cen().set_bit());
 }

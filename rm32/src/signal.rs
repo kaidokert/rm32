@@ -11,8 +11,8 @@ pub enum SignalType {
 }
 
 /// Detect input type from DMA buffer pulse pattern.
-pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
-    if dma_buffer.len() < 3 {
+pub fn detect_input(edges: &[u32], _cpu_mhz: u8) -> SignalType {
+    if edges.len() < 3 {
         return SignalType::None;
     }
 
@@ -23,9 +23,9 @@ pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
     // The first captured slot can still hold the previous frame tail. Start
     // from buf[1] and subtract at timer width so 16-bit counter wraps stay
     // valid pulse widths.
-    let mut last = dma_buffer[1] as u16;
-    let end = dma_buffer.len().min(32);
-    for sample in &dma_buffer[2..end] {
+    let mut last = edges[1] as u16;
+    let end = edges.len().min(32);
+    for sample in &edges[2..end] {
         let sample = *sample as u16;
         let diff = sample.wrapping_sub(last);
         if diff > 0 {
@@ -66,12 +66,12 @@ pub fn detect_input(dma_buffer: &[u32], _cpu_mhz: u8) -> SignalType {
 /// Returns mapped throttle value (0-2047 for unidirectional).
 /// Compute MultiShot input from DMA buffer.
 /// MultiShot uses a single pulse width (243-1200µs → 0-2000 throttle).
-pub fn compute_multishot(dma_buffer: &[u32]) -> Option<u16> {
+pub fn compute_multishot(edges: &[u32]) -> Option<u16> {
     use crate::functions::map;
-    if dma_buffer.len() < 2 {
+    if edges.len() < 2 {
         return None;
     }
-    let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]);
+    let pulse = edges[1].wrapping_sub(edges[0]);
     if pulse > 0 && pulse < 1500 {
         Some(map(pulse as i32, 243, 1200, 0, 2000) as u16)
     } else {
