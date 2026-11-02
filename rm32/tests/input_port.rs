@@ -13,6 +13,7 @@ enum BridgeEvent {
     Period(u16),
     Divider(u16),
     AllOff,
+    AllPwm(bool),
     ComStep(u8),
     ComStepComp(u8, bool),
 }
@@ -314,7 +315,9 @@ impl PhaseOutput for Phase {
         event(BridgeEvent::AllOff);
     }
     fn full_brake(&mut self) {}
-    fn all_pwm(&mut self, _: bool) {}
+    fn all_pwm(&mut self, complementary: bool) {
+        event(BridgeEvent::AllPwm(complementary));
+    }
     fn proportional_brake(&mut self) {}
 }
 #[derive(Default)]
@@ -682,8 +685,23 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     raw_frame(20);
     raw_frame(1);
     raw_frame(37);
-    rm32::system::SystemTick::<platform::StmPlatform>::sync_config_writes(shared, &mut main);
+    // Even if a DShot config write lands before the main loop's explicit
+    // sync_config_writes call, isr_handlers::service_sine synchronizes
+    // main.config and tick.config inside its masked critical section so sine
+    // output and priority-0 commutation observe the same drive mode.
+    let mut system = rm32::system::SystemTick::<platform::StmPlatform>::new();
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::StepperSine);
+    shared.set_adjusted_input(100);
+    take_events();
+    let _ = isr_handlers::service_sine(&mut system, &mut main, 50);
     assert_eq!(main.config.comp_pwm, 1);
+    let sine_events = take_events();
+    assert!(
+        sine_events.contains(&BridgeEvent::AllPwm(true)),
+        "service_sine must synchronize pending DShot comp_pwm before all_pwm"
+    );
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    shared.set_adjusted_input(0);
 
     command(1);
     take_events();
