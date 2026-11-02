@@ -49,9 +49,11 @@ HARNESS_EXE=../../downloads/target/release/rm32_harness python3 -m pytest test_v
 
 Input actions are now applied by `transfer::dispatch` in both firmware and the
 host harness. `InputContext` borrows the caller's command/configuration and EDT
-state; `DispatchResult` returns tone intent without playing it. CRSF callers use
-`CrsfParser::dispatch_byte`. Capture decoding, command repetition, and the
-armed/stopped command gate are unchanged.
+state, and `transfer::dispatch` publishes tone requests through `SharedState`
+(`set_tone_request`). Packet-slicing DShot ports can decode 16-bit frames through
+`TransferState::process_packet`. CRSF callers use `CrsfParser::dispatch_byte`.
+Capture decoding, command repetition, and the armed/stopped command gate are
+unchanged.
 
 Programming command 36 now connects to the existing programming state machine:
 after six accepted command repetitions, the next valid DShot values supply the
