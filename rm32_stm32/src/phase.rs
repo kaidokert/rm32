@@ -21,7 +21,7 @@ use crate::gpio_pin::GpioPin;
 use crate::gpio_regs::GpioPort;
 use core::marker::PhantomData;
 use rm32::bridge::{LegRole, step_legs};
-use rm32::hal::PhaseOutput;
+use rm32::hal::{PhaseOutput, PwmMode};
 
 /// GPIO MODER values.
 const MODE_OUTPUT: u32 = 0b01;
@@ -30,7 +30,7 @@ const MODE_ALTERNATE: u32 = 0b10;
 /// Derive the operation order from the semantic table at compile time for the
 /// sequential `bridge_enable` fallback: floating first, low second, driven last.
 const fn ordered_phases(step: u8) -> [u8; 3] {
-    let legs = step_legs(step, false);
+    let legs = step_legs(step, PwmMode::Diode);
     let mut order = [0; 3];
     let mut phase = 0;
     while phase < 3 {
@@ -82,8 +82,8 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
 
     /// Compute `[bsrr_a, bsrr_b, moder_a_mask, moder_a_val, moder_b_mask, moder_b_val]`
     /// for commutation step `step_ix + 1`.
-    const fn plan_step(step_ix: usize, comp: bool) -> [u32; 6] {
-        let legs = step_legs(step_ix as u8 + 1, comp);
+    const fn plan_step(step_ix: usize, mode: PwmMode) -> [u32; 6] {
+        let legs = step_legs(step_ix as u8 + 1, mode);
         let mut r = [0u32; 6];
         let mut idx = 0;
         while idx < 3 {
@@ -135,18 +135,21 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
         r
     }
 
-    /// Build the six-step GPIO register plan table for `comp` drive mode.
-    const fn plan_table(comp: bool) -> [[u32; 6]; 6] {
+    /// Build the six-step GPIO register plan table for `mode` drive mode.
+    const fn plan_table(mode: PwmMode) -> [[u32; 6]; 6] {
         let mut t = [[0u32; 6]; 6];
         let mut s = 0;
         while s < 6 {
-            t[s] = Self::plan_step(s, comp);
+            t[s] = Self::plan_step(s, mode);
             s += 1;
         }
         t
     }
 
-    const PLAN: [[[u32; 6]; 6]; 2] = [Self::plan_table(false), Self::plan_table(true)];
+    const PLAN: [[[u32; 6]; 6]; 2] = [
+        Self::plan_table(PwmMode::Diode),
+        Self::plan_table(PwmMode::Complementary),
+    ];
 
     /// Construct a standard six-FET phase driver (`bridge_enable = false`).
     pub fn new() -> Self {
@@ -183,20 +186,24 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
     /// Normal: low-side alternate with ODR latch cleared (complementary) or output LOW.
     /// Bridge: enable pin output HIGH (complementary) or output LOW (diode).
     #[inline]
-    fn phase_pwm<H: GpioPin, L: GpioPin>(&self, comp: bool) {
+    fn phase_pwm<H: GpioPin, L: GpioPin>(&self, mode: PwmMode) {
         if self.bridge_enable {
             L::set_mode(MODE_OUTPUT);
-            if comp {
-                L::set_high(); // enable on
-            } else {
-                L::set_low(); // enable off
+            match mode {
+                PwmMode::Complementary => L::set_high(), // enable on
+                PwmMode::Diode => L::set_low(),          // enable off
             }
-        } else if !comp {
-            L::set_mode(MODE_OUTPUT);
-            L::set_low();
         } else {
-            L::set_mode(MODE_ALTERNATE);
-            L::set_low();
+            match mode {
+                PwmMode::Diode => {
+                    L::set_mode(MODE_OUTPUT);
+                    L::set_low();
+                }
+                PwmMode::Complementary => {
+                    L::set_mode(MODE_ALTERNATE);
+                    L::set_low();
+                }
+            }
         }
         H::set_mode(MODE_ALTERNATE);
     }
@@ -256,22 +263,20 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
 impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPin> PhaseOutput
     for PhaseDriver<AH, AL, BH, BL, CH, CL>
 {
-    /// Drive six-step commutation `step` (`1..=6`) using `complementary` mode.
+    /// Drive six-step commutation `step` (`1..=6`) using `mode`.
     #[inline(never)]
     #[allow(unexpected_cfgs)]
-    fn com_step(&mut self, step: u8, complementary: bool) {
+    fn com_step(&mut self, step: u8, mode: PwmMode) {
         #[cfg(all(target_arch = "arm", not(rm32_bridge_enable)))]
         {
-            if let Some(p) = Self::PLAN[complementary as usize].get((step as usize).wrapping_sub(1))
-            {
+            if let Some(p) = Self::PLAN[mode as usize].get((step as usize).wrapping_sub(1)) {
                 Self::apply_plan(p);
             }
             return;
         }
         #[allow(unreachable_code)]
         if !self.bridge_enable {
-            if let Some(p) = Self::PLAN[complementary as usize].get((step as usize).wrapping_sub(1))
-            {
+            if let Some(p) = Self::PLAN[mode as usize].get((step as usize).wrapping_sub(1)) {
                 Self::apply_plan(p);
             }
             return;
@@ -291,9 +296,9 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
             _ => Self::phase_low::<CH, CL>(),
         }
         match pwm {
-            0 => self.phase_pwm::<AH, AL>(complementary),
-            1 => self.phase_pwm::<BH, BL>(complementary),
-            _ => self.phase_pwm::<CH, CL>(complementary),
+            0 => self.phase_pwm::<AH, AL>(mode),
+            1 => self.phase_pwm::<BH, BL>(mode),
+            _ => self.phase_pwm::<CH, CL>(mode),
         }
     }
 
@@ -313,10 +318,10 @@ impl<AH: GpioPin, AL: GpioPin, BH: GpioPin, BL: GpioPin, CH: GpioPin, CL: GpioPi
 
     /// Configure all three phases for PWM drive (sine startup).
     #[inline(never)]
-    fn all_pwm(&mut self, complementary: bool) {
-        self.phase_pwm::<AH, AL>(complementary);
-        self.phase_pwm::<BH, BL>(complementary);
-        self.phase_pwm::<CH, CL>(complementary);
+    fn all_pwm(&mut self, mode: PwmMode) {
+        self.phase_pwm::<AH, AL>(mode);
+        self.phase_pwm::<BH, BL>(mode);
+        self.phase_pwm::<CH, CL>(mode);
     }
 
     /// Configure high-side FETs off and low-side FETs for proportional PWM braking.

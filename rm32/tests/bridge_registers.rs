@@ -3,7 +3,7 @@
 #![allow(dead_code)] // The included port modules also expose board-only helpers.
 
 use rm32::bridge::Bridge;
-use rm32::hal::PhaseOutput;
+use rm32::hal::{PhaseOutput, PwmMode};
 use std::cell::RefCell;
 
 #[path = "../../rm32_stm32/src/bridge.rs"]
@@ -206,7 +206,8 @@ fn assert_registers(expected: &Registers) {
 #[test]
 fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
     for enable in [false, true] {
-        for complementary in [false, true] {
+        for pwm_mode in [PwmMode::Diode, PwmMode::Complementary] {
+            let complementary = pwm_mode.is_complementary();
             for forward in [false, true] {
                 REGS.set(Registers::default());
                 let mut expected = Registers::default();
@@ -243,7 +244,7 @@ fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
                     } else {
                         atomic_step(&mut expected, float, low, driven, complementary);
                     }
-                    driver.com_step(step, complementary);
+                    driver.com_step(step, pwm_mode);
                     assert_registers(&expected);
                     // Final MODER/ODR state on the batched path must match the
                     // sequential per-pin reference bit-for-bit.
@@ -273,7 +274,7 @@ fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
                     }
                 }
                 for invalid in (0..=255).filter(|s| !(1..=6).contains(s)) {
-                    driver.com_step(invalid, complementary);
+                    driver.com_step(invalid, pwm_mode);
                     assert_registers(&expected); // Invalid steps remain no-ops.
                 }
             }
@@ -284,7 +285,8 @@ fn six_steps_preserve_every_gpio_write_in_both_directions_and_drive_modes() {
 #[test]
 fn off_brake_sine_and_reentry_preserve_write_order() {
     for enable in [false, true] {
-        for complementary in [false, true] {
+        for pwm_mode in [PwmMode::Diode, PwmMode::Complementary] {
+            let complementary = pwm_mode.is_complementary();
             REGS.set(Registers::default());
             let mut expected = Registers::default();
             let mut driver = if enable {
@@ -317,7 +319,7 @@ fn off_brake_sine_and_reentry_preserve_write_order() {
             for p in 0..3 {
                 solid(&mut expected, p, false);
             }
-            driver.all_pwm(complementary);
+            driver.all_pwm(pwm_mode);
             for p in 0..3 {
                 pwm(&mut expected, p, complementary, enable);
             }
@@ -331,19 +333,19 @@ fn complementary_sine_entry_after_active_brake_clears_low_latch_before_all_off()
     REGS.set(Registers::default());
     let mut driver = phase::G0APhaseDriver::new();
     // Active brake sector 2 drives PB0 (Phase B low-side) solid high.
-    driver.com_step(2, true);
+    driver.com_step(2, PwmMode::Complementary);
     REGS.with_borrow(|r| {
         assert_ne!(r.odr[1] & (1 << 0), 0, "PB0 ODR should be high in step 2");
     });
-    // Entering complementary sine startup (`all_pwm(true)`) must clear PB0's
+    // Entering complementary sine startup (`all_pwm(PwmMode::Complementary)`) must clear PB0's
     // ODR latch while switching to alternate mode so a subsequent `all_off()`
     // never exposes a high output latch while PB0 returns to output mode.
-    driver.all_pwm(true);
+    driver.all_pwm(PwmMode::Complementary);
     REGS.with_borrow(|r| {
         assert_eq!(
             r.odr[1] & (1 << 0),
             0,
-            "all_pwm(true) must clear PB0 ODR latch"
+            "all_pwm(PwmMode::Complementary) must clear PB0 ODR latch"
         );
     });
     let (mut sim_mode, mut sim_odr, start) = REGS.with_borrow(|r| (r.mode, r.odr, r.writes.len()));
@@ -372,19 +374,19 @@ fn complementary_sine_entry_after_active_brake_clears_low_latch_before_all_off()
 fn bridge_enable_deasserts_enable_pins_when_switching_to_diode() {
     REGS.set(Registers::default());
     let mut driver = phase::G0APhaseDriver::new_bridge();
-    driver.all_pwm(true);
+    driver.all_pwm(PwmMode::Complementary);
     REGS.with_borrow(|r| {
         for &(port, pin) in &LOW {
             assert_ne!(r.odr[port] & (1 << pin), 0);
         }
     });
-    driver.all_pwm(false);
+    driver.all_pwm(PwmMode::Diode);
     REGS.with_borrow(|r| {
         for &(port, pin) in &LOW {
             assert_eq!(
                 r.odr[port] & (1 << pin),
                 0,
-                "all_pwm(false) on bridge_enable must de-assert enable pin"
+                "all_pwm(PwmMode::Diode) on bridge_enable must de-assert enable pin"
             );
         }
     });

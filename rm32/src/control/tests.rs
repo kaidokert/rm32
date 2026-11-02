@@ -180,7 +180,7 @@ mod tests {
     struct MockPhase {
         all_off_called: bool,
         com_step_calls: u32,
-        last_com_step_comp: Option<bool>,
+        last_com_step_mode: Option<crate::hal::PwmMode>,
         prop_brake_calls: u32,
         order: *const MockOrder,
     }
@@ -189,23 +189,23 @@ mod tests {
             Self {
                 all_off_called: false,
                 com_step_calls: 0,
-                last_com_step_comp: None,
+                last_com_step_mode: None,
                 prop_brake_calls: 0,
                 order: ptr::null(),
             }
         }
     }
     impl hal::PhaseOutput for MockPhase {
-        fn com_step(&mut self, _: u8, complementary: bool) {
+        fn com_step(&mut self, _: u8, mode: crate::hal::PwmMode) {
             self.com_step_calls += 1;
-            self.last_com_step_comp = Some(complementary);
+            self.last_com_step_mode = Some(mode);
         }
         fn all_off(&mut self) {
             self.all_off_called = true;
             record_order(self.order, |order| &order.all_off);
         }
         fn full_brake(&mut self) {}
-        fn all_pwm(&mut self, _: bool) {}
+        fn all_pwm(&mut self, _: crate::hal::PwmMode) {}
         fn proportional_brake(&mut self) {
             self.prop_brake_calls += 1;
             record_order(self.order, |order| &order.prop_brake);
@@ -258,8 +258,8 @@ mod tests {
         const PWM_BASE_PERIOD: u16 = 1999;
     }
     impl crate::hal::PhaseOutput for MockMotorHal {
-        fn com_step(&mut self, step: u8, complementary: bool) {
-            crate::hal::PhaseOutput::com_step(&mut self.phase, step, complementary);
+        fn com_step(&mut self, step: u8, mode: crate::hal::PwmMode) {
+            crate::hal::PhaseOutput::com_step(&mut self.phase, step, mode);
         }
         fn all_off(&mut self) {
             crate::hal::PhaseOutput::all_off(&mut self.phase);
@@ -267,8 +267,8 @@ mod tests {
         fn full_brake(&mut self) {
             crate::hal::PhaseOutput::full_brake(&mut self.phase);
         }
-        fn all_pwm(&mut self, complementary: bool) {
-            crate::hal::PhaseOutput::all_pwm(&mut self.phase, complementary);
+        fn all_pwm(&mut self, mode: crate::hal::PwmMode) {
+            crate::hal::PhaseOutput::all_pwm(&mut self.phase, mode);
         }
         fn proportional_brake(&mut self) {
             crate::hal::PhaseOutput::proportional_brake(&mut self.phase);
@@ -1112,7 +1112,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1152,7 +1152,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1189,7 +1189,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1223,7 +1223,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1266,7 +1266,7 @@ mod tests {
                 &mut com_timer,
                 &mut comp,
                 &mut phase,
-                false,
+                crate::hal::PwmMode::Diode,
                 bidirectional,
                 true,
             );
@@ -1304,7 +1304,7 @@ mod tests {
                 &mut com_timer,
                 &mut comp,
                 &mut phase,
-                false,
+                crate::hal::PwmMode::Diode,
                 bidirectional,
                 false,
             );
@@ -1346,7 +1346,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1380,7 +1380,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             false,
         );
@@ -1414,7 +1414,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             false,
             true,
         );
@@ -1449,7 +1449,7 @@ mod tests {
             &mut com_timer,
             &mut comp,
             &mut phase,
-            false,
+            crate::hal::PwmMode::Diode,
             true,
             true,
         );

@@ -317,8 +317,8 @@ struct LockedComPhase;
 
 impl rm32::hal::PhaseOutput for LockedComPhase {
     #[inline]
-    fn com_step(&mut self, step: u8, complementary: bool) {
-        COM_LOCAL.with_masked(|com| com.phase.com_step(step, complementary));
+    fn com_step(&mut self, step: u8, mode: rm32::hal::PwmMode) {
+        COM_LOCAL.with_masked(|com| com.phase.com_step(step, mode));
     }
     #[inline]
     fn all_off(&mut self) {
@@ -329,8 +329,8 @@ impl rm32::hal::PhaseOutput for LockedComPhase {
         COM_LOCAL.with_masked(|com| com.phase.full_brake());
     }
     #[inline]
-    fn all_pwm(&mut self, complementary: bool) {
-        COM_LOCAL.with_masked(|com| com.phase.all_pwm(complementary));
+    fn all_pwm(&mut self, mode: rm32::hal::PwmMode) {
+        COM_LOCAL.with_masked(|com| com.phase.all_pwm(mode));
     }
     #[inline]
     fn proportional_brake(&mut self) {
@@ -463,6 +463,11 @@ pub fn handle_tim14() {
     // priority on every MCU and cannot preempt each other; lower-priority
     // callers (`handle_tim6`, `service_sine`) mask interrupts via `with_masked`.
     let com = unsafe { COM_LOCAL.get_unchecked() };
+    let pwm_mode = if CFG_COMP_PWM.load(Ordering::Relaxed) {
+        rm32::hal::PwmMode::Complementary
+    } else {
+        rm32::hal::PwmMode::Diode
+    };
     rm32::control::isr_logic::commutation_timer_expired::<crate::platform::StmPlatform, _, _, _, _>(
         &mut com.commutation,
         &mut com.bemf,
@@ -470,7 +475,7 @@ pub fn handle_tim14() {
         &mut com.com_timer,
         &mut com.comp,
         &mut com.phase,
-        CFG_COMP_PWM.load(Ordering::Relaxed),
+        pwm_mode,
         CFG_BIDIR.load(Ordering::Relaxed),
         CFG_STRICT_CHANGEOVER.load(Ordering::Relaxed),
     );

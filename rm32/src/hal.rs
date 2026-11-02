@@ -23,11 +23,31 @@ pub enum Phase {
     C,
 }
 
+/// Low-side gate drive mode for PWM-driven bridge legs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum PwmMode {
+    /// Non-complementary drive: high-side FET switches PWM while the low-side
+    /// FET stays off (freewheeling through the body diode).
+    Diode = 0,
+    /// Complementary PWM: high-side and low-side FETs switch in hardware
+    /// complementary PWM with dead-time insertion (synchronous rectification).
+    Complementary = 1,
+}
+
+impl PwmMode {
+    /// True when this mode is [`PwmMode::Complementary`].
+    #[inline(always)]
+    pub const fn is_complementary(self) -> bool {
+        matches!(self, Self::Complementary)
+    }
+}
+
 const FLOATING_PHASE_TABLE: [Phase; 8] = {
     let mut table = [Phase::C; 8];
     let mut step = 1u8;
     while step <= 6 {
-        let legs = crate::bridge::step_legs(step, false);
+        let legs = crate::bridge::step_legs(step, PwmMode::Diode);
         table[step as usize] = if matches!(legs[0], crate::bridge::LegRole::Float) {
             Phase::A
         } else if matches!(legs[1], crate::bridge::LegRole::Float) {
@@ -83,14 +103,14 @@ pub trait PulseOutput {
     fn toggle(&mut self);
 }
 
-/// Motor phase output control. Callers supply the active drive mode
-/// (`complementary` vs diode) explicitly; invalid commutation steps leave
-/// outputs unchanged.
+/// Motor phase output control. Callers supply the active [`PwmMode`]
+/// (`PwmMode::Complementary` vs `PwmMode::Diode`) explicitly; invalid
+/// commutation steps leave outputs unchanged.
 pub trait PhaseOutput {
-    fn com_step(&mut self, step: u8, complementary: bool);
+    fn com_step(&mut self, step: u8, mode: PwmMode);
     fn all_off(&mut self);
     fn full_brake(&mut self);
-    fn all_pwm(&mut self, complementary: bool);
+    fn all_pwm(&mut self, mode: PwmMode);
     fn proportional_brake(&mut self);
     /// Toggle pulse output on commutation step 1/4 (debug RPM measurement).
     /// Default no-op — override for boards with pulse output pin.

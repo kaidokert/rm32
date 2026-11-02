@@ -86,9 +86,9 @@ minor version. Version 0.4 combines the power-stage and BEMF interfaces:
   explicit. `filter_read` defaults to an ordinary level read. These operations
   do not add interrupt entry gates or change the persistence filter.
 - `step_legs` defines the six-step table shared by GPIO and BEMF selection.
-  `PhaseOutput::com_step(step, complementary)` and `PhaseOutput::all_pwm(complementary)`
-  accept the complementary-drive flag explicitly (`config.use_comp_pwm()` for
-  motor commutation and sine startup, `false` for tones), while `bridge_enable`
+  `PhaseOutput::com_step(step, mode)` and `PhaseOutput::all_pwm(mode)`
+  accept `hal::PwmMode` explicitly (`config.pwm_mode()` for motor commutation and
+  sine startup, `PwmMode::Diode` for tones), while `bridge_enable`
   remains constructor-selected (`PhaseDriver::new()` vs `PhaseDriver::new_bridge()`).
   On standard six-FET bridges, `PhaseDriver::com_step` pre-stages per-port `BSRR`
   output levels (break-before-make across ports) followed by per-port `MODER`

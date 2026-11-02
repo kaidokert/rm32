@@ -125,6 +125,15 @@ impl EepromConfig {
     pub fn use_comp_pwm(&self) -> bool {
         self.comp_pwm != 0
     }
+    /// Configured bridge PWM drive mode (`PwmMode::Complementary` when
+    /// `comp_pwm != 0`, otherwise `PwmMode::Diode`).
+    pub const fn pwm_mode(&self) -> crate::hal::PwmMode {
+        if self.comp_pwm != 0 {
+            crate::hal::PwmMode::Complementary
+        } else {
+            crate::hal::PwmMode::Diode
+        }
+    }
     pub fn has_stuck_rotor_protection(&self) -> bool {
         self.stuck_rotor_protection != 0
     }

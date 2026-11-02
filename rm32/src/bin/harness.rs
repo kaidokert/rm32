@@ -102,7 +102,7 @@ struct MockPhase {
     full_brake: HalCounter,
 }
 impl hal::PhaseOutput for MockPhase {
-    fn com_step(&mut self, _: u8, _: bool) {
+    fn com_step(&mut self, _: u8, _: hal::PwmMode) {
         self.mode = 1;
     }
     fn all_off(&mut self) {
@@ -113,7 +113,7 @@ impl hal::PhaseOutput for MockPhase {
         self.mode = 4;
         self.full_brake.set(self.full_brake.get() + 1);
     }
-    fn all_pwm(&mut self, _: bool) {
+    fn all_pwm(&mut self, _: hal::PwmMode) {
         self.mode = 2;
     }
     fn proportional_brake(&mut self) {
@@ -164,8 +164,8 @@ impl rm32::platform::Platform for MockMotorHal {
     const PWM_BASE_PERIOD: u16 = <HarnessPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
 }
 impl rm32::hal::PhaseOutput for MockMotorHal {
-    fn com_step(&mut self, step: u8, complementary: bool) {
-        rm32::hal::PhaseOutput::com_step(&mut self.phase, step, complementary);
+    fn com_step(&mut self, step: u8, mode: rm32::hal::PwmMode) {
+        rm32::hal::PhaseOutput::com_step(&mut self.phase, step, mode);
     }
     fn all_off(&mut self) {
         rm32::hal::PhaseOutput::all_off(&mut self.phase);
@@ -173,8 +173,8 @@ impl rm32::hal::PhaseOutput for MockMotorHal {
     fn full_brake(&mut self) {
         rm32::hal::PhaseOutput::full_brake(&mut self.phase);
     }
-    fn all_pwm(&mut self, complementary: bool) {
-        rm32::hal::PhaseOutput::all_pwm(&mut self.phase, complementary);
+    fn all_pwm(&mut self, mode: rm32::hal::PwmMode) {
+        rm32::hal::PhaseOutput::all_pwm(&mut self.phase, mode);
     }
     fn proportional_brake(&mut self) {
         rm32::hal::PhaseOutput::proportional_brake(&mut self.phase);
@@ -709,7 +709,7 @@ impl Harness {
                         &mut self.hal.com_timer,
                         &mut self.hal.comp,
                         &mut self.hal.phase,
-                        self.config.use_comp_pwm(),
+                        self.config.pwm_mode(),
                         self.config.is_bidirectional(),
                         self.config.use_strict_changeover(),
                     );

@@ -4,6 +4,7 @@
 //! table exists once.
 
 use crate::hal::PhaseOutput;
+pub use crate::hal::PwmMode;
 
 /// What one half-bridge leg (phase) is doing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,14 +22,13 @@ pub enum LegRole {
 }
 
 /// AM32's six-step table (`comStep`): the role of phases A, B, C in `step`
-/// (1..=6); any other step leaves every leg floating. `complementary`
-/// selects the driven leg's PWM style (the drive-mode policy).
-pub const fn step_legs(step: u8, complementary: bool) -> [LegRole; 3] {
+/// (1..=6); any other step leaves every leg floating. `mode` selects the
+/// driven leg's PWM style (`PwmMode::Diode` vs `PwmMode::Complementary`).
+pub const fn step_legs(step: u8, mode: PwmMode) -> [LegRole; 3] {
     use LegRole::{Float, LowSolid};
-    let pwm = if complementary {
-        LegRole::PwmComplementary
-    } else {
-        LegRole::PwmDiode
+    let pwm = match mode {
+        PwmMode::Complementary => LegRole::PwmComplementary,
+        PwmMode::Diode => LegRole::PwmDiode,
     };
     match step {
         1 => [pwm, LowSolid, Float],
@@ -61,8 +61,8 @@ pub trait Bridge: PhaseOutput {
 /// A `&mut` to a bridge is a bridge (lets a HAL hand out `&mut` its own).
 impl<B: PhaseOutput + ?Sized> PhaseOutput for &mut B {
     #[inline(always)]
-    fn com_step(&mut self, step: u8, complementary: bool) {
-        (**self).com_step(step, complementary);
+    fn com_step(&mut self, step: u8, mode: PwmMode) {
+        (**self).com_step(step, mode);
     }
     #[inline(always)]
     fn all_off(&mut self) {
@@ -73,8 +73,8 @@ impl<B: PhaseOutput + ?Sized> PhaseOutput for &mut B {
         (**self).full_brake();
     }
     #[inline(always)]
-    fn all_pwm(&mut self, complementary: bool) {
-        (**self).all_pwm(complementary);
+    fn all_pwm(&mut self, mode: PwmMode) {
+        (**self).all_pwm(mode);
     }
     #[inline(always)]
     fn proportional_brake(&mut self) {
@@ -124,21 +124,20 @@ mod tests {
     #[test]
     fn step_legs_is_am32_comstep() {
         for (ix, &(pwm, low)) in AM32.iter().enumerate() {
-            for comp in [false, true] {
-                let legs = step_legs(ix as u8 + 1, comp);
+            for mode in [PwmMode::Diode, PwmMode::Complementary] {
+                let legs = step_legs(ix as u8 + 1, mode);
                 for (phase, &role) in legs.iter().enumerate() {
                     let want = if phase == pwm {
-                        if comp {
-                            LegRole::PwmComplementary
-                        } else {
-                            LegRole::PwmDiode
+                        match mode {
+                            PwmMode::Complementary => LegRole::PwmComplementary,
+                            PwmMode::Diode => LegRole::PwmDiode,
                         }
                     } else if phase == low {
                         LegRole::LowSolid
                     } else {
                         LegRole::Float
                     };
-                    assert_eq!(role, want, "step {} phase {phase} comp {comp}", ix + 1);
+                    assert_eq!(role, want, "step {} phase {phase} mode {mode:?}", ix + 1);
                 }
             }
         }
@@ -147,7 +146,7 @@ mod tests {
     #[test]
     fn invalid_steps_float_everything() {
         for step in [0, 7, 255] {
-            assert_eq!(step_legs(step, true), [LegRole::Float; 3]);
+            assert_eq!(step_legs(step, PwmMode::Complementary), [LegRole::Float; 3]);
         }
     }
 }

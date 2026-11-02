@@ -54,20 +54,20 @@ struct Phase {
     sector_active: [u16; 3],
     log: Log,
     step: u8,
-    complementary: bool,
+    pwm_mode: PwmMode,
 }
 impl PhaseOutput for Phase {
-    fn com_step(&mut self, step: u8, complementary: bool) {
+    fn com_step(&mut self, step: u8, mode: PwmMode) {
         self.sector_active = self.active.get();
         self.step = step;
-        self.complementary = complementary;
+        self.pwm_mode = mode;
         self.log.borrow_mut().push("sector");
     }
     fn all_off(&mut self) {
         self.log.borrow_mut().push("off");
     }
-    fn all_pwm(&mut self, complementary: bool) {
-        self.complementary = complementary;
+    fn all_pwm(&mut self, mode: PwmMode) {
+        self.pwm_mode = mode;
         self.log.borrow_mut().push("sine");
     }
     fn full_brake(&mut self) {
@@ -164,8 +164,8 @@ impl<P: rm32::platform::Platform> rm32::platform::Platform for Hal<P> {
     const PWM_BASE_PERIOD: u16 = P::PWM_BASE_PERIOD;
 }
 impl<P: rm32::platform::Platform> rm32::hal::PhaseOutput for Hal<P> {
-    fn com_step(&mut self, step: u8, complementary: bool) {
-        rm32::hal::PhaseOutput::com_step(&mut self.phase, step, complementary);
+    fn com_step(&mut self, step: u8, mode: PwmMode) {
+        rm32::hal::PhaseOutput::com_step(&mut self.phase, step, mode);
     }
     fn all_off(&mut self) {
         rm32::hal::PhaseOutput::all_off(&mut self.phase);
@@ -173,8 +173,8 @@ impl<P: rm32::platform::Platform> rm32::hal::PhaseOutput for Hal<P> {
     fn full_brake(&mut self) {
         rm32::hal::PhaseOutput::full_brake(&mut self.phase);
     }
-    fn all_pwm(&mut self, complementary: bool) {
-        rm32::hal::PhaseOutput::all_pwm(&mut self.phase, complementary);
+    fn all_pwm(&mut self, mode: PwmMode) {
+        rm32::hal::PhaseOutput::all_pwm(&mut self.phase, mode);
     }
     fn proportional_brake(&mut self) {
         rm32::hal::PhaseOutput::proportional_brake(&mut self.phase);
@@ -275,7 +275,7 @@ impl<P: rm32::platform::Platform> RigFor<P> {
                     sector_active: [0; 3],
                     log: log.clone(),
                     step: 0,
-                    complementary: false,
+                    pwm_mode: PwmMode::Diode,
                 },
                 comp: Comp {
                     log: log.clone(),
@@ -566,7 +566,7 @@ fn active_braking_waits_for_stop_and_restarts_consistently() {
             &mut r.hal.com,
             &mut r.hal.comp,
             &mut r.hal.phase,
-            false,
+            PwmMode::Diode,
             false,
             false,
         );
@@ -802,7 +802,7 @@ fn alternate_timer_commutation_reports_microseconds_and_switches_at_one_ms() {
             &mut r.hal.com,
             &mut r.hal.comp,
             &mut r.hal.phase,
-            false,
+            PwmMode::Diode,
             false,
             true,
         );
@@ -814,8 +814,10 @@ fn alternate_timer_commutation_reports_microseconds_and_switches_at_one_ms() {
 
 #[test]
 fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_commutation() {
-    for comp_pwm in [0u8, 1u8] {
-        let want = comp_pwm != 0;
+    for (comp_pwm, want, opposite) in [
+        (0u8, PwmMode::Diode, PwmMode::Complementary),
+        (1u8, PwmMode::Complementary, PwmMode::Diode),
+    ] {
         let mut r = Rig::new();
         r.main.config.comp_pwm = comp_pwm;
         r.main.config.brake_on_stop = 2;
@@ -824,25 +826,25 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
         // Active brake mode 2 on idle uses configured comp_pwm.
         r.tick(0);
         assert_eq!(r.hal.phase.step, 2);
-        assert_eq!(r.hal.phase.complementary, want);
+        assert_eq!(r.hal.phase.pwm_mode, want);
 
         // Sine entry all_pwm uses configured comp_pwm.
         r.tick(80);
         r.sine();
         assert!(r.log.borrow().contains(&"sine"));
-        assert_eq!(r.hal.phase.complementary, want);
+        assert_eq!(r.hal.phase.pwm_mode, want);
 
         // Sine-to-six-step handoff com_step uses configured comp_pwm.
         r.tick(250);
         r.sine();
         r.log.borrow_mut().clear();
-        r.hal.phase.complementary = !want;
+        r.hal.phase.pwm_mode = opposite;
         r.tick(250);
         assert!(r.log.borrow().contains(&"sector"));
-        assert_eq!(r.hal.phase.complementary, want);
+        assert_eq!(r.hal.phase.pwm_mode, want);
 
         // Commutation timer expiration uses configured comp_pwm.
-        r.hal.phase.complementary = !want;
+        r.hal.phase.pwm_mode = opposite;
         isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _>(
             &mut r.comm,
             &mut r.bemf,
@@ -854,6 +856,6 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
             false,
             false,
         );
-        assert_eq!(r.hal.phase.complementary, want);
+        assert_eq!(r.hal.phase.pwm_mode, want);
     }
 }
