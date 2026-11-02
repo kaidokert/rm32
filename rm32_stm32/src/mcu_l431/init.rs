@@ -182,7 +182,7 @@ pub fn init(
         tim1.cr1.write(|w| w.arpe().set_bit().cen().set_bit());
     }
     let pwm = super::pwm::Pwm::new();
-    let phase = G0APhaseDriver::new(false); // same pins for L4_N
+    let phase = G0APhaseDriver::new(); // same pins for L4_N
 
     // COMP2 init
     super::comp_init::init_comp2(bemf_pins.phase_a);

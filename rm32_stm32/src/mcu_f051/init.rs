@@ -51,7 +51,7 @@ pub fn init(
         tim1.cr1.write(|w| w.cen().set_bit());
     }
     let pwm = super::pwm::Pwm::new();
-    let phase = G0APhaseDriver::new(false); // same pins for F0_A
+    let phase = G0APhaseDriver::new(); // same pins for F0_A
 
     // COMP1 init
     super::comp_init::init_comp1();

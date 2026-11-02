@@ -64,7 +64,7 @@ fn main() -> ! {
 
     // --- Startup tune (before peripherals move to ISR) ---
     if BOARD.bridge_enable {
-        hal.phase = rm32_stm32::phase::G0APhaseDriver::new_bridge(false);
+        hal.phase = rm32_stm32::phase::G0APhaseDriver::new_bridge();
     }
     {
         use rm32::sounds::Sounds;

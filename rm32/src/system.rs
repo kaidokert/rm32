@@ -196,7 +196,7 @@ impl<P: crate::constants::Timing> SystemTick<P> {
             hal.bemf().mask_irq();
             hal.bridge().set_duty_all(0);
             hal.bridge().latch();
-            hal.bridge().all_pwm();
+            hal.bridge().all_pwm(main.config.pwm_mode());
             duty.active_brake_on = false;
             duty.sine_outputs_on = true;
         }

@@ -162,9 +162,17 @@ static COM_LOCAL: IsrTierCell<TargetComIsrState> = IsrTierCell::new();
 static TICK_LOCAL: IsrTierCell<TargetTickIsrState> = IsrTierCell::new();
 static INPUT_LOCAL: IsrTierCell<TargetInputIsrState> = IsrTierCell::new();
 
+static CFG_COMP_PWM: AtomicBool = AtomicBool::new(false);
 static CFG_BIDIR: AtomicBool = AtomicBool::new(false);
 static CFG_STRICT_CHANGEOVER: AtomicBool = AtomicBool::new(false);
 static CONFIG_DIRTY: AtomicBool = AtomicBool::new(false);
+
+#[inline]
+fn latch_com_config_flags(config: &EepromConfig) {
+    CFG_COMP_PWM.store(config.use_comp_pwm(), Ordering::Relaxed);
+    CFG_BIDIR.store(config.is_bidirectional(), Ordering::Relaxed);
+    CFG_STRICT_CHANGEOVER.store(config.use_strict_changeover(), Ordering::Relaxed);
+}
 
 #[inline(always)]
 fn ensure_split_init() {
@@ -178,8 +186,7 @@ fn install_staged_isr_state() {
     cortex_m::interrupt::free(|_| {
         if let Some(state) = isr::take_isr_state() {
             let (pwm, input, comp, interval, com_timer, phase) = state.hal.into_parts();
-            CFG_BIDIR.store(state.config.is_bidirectional(), Ordering::Relaxed);
-            CFG_STRICT_CHANGEOVER.store(state.config.use_strict_changeover(), Ordering::Relaxed);
+            latch_com_config_flags(&state.config);
             CONFIG_DIRTY.store(false, Ordering::Release);
             // SAFETY: Interrupts are masked and no tier cell is borrowed while
             // staging is consumed.
@@ -236,6 +243,24 @@ pub fn service_sine(
         // only called from `main` (thread mode), so `handle_tim6` cannot be
         // active on the call stack.
         let tick = unsafe { TICK_LOCAL.get_unchecked() };
+        let shared = isr::shared();
+        if CONFIG_DIRTY.swap(false, Ordering::AcqRel) || shared.config_write_overflowed() {
+            // SAFETY: Interrupts are masked (`with_masked`), so no input ISR
+            // or main-loop config accessor can overlap this copy.
+            let inp = unsafe { INPUT_LOCAL.get_unchecked() };
+            tick.config = inp.config;
+            rm32::system::SystemTick::<crate::platform::StmPlatform>::sync_config_snapshot(
+                shared,
+                main,
+                &inp.config,
+            );
+            latch_com_config_flags(&inp.config);
+        } else {
+            rm32::system::SystemTick::<crate::platform::StmPlatform>::sync_config_writes(
+                shared, main,
+            );
+            latch_com_config_flags(&main.config);
+        }
         let mut hal = SplitMotorHal {
             pwm: &mut tick.pwm,
             comp: &mut com.comp,
@@ -244,7 +269,7 @@ pub fn service_sine(
             phase: &mut com.phase,
         };
         system.service_sine(
-            isr::shared(),
+            shared,
             main,
             &mut hal,
             &mut tick.duty,
@@ -292,8 +317,8 @@ struct LockedComPhase;
 
 impl rm32::hal::PhaseOutput for LockedComPhase {
     #[inline]
-    fn com_step(&mut self, step: u8) {
-        COM_LOCAL.with_masked(|com| com.phase.com_step(step));
+    fn com_step(&mut self, step: u8, mode: rm32::hal::PwmMode) {
+        COM_LOCAL.with_masked(|com| com.phase.com_step(step, mode));
     }
     #[inline]
     fn all_off(&mut self) {
@@ -304,8 +329,8 @@ impl rm32::hal::PhaseOutput for LockedComPhase {
         COM_LOCAL.with_masked(|com| com.phase.full_brake());
     }
     #[inline]
-    fn all_pwm(&mut self) {
-        COM_LOCAL.with_masked(|com| com.phase.all_pwm());
+    fn all_pwm(&mut self, mode: rm32::hal::PwmMode) {
+        COM_LOCAL.with_masked(|com| com.phase.all_pwm(mode));
     }
     #[inline]
     fn proportional_brake(&mut self) {
@@ -331,6 +356,7 @@ pub fn handle_tim6() {
         INPUT_LOCAL.with_masked(|inp| {
             if CONFIG_DIRTY.swap(false, Ordering::AcqRel) {
                 tick.config = inp.config;
+                latch_com_config_flags(&tick.config);
             }
         });
     }
@@ -353,6 +379,7 @@ pub fn handle_tim6() {
                 // SAFETY: Interrupts are masked (`with_masked`), so no input
                 // ISR or main-loop config accessor can overlap this copy.
                 tick.config = unsafe { INPUT_LOCAL.get_unchecked().config };
+                latch_com_config_flags(&tick.config);
             }
             if shared.isr_action() == rm32::shared_comm::IsrAction::AllOff {
                 shared.take_duty_kick_down();
@@ -378,6 +405,7 @@ pub fn handle_tim6() {
                 // SAFETY: Interrupts are masked (`with_masked`), so no input
                 // ISR or main-loop config accessor can overlap this copy.
                 tick.config = unsafe { INPUT_LOCAL.get_unchecked().config };
+                latch_com_config_flags(&tick.config);
             }
             let mut hal = SplitMotorHal {
                 pwm: &mut tick.pwm,
@@ -435,6 +463,10 @@ pub fn handle_tim14() {
     // priority on every MCU and cannot preempt each other; lower-priority
     // callers (`handle_tim6`, `service_sine`) mask interrupts via `with_masked`.
     let com = unsafe { COM_LOCAL.get_unchecked() };
+    let pwm_mode = match CFG_COMP_PWM.load(Ordering::Relaxed) {
+        false => rm32::hal::PwmMode::Diode,
+        true => rm32::hal::PwmMode::Complementary,
+    };
     rm32::control::isr_logic::commutation_timer_expired::<crate::platform::StmPlatform, _, _, _, _>(
         &mut com.commutation,
         &mut com.bemf,
@@ -442,6 +474,7 @@ pub fn handle_tim14() {
         &mut com.com_timer,
         &mut com.comp,
         &mut com.phase,
+        pwm_mode,
         CFG_BIDIR.load(Ordering::Relaxed),
         CFG_STRICT_CHANGEOVER.load(Ordering::Relaxed),
     );
@@ -568,8 +601,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
             |prescaler| inp.input.set_output_prescaler(prescaler),
         );
         if prev_config.is_some_and(|prev| prev.as_bytes() != inp.config.as_bytes()) {
-            CFG_BIDIR.store(inp.config.is_bidirectional(), Ordering::Relaxed);
-            CFG_STRICT_CHANGEOVER.store(inp.config.use_strict_changeover(), Ordering::Relaxed);
+            latch_com_config_flags(&inp.config);
             CONFIG_DIRTY.store(true, Ordering::Release);
         }
         if let Some(psc) = actions.next_capture.prescaler {

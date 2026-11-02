@@ -7,12 +7,27 @@
 use crate::gpio_regs::GpioPort;
 use crate::mcu::{PortA, PortB};
 
+mod sealed {
+    pub trait PinPort {
+        const IS_PORT_B: bool;
+    }
+    impl PinPort for super::PortA {
+        const IS_PORT_B: bool = false;
+    }
+    impl PinPort for super::PortB {
+        const IS_PORT_B: bool = true;
+    }
+    pub trait Sealed {}
+}
+
 /// A GPIO pin known at compile time.
-pub trait GpioPin {
+pub trait GpioPin: sealed::Sealed {
     /// The port this pin belongs to.
-    type Port: GpioPort;
+    type Port: GpioPort + sealed::PinPort;
     /// Pin number (0..15).
     const PIN: u8;
+    /// True when `Self::Port` is `PortB` (`false` for `PortA`), derived from `Self::Port`.
+    const PORT_B: bool = <Self::Port as sealed::PinPort>::IS_PORT_B;
 
     /// Precomputed MODER bit offset (pin * 2).
     const MODER_OFFSET: u32 = Self::PIN as u32 * 2;
@@ -48,6 +63,7 @@ pub trait GpioPin {
 macro_rules! gpio_pin {
     ($name:ident, $port:ty, $pin:literal) => {
         pub struct $name;
+        impl sealed::Sealed for $name {}
         impl GpioPin for $name {
             type Port = $port;
             const PIN: u8 = $pin;

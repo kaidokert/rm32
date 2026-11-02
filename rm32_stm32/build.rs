@@ -372,6 +372,11 @@ pub const BOARD: rm32::board::BoardConfig = rm32::board::BoardConfig {{
 
     fs::write(&dest, code).unwrap();
 
+    println!("cargo::rustc-check-cfg=cfg(rm32_bridge_enable)");
+    if board.bridge_enable {
+        println!("cargo:rustc-cfg=rm32_bridge_enable");
+    }
+
     // Auto-set MCU feature based on YAML (informational — the feature must still
     // be passed via Cargo, but this validates consistency)
     let _expected_feature = format!("stm32{}", board.mcu.replace("stm32", ""));
