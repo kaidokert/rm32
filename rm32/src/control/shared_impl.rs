@@ -413,9 +413,13 @@ mod tests {
 
     #[test]
     fn domain_traits_roundtrip_without_dummy_defaults() {
-        let shared = TestShared::new();
+        let shared = TestShared::default();
 
         // MotorStatus & MotorStatusExt
+        assert_eq!(shared.motor_mode(), MotorMode::Disarmed);
+        shared.set_motor_mode(MotorMode::Armed);
+        assert!(shared.armed());
+        shared.set_armed(false);
         assert!(!shared.armed());
         shared.set_armed(true);
         assert!(shared.armed());
@@ -425,10 +429,26 @@ mod tests {
         shared.set_old_routine(false);
         assert!(shared.running());
         assert!(!shared.old_routine());
+        shared.set_old_routine(true);
+        assert!(shared.old_routine());
+        shared.set_running(false);
+        assert!(!shared.running());
         shared.set_stepper_sine(true);
         assert!(shared.stepper_sine());
+        shared.set_stepper_sine(false);
+        assert!(!shared.stepper_sine());
+        shared.transition(MotorEvent::StartMotor);
+        assert!(shared.running());
+        shared.set_zero_crosses(10);
+        assert_eq!(shared.zero_crosses(), 10);
+        shared.increment_zero_crosses();
+        assert_eq!(shared.zero_crosses(), 11);
+        shared.set_commutation_interval(900);
+        assert_eq!(shared.commutation_interval(), 900);
         shared.set_e_com_time(4321);
         assert_eq!(shared.e_com_time(), 4321);
+        shared.set_gate_avg(321);
+        assert_eq!(shared.gate_avg(), 321);
         shared.set_interval_timer_count(999);
         assert_eq!(shared.interval_timer_count(), 999);
         shared.set_duty_cycle(777);
@@ -437,6 +457,7 @@ mod tests {
         assert!(!shared.forward());
 
         // Throttle
+        assert!(!shared.dshot_telemetry());
         shared.set_input_set(true);
         assert!(shared.input_set());
         shared.set_is_dshot(true);
@@ -497,7 +518,9 @@ mod tests {
         shared.increment_control_ticks();
         assert_eq!(shared.control_ticks(), 1);
         shared.one_khz_counter_inc();
-        assert!(shared.one_khz_counter_check_and_reset(1));
+        assert!(!shared.one_khz_counter_check_and_reset(2));
+        shared.one_khz_counter_inc();
+        assert!(shared.one_khz_counter_check_and_reset(2));
         shared.tone_active.set(true);
         assert!(shared.tone_active());
     }

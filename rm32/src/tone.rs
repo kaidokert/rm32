@@ -33,6 +33,7 @@ pub struct ToneScheduler {
     repeats_left: u8,
     gap: bool,
     active: bool,
+    active_pwm_mode: Option<crate::hal::PwmMode>,
 }
 
 const DEFAULT_TUNE: [Note; 2] = [
@@ -248,13 +249,16 @@ pub fn step<P, B, M>(
 {
     match tone.tick::<P>(request, bridge_busy) {
         ToneAction::StartNote(note) => {
+            let mode = config.pwm_mode();
+            tone.active_pwm_mode = Some(mode);
             let mut bridge = bridge();
             bridge.set_period(P::PWM_BASE_PERIOD);
             bridge.set_tone_divider(note.prescaler);
             bridge.set_duty_all(tone.duty(config.beep_volume));
-            bridge.com_step(note.step, config.pwm_mode());
+            bridge.com_step(note.step, mode);
         }
         ToneAction::Silence => {
+            tone.active_pwm_mode = None;
             let mut bridge = bridge();
             if bridge_busy {
                 // The motor or brake path already applied this tick's phase
@@ -267,7 +271,16 @@ pub fn step<P, B, M>(
                 bridge.set_period(base_period);
             }
         }
-        ToneAction::Idle => {}
+        ToneAction::Idle => {
+            let mode = config.pwm_mode();
+            if tone.active()
+                && tone.active_pwm_mode != Some(mode)
+                && let Some(note) = tone.note()
+            {
+                tone.active_pwm_mode = Some(mode);
+                bridge().com_step(note.step, mode);
+            }
+        }
     }
 }
 
@@ -511,5 +524,17 @@ mod tests {
         bridge = MockBridge::default();
         step::<TestTime, _, _>(&mut scheduler, 1, false, &config, 1555, || &mut bridge);
         assert_eq!(bridge.last_step, Some((2, PwmMode::Complementary)));
+
+        // If comp_pwm changes mid-note while ToneScheduler::tick returns Idle,
+        // step reapplies com_step with the updated PwmMode on the next tick and
+        // stays silent on subsequent Idle ticks when the mode is unchanged.
+        config.comp_pwm = 0;
+        bridge = MockBridge::default();
+        step::<TestTime, _, _>(&mut scheduler, 0, false, &config, 1555, || &mut bridge);
+        assert_eq!(bridge.last_step, Some((2, PwmMode::Diode)));
+
+        bridge = MockBridge::default();
+        step::<TestTime, _, _>(&mut scheduler, 0, false, &config, 1555, || &mut bridge);
+        assert_eq!(bridge.last_step, None);
     }
 }

@@ -1080,10 +1080,15 @@ mod tests {
 
     #[test]
     fn shared_state_domain_traits_roundtrip_without_dummy_defaults() {
+        use crate::motor_mode::MotorEvent;
         use crate::units::{CentiAmps, CentiVolts};
         let shared = SharedState::new::<crate::platform::TestPlatform>();
 
         // MotorStatus & MotorStatusExt
+        assert_eq!(MotorStatus::motor_mode(&shared), MotorMode::Disarmed);
+        MotorStatus::set_motor_mode(&shared, MotorMode::Armed);
+        assert!(MotorStatusExt::armed(&shared));
+        MotorStatus::set_armed(&shared, false);
         assert!(!MotorStatusExt::armed(&shared));
         MotorStatus::set_armed(&shared, true);
         assert!(MotorStatusExt::armed(&shared));
@@ -1093,8 +1098,20 @@ mod tests {
         MotorStatus::set_old_routine(&shared, false);
         assert!(MotorStatusExt::running(&shared));
         assert!(!MotorStatusExt::old_routine(&shared));
+        MotorStatus::set_running(&shared, false);
+        assert!(!MotorStatusExt::running(&shared));
         MotorStatus::set_stepper_sine(&shared, true);
         assert!(MotorStatusExt::stepper_sine(&shared));
+        MotorStatus::set_stepper_sine(&shared, false);
+        assert!(!MotorStatusExt::stepper_sine(&shared));
+        MotorStatus::transition(&shared, MotorEvent::StartMotor);
+        assert!(MotorStatusExt::running(&shared));
+        MotorStatus::set_zero_crosses(&shared, 10);
+        assert_eq!(MotorStatus::zero_crosses(&shared), 10);
+        MotorStatus::increment_zero_crosses(&shared);
+        assert_eq!(MotorStatus::zero_crosses(&shared), 11);
+        MotorStatus::set_commutation_interval(&shared, 900);
+        assert_eq!(MotorStatus::commutation_interval(&shared), 900);
         MotorStatus::set_e_com_time(&shared, 4321);
         assert_eq!(MotorStatus::e_com_time(&shared), 4321);
         MotorStatus::set_interval_timer_count(&shared, 999);
@@ -1105,6 +1122,7 @@ mod tests {
         assert!(!MotorStatus::forward(&shared));
 
         // Throttle
+        assert!(!Throttle::dshot_telemetry(&shared));
         Throttle::set_input_set(&shared, true);
         assert!(Throttle::input_set(&shared));
         Throttle::set_is_dshot(&shared, true);
