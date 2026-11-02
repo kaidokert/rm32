@@ -463,10 +463,9 @@ pub fn handle_tim14() {
     // priority on every MCU and cannot preempt each other; lower-priority
     // callers (`handle_tim6`, `service_sine`) mask interrupts via `with_masked`.
     let com = unsafe { COM_LOCAL.get_unchecked() };
-    let pwm_mode = if CFG_COMP_PWM.load(Ordering::Relaxed) {
-        rm32::hal::PwmMode::Complementary
-    } else {
-        rm32::hal::PwmMode::Diode
+    let pwm_mode = match CFG_COMP_PWM.load(Ordering::Relaxed) {
+        false => rm32::hal::PwmMode::Diode,
+        true => rm32::hal::PwmMode::Complementary,
     };
     rm32::control::isr_logic::commutation_timer_expired::<crate::platform::StmPlatform, _, _, _, _>(
         &mut com.commutation,
