@@ -530,12 +530,13 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     assert!(!interrupt::masked());
     let start = take_events();
     assert!(
-        start.windows(4).any(|w| w
+        start.windows(5).any(|w| w
             == [
                 BridgeEvent::Period(1999),
                 BridgeEvent::Divider(50),
                 BridgeEvent::Duty(15),
                 BridgeEvent::ComStep(2),
+                BridgeEvent::ComStepMode(2, PwmMode::Diode),
             ]),
         "{start:?}"
     );
@@ -677,8 +678,8 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     );
 
     // Mutate comp_pwm (EEPROM byte 20) via DShot programming while Armed, and
-    // verify CFG_COMP_PWM updates for priority-0 handle_tim14 while tones still
-    // drive PwmMode::Diode.
+    // verify CFG_COMP_PWM and tick.config update for both tone::step and
+    // priority-0 handle_tim14.
     shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
     shared.set_adjusted_input(0);
     command(36);
@@ -708,8 +709,8 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     isr_handlers::handle_tim6();
     let tone_events = take_events();
     assert!(
-        tone_events.contains(&BridgeEvent::ComStepMode(2, PwmMode::Diode)),
-        "tone::step must pass PwmMode::Diode even when comp_pwm=1"
+        tone_events.contains(&BridgeEvent::ComStepMode(2, PwmMode::Complementary)),
+        "tone::step must pass PwmMode::Complementary when comp_pwm=1"
     );
     for _ in 0..6000 {
         isr_handlers::handle_tim6();

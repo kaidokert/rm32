@@ -14,7 +14,9 @@ mod tests {
 
     use crate::control::isr_logic;
     use crate::control::shared_impl::TestShared;
-    use crate::shared_comm::{IsrAction, IsrTiming as _, MainControl as _, MotorState as _};
+    use crate::shared_comm::{
+        Commands as _, IsrAction, MotorStatus as _, MotorStatusExt as _, Throttle as _,
+    };
 
     fn make_armed_timeout() -> u32 {
         0

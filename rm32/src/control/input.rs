@@ -238,7 +238,7 @@ mod tests {
     use super::*;
     use crate::control::shared_impl::TestShared;
     use crate::motor_mode::MotorMode;
-    use crate::shared_comm::MainControl;
+    use crate::shared_comm::Commands as _;
 
     fn setup() -> (TestShared, EepromConfig, ProtectionState, InputState) {
         let shared = TestShared::new();

@@ -437,12 +437,13 @@ pub fn handle_tim6() {
     // `COM_LOCAL.with_masked` only inside `LockedComPhase` when a note transition
     // or silence actually writes the phase driver.
     let mut locked_phase = LockedComPhase;
+    let config = &tick.config;
     let pwm = &mut tick.pwm;
     rm32::tone::step::<crate::platform::StmPlatform, _, _>(
         &mut tick.tone,
         request,
         bridge_busy,
-        tick.config.beep_volume,
+        config,
         shared.tim1_arr(),
         || crate::bridge::StmBridge {
             pwm,

@@ -330,7 +330,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
 
     // Ramp rate limiting. The average is read here, after `bemf_polling`
     // may have updated e_com this tick, and is also the COMP gate's latch
-    // (see `IsrTiming::gate_avg`): one division per tick, clamped at 0 only.
+    // (see `MotorStatus::gate_avg`): one division per tick, clamped at 0 only.
     let average_interval = crate::platform::e_com_us_to_avg_ticks::<H>(ctx.shared.e_com_time());
     ctx.shared.set_gate_avg(average_interval.max(0) as u32);
     ctx.duty.ramp_limit::<H>(
@@ -452,7 +452,7 @@ pub enum BemfIrq {
 /// The COMP interrupt's acceptance gate (AM32 `COMP_IRQHandler`,
 /// `stm32l4xx_it.c` / `stm32g0xx_it.c`): the gate opens once `gate_avg > 0`
 /// and the interval timer has run past half the control tick's latched average
-/// (`IsrTiming::gate_avg`). Gate open on an edge -> `Open` (the caller then
+/// (`MotorStatus::gate_avg`). Gate open on an edge -> `Open` (the caller then
 /// runs `bemf_zero_cross`, which masks on accept and stays armed on a
 /// persistence reject). Closed -> `Noise` or `Camp`.
 ///
@@ -468,7 +468,7 @@ pub fn on_bemf_irq<S, B, I, E>(
     entered: E,
 ) -> BemfIrq
 where
-    S: crate::shared_comm::IsrTiming,
+    S: crate::shared_comm::MotorStatus,
     B: BemfSensor,
     I: IntervalTimer,
     E: FnOnce(),
