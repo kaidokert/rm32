@@ -256,7 +256,7 @@ struct MockTelem {
     kiss_packet: [u8; 10],
 }
 impl hal::TelemetryUart for MockTelem {
-    fn send_dma(&mut self, data: &[u8]) {
+    fn send(&mut self, data: &[u8]) {
         if data.len() == 10 {
             self.kiss_packet.copy_from_slice(data);
         }
@@ -285,7 +285,7 @@ struct Harness {
     has_throttle: bool,
     throttle_value: u16,
     do_transfer: bool,
-    dma_buffer: [u32; 64],
+    edges: [u32; 64],
     input_pin_high: bool,
 
     // Unified system tick (shared with firmware)
@@ -341,7 +341,7 @@ impl Harness {
             has_throttle: false,
             throttle_value: 0,
             do_transfer: false,
-            dma_buffer: [0; 64],
+            edges: [0; 64],
             input_pin_high: false,
             system: SystemTick::new(),
             transfer: rm32::transfer::TransferState::default(),
@@ -402,8 +402,8 @@ impl Harness {
 
         let mut base = 1000u32;
         for (i, &bit) in bits.iter().enumerate() {
-            self.dma_buffer[i * 2] = base;
-            self.dma_buffer[i * 2 + 1] = base + if bit != 0 { 22 } else { 10 };
+            self.edges[i * 2] = base;
+            self.edges[i * 2 + 1] = base + if bit != 0 { 22 } else { 10 };
             base += 32;
         }
     }
@@ -415,7 +415,7 @@ impl Harness {
     fn handle_transfer(&mut self) {
         // Use library TransferState for all input processing
         let actions = self.transfer.process::<HarnessPlatform>(
-            &self.dma_buffer,
+            &self.edges,
             self.shared.input_set(),
             self.dshot,
             self.servo_pwm,
@@ -720,7 +720,7 @@ impl Harness {
                 if let Ok(idx) = k[4..].parse::<usize>()
                     && idx < 64
                 {
-                    self.dma_buffer[idx] = v as u32;
+                    self.edges[idx] = v as u32;
                 }
             }
             // Direct state overrides
@@ -1028,8 +1028,8 @@ mod dispatch_regressions {
         let crc = (payload & 15) ^ ((payload / 16) & 15) ^ ((payload / 256) & 15);
         let packet = payload * 16 + crc;
         for i in 0..16 {
-            h.dma_buffer[2 * i] = i as u32 * 100;
-            h.dma_buffer[2 * i + 1] = i as u32 * 100
+            h.edges[2 * i] = i as u32 * 100;
+            h.edges[2 * i + 1] = i as u32 * 100
                 + if packet & (1 << (15 - i)) == 0 {
                     25
                 } else {
@@ -1085,12 +1085,12 @@ mod dispatch_regressions {
         h.servo_pwm = true;
         h.config.disable_stick_calibration = 0;
         h.shared.set_adjusted_input(1900);
-        h.dma_buffer[0] = 0;
-        h.dma_buffer[1] = 1900;
+        h.edges[0] = 0;
+        h.edges[1] = 1900;
         for _ in 0..120 {
             h.handle_transfer();
         }
-        h.dma_buffer[1] = 1100;
+        h.edges[1] = 1100;
         for _ in 0..76 {
             h.handle_transfer();
         }

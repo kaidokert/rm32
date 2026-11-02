@@ -53,53 +53,54 @@ pub enum TransferAction {
     },
 }
 
-/// DMA capture setup requested for the next input frame.
+/// Capture setup requested for the next input frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaptureConfig {
-    /// DMA transfer count.
-    pub ndtr: u32,
+    /// Edges (timestamps) to capture before the next frame callback (a
+    /// DMA port's transfer count; AM32's `buffersize`).
+    pub edges_per_burst: u32,
     /// Timer prescaler update, if protocol detection changed the capture rate.
     pub prescaler: Option<u16>,
 }
 
 impl CaptureConfig {
     pub const DSHOT: Self = Self {
-        ndtr: 32,
+        edges_per_burst: 32,
         prescaler: None,
     };
     /// DShot detection uses one full frame. Using 33 edges consumes the next
     /// frame's first edge and can leave steady-state capture misaligned.
     pub const fn dshot_detection<P: crate::platform::Platform>() -> Self {
         Self {
-            ndtr: 32,
+            edges_per_burst: 32,
             prescaler: Some((P::CAPTURE_HZ / 6_000_000) as u16),
         }
     }
     pub const SERVO: Self = Self {
-        ndtr: 2,
+        edges_per_burst: 2,
         prescaler: None,
     };
     pub const SERVO_REALIGN: Self = Self {
-        ndtr: 3,
+        edges_per_burst: 3,
         prescaler: None,
     };
 
     pub const DSHOT600_DETECTED: Self = Self {
-        ndtr: 32,
+        edges_per_burst: 32,
         prescaler: Some(0),
     };
     pub const DSHOT300_DETECTED: Self = Self {
-        ndtr: 32,
+        edges_per_burst: 32,
         prescaler: Some(1),
     };
     pub const DSHOT150_DETECTED: Self = Self {
-        ndtr: 32,
+        edges_per_burst: 32,
         prescaler: Some(3),
     };
 
     pub const fn servo_detected<P: crate::platform::Platform>() -> Self {
         Self {
-            ndtr: 2,
+            edges_per_burst: 2,
             prescaler: Some((P::CAPTURE_HZ / 1_000_000).saturating_sub(1) as u16),
         }
     }
@@ -120,7 +121,7 @@ pub struct TransferActions {
 impl TransferState {
     /// Process a DMA transfer complete event.
     ///
-    /// `dma_buffer`: the captured DMA data (32 entries for DShot, 2-3 for servo)
+    /// `edges`: the captured DMA data (32 entries for DShot, 2-3 for servo)
     /// `input_set`: whether input type has been detected
     /// `dshot_mode`: whether DShot is the active input
     /// `servo_mode`: whether servo PWM is the active input
@@ -137,7 +138,7 @@ impl TransferState {
     #[allow(clippy::too_many_arguments)]
     pub fn process<P: crate::platform::Platform>(
         &mut self,
-        dma_buffer: &[u32],
+        edges: &[u32],
         input_set: bool,
         dshot_mode: bool,
         servo_mode: bool,
@@ -157,7 +158,7 @@ impl TransferState {
 
         // --- Input detection ---
         if !input_set {
-            let sig = signal::detect_input(dma_buffer, (P::CAPTURE_HZ / 1_000_000) as u8);
+            let sig = signal::detect_input(edges, (P::CAPTURE_HZ / 1_000_000) as u8);
             let protocol = match sig {
                 signal::SignalType::Dshot600
                 | signal::SignalType::Dshot300
@@ -204,10 +205,10 @@ impl TransferState {
         let mut bidir_detected = false;
 
         // --- DShot processing ---
-        if dshot_mode && dma_buffer.len() >= 32 {
+        if dshot_mode && edges.len() >= 32 {
             let buf: [u32; 32] = {
                 let mut b = [0u32; 32];
-                b.copy_from_slice(&dma_buffer[..32]);
+                b.copy_from_slice(&edges[..32]);
                 b
             };
             let frame = dshot::decode_frame(&buf, frametime_low, frametime_high, dshot_telemetry);
@@ -250,8 +251,8 @@ impl TransferState {
         else if servo_mode {
             if input_pin_high {
                 // Rising edge — wait for falling to get pulse width
-            } else if dma_buffer.len() >= 2 {
-                let pulse = dma_buffer[1].wrapping_sub(dma_buffer[0]) as u16;
+            } else if edges.len() >= 2 {
+                let pulse = edges[1].wrapping_sub(edges[0]) as u16;
                 action = match self.servo.compute(pulse, current_newinput, bidirectional) {
                     ServoResult::Throttle(v) => TransferAction::ServoThrottle(v),
                     ServoResult::OutOfRange => {
@@ -289,9 +290,8 @@ impl TransferState {
             // DShot frame averaging (for dshot_frametime calibration)
             if dshot_mode && self.average_count < 8 && *zero_input_count > 5 {
                 self.average_count += 1;
-                if dma_buffer.len() >= 32 {
-                    self.average_packet_length +=
-                        (dma_buffer[31].wrapping_sub(dma_buffer[0])) as u16 as u32;
+                if edges.len() >= 32 {
+                    self.average_packet_length += (edges[31].wrapping_sub(edges[0])) as u16 as u32;
                 }
                 if self.average_count == 8 {
                     let avg = self.average_packet_length >> 3;
@@ -533,10 +533,10 @@ mod tests {
     const INTER_FRAME_GAP_TICKS: u32 = 78_400;
 
     #[test]
-    fn capture_config_ndtr_values() {
-        assert_eq!(CaptureConfig::DSHOT.ndtr, 32);
-        assert_eq!(CaptureConfig::SERVO.ndtr, 2);
-        assert_eq!(CaptureConfig::SERVO_REALIGN.ndtr, 3);
+    fn capture_config_edges_per_burst() {
+        assert_eq!(CaptureConfig::DSHOT.edges_per_burst, 32);
+        assert_eq!(CaptureConfig::SERVO.edges_per_burst, 2);
+        assert_eq!(CaptureConfig::SERVO_REALIGN.edges_per_burst, 3);
     }
 
     fn dshot_dma_buffer(value: u16, telem: bool, inverted_crc: bool) -> [u32; 32] {
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn dshot_detection_uses_one_frame_capture_window() {
         assert_eq!(
-            CaptureConfig::dshot_detection::<CapturePlatform<60>>().ndtr,
+            CaptureConfig::dshot_detection::<CapturePlatform<60>>().edges_per_burst,
             32
         );
         assert_eq!(
@@ -818,7 +818,10 @@ mod tests {
             actions.next_capture,
             CaptureConfig::dshot_detection::<CapturePlatform<60>>()
         );
-        assert_eq!(actions.next_capture.ndtr, CaptureConfig::DSHOT.ndtr);
+        assert_eq!(
+            actions.next_capture.edges_per_burst,
+            CaptureConfig::DSHOT.edges_per_burst
+        );
     }
 
     #[test]

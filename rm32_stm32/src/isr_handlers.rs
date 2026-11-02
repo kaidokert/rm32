@@ -33,7 +33,7 @@
 //!    `transfer`, authoritative `config`, and protocol state.
 //!    - Accessed via `INPUT_LOCAL.with_masked` (`interrupt::free`). When the
 //!      input peripheral first moves out of the boot staging cell into
-//!      `INPUT_LOCAL`, `receive_dshot_dma()` is re-armed so DMA `CMAR` points
+//!      `INPUT_LOCAL`, `start_capture()` is re-armed so DMA `CMAR` points
 //!      at the permanent `INPUT_LOCAL` buffer address.
 
 use crate::bridge::TimerPwm as _;
@@ -223,7 +223,7 @@ fn install_staged_isr_state() {
                 // Re-arm input capture DMA so the peripheral's memory address
                 // register points at `INPUT_LOCAL` rather than the consumed
                 // `ISR_STATE` staging cell.
-                inp.input.receive_dshot_dma();
+                inp.input.start_capture();
             }
         }
     });
@@ -522,7 +522,7 @@ pub fn handle_dma_tc() {
     INPUT_LOCAL.with_masked(|inp| {
         if shared.armed() && shared.dshot_telemetry() {
             if inp.input.is_output() {
-                inp.input.receive_dshot_dma();
+                inp.input.start_capture();
             } else {
                 let gcr = inp.input.gcr_buffer();
 
@@ -544,7 +544,7 @@ pub fn handle_dma_tc() {
                     <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT,
                 );
 
-                inp.input.send_dshot_dma();
+                inp.input.start_gcr_output();
             }
         }
     });
@@ -555,7 +555,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
     ensure_split_init();
     let shared = isr::shared();
     INPUT_LOCAL.with_masked(|inp| {
-        let buf = inp.input.dma_buffer();
+        let buf = inp.input.edges();
 
         let pin_high = inp.input.input_pin_state();
 

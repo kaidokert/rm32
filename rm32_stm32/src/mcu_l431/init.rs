@@ -194,7 +194,7 @@ pub fn init(
     super::input_capture::init_l431();
     let mut input = super::input_capture::new_capture();
     use rm32::hal::InputCapture;
-    input.receive_dshot_dma();
+    input.start_capture();
 
     // ADC
     let adc = super::adc::new_adc();

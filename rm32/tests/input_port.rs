@@ -250,21 +250,21 @@ struct Input {
     gcr: [u32; 37],
 }
 impl InputCapture for Input {
-    fn receive_dshot_dma(&mut self) {
+    fn start_capture(&mut self) {
         RECEIVE_DMA_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         LAST_RECEIVE_DMA_SELF_ADDR.store(
             self as *const Self as usize,
             std::sync::atomic::Ordering::SeqCst,
         );
     }
-    fn send_dshot_dma(&mut self) {}
+    fn start_gcr_output(&mut self) {}
     fn input_pin_state(&self) -> bool {
         false
     }
     fn set_pull_up(&mut self) {}
     fn set_pull_down(&mut self) {}
     fn set_pull_none(&mut self) {}
-    fn dma_buffer(&self) -> &[u32; 64] {
+    fn edges(&self) -> &[u32; 64] {
         assert!(interrupt::masked());
         LAST_DMA_BUFFER_SELF_ADDR.store(
             self as *const Self as usize,
@@ -400,7 +400,7 @@ fn raw_frame(value: u16) {
                 };
         }
         let next = isr_handlers::handle_exti_frame();
-        assert_eq!(next.ndtr, 32);
+        assert_eq!(next.edges_per_burst, 32);
         assert_eq!(next.prescaler, None);
     });
 }
@@ -470,11 +470,11 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     let live_addr = LAST_DMA_BUFFER_SELF_ADDR.load(std::sync::atomic::Ordering::SeqCst);
     assert_ne!(
         rearmed_addr, staged_input_addr,
-        "receive_dshot_dma must not point at the consumed ISR_STATE staging cell"
+        "start_capture must not point at the consumed ISR_STATE staging cell"
     );
     assert_eq!(
         rearmed_addr, live_addr,
-        "receive_dshot_dma must be called on the permanent INPUT_LOCAL instance"
+        "start_capture must be called on the permanent INPUT_LOCAL instance"
     );
     let mut visited = false;
     isr::with_isr_state(|_| visited = true);

@@ -66,7 +66,7 @@ fn EXTI15_10() {
     let dma = unsafe { &*pac::DMA1::PTR };
     let ch1 = dma.ch1();
     unsafe {
-        ch1.ndtr().write(|w| w.bits(next_capture.ndtr));
+        ch1.ndtr().write(|w| w.bits(next_capture.edges_per_burst));
         ch1.cr().modify(|r, w| w.bits(r.bits() | 1)); // Enable CH1
     }
     // TIM15 CR1.CEN

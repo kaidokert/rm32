@@ -291,7 +291,7 @@ mod tests {
     struct MockTelem;
 
     impl crate::hal::TelemetryUart for MockTelem {
-        fn send_dma(&mut self, _: &[u8]) {}
+        fn send(&mut self, _: &[u8]) {}
     }
 
     fn main_state() -> MainState {

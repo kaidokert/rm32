@@ -80,7 +80,7 @@ pub enum ServoResult {
 }
 
 impl ServoState {
-    /// Process a servo pulse width (dma_buffer[1] - dma_buffer[0]).
+    /// Process a servo pulse width (edges[1] - edges[0]).
     /// Returns the new newinput value with rate limiting applied.
     pub fn compute(
         &mut self,

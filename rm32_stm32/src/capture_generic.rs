@@ -32,7 +32,7 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> GenericCapture<D, T, P> {
 }
 
 impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, T, P> {
-    fn receive_dshot_dma(&mut self) {
+    fn start_capture(&mut self) {
         self.dma.disable();
         self.timer.reset();
         self.timer.configure_capture(0); // prescaler set per-MCU in TimerOps impl
@@ -45,7 +45,7 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, 
         self.timer.start();
     }
 
-    fn send_dshot_dma(&mut self) {
+    fn start_gcr_output(&mut self) {
         self.dma.disable();
         self.timer.reset();
         self.timer.configure_output(self.output_prescaler.raw());
@@ -70,7 +70,7 @@ impl<D: DmaOps, T: TimerOps, P: InputPinOps> InputCapture for GenericCapture<D, 
     fn set_pull_none(&mut self) {
         self.pin.set_pull_none();
     }
-    fn dma_buffer(&self) -> &[u32; 64] {
+    fn edges(&self) -> &[u32; 64] {
         &self.dma_buf
     }
     fn gcr_buffer(&mut self) -> &mut [u32; 37] {

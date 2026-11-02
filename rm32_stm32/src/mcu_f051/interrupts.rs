@@ -67,7 +67,7 @@ fn EXTI4_15() {
     // Re-enable DMA CH5 for next frame
     let dma = unsafe { &*pac::DMA1::PTR };
     unsafe {
-        dma.ch5.ndtr.write(|w| w.bits(next_capture.ndtr));
+        dma.ch5.ndtr.write(|w| w.bits(next_capture.edges_per_burst));
         // Enable CH5
         dma.ch5.cr.modify(|r, w| w.bits(r.bits() | 1));
     }

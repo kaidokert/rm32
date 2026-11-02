@@ -87,7 +87,7 @@ impl TelemUart {
             .modify(|r, w| unsafe { w.bits((r.bits() & !0x3F) | 51) });
 
         // Configure DMA channel 3 (index 2)
-        // MAR is set to 0 here; send_dma() sets the actual buffer address before each transfer.
+        // MAR is set to 0 here; send() sets the actual buffer address before each transfer.
         dma.ch(2)
             .par()
             .write(|w| unsafe { w.bits(usart.tdr().as_ptr() as u32) });
@@ -109,7 +109,7 @@ impl TelemUart {
 }
 
 impl TelemetryUart for TelemUart {
-    fn send_dma(&mut self, data: &[u8]) {
+    fn send(&mut self, data: &[u8]) {
         let usart = unsafe { &*USART1::ptr() };
         let dma = unsafe { &*DMA1::ptr() };
 

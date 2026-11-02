@@ -54,7 +54,7 @@ impl<U: UartPeripheral> GenericTelemUart<U> {
 }
 
 impl<U: UartPeripheral> TelemetryUart for GenericTelemUart<U> {
-    fn send_dma(&mut self, data: &[u8]) {
+    fn send(&mut self, data: &[u8]) {
         let len = data.len().min(49);
         self.tx_buf[..len].copy_from_slice(&data[..len]);
         self.ops.send_dma_raw(self.tx_buf.as_ptr(), len as u16);

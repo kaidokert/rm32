@@ -152,12 +152,12 @@ fn detection_configures_capture_and_output_only_after_confirmation() {
         r.shared.set_dshot(false);
         let edges: [u32; 32] = std::array::from_fn(|i| 65520u32.wrapping_add(i as u32 * spacing));
         let first = r.edges(&edges, false).0;
-        assert_eq!(first.ndtr, 32);
+        assert_eq!(first.edges_per_burst, 32);
         assert_eq!(first.prescaler, Some(8));
         assert!(!r.shared.input_set());
         assert!(r.prescalers.is_empty());
         let second = r.edges(&edges, false).0;
-        assert_eq!(second.ndtr, count);
+        assert_eq!(second.edges_per_burst, count);
         assert_eq!(second.prescaler, Some(input_psc));
         assert!(r.shared.input_set());
         assert_eq!(r.shared.servo_pwm(), output.is_none());
@@ -348,7 +348,7 @@ fn servo_edges_realign_validate_and_publish_calibration_even_with_full_queue() {
     r.shared.set_servo_pwm(true);
     r.shared.set_adjusted_input(1900);
     r.config.disable_stick_calibration = 0;
-    assert_eq!(r.edges(&[0, 1900], true).0.ndtr, 3);
+    assert_eq!(r.edges(&[0, 1900], true).0.edges_per_burst, 3);
     r.shared.set_signal_timeout(99);
     r.edges(&[0, 800], false);
     assert_eq!(r.shared.signal_timeout(), 99);

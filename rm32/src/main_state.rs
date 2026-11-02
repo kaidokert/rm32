@@ -44,7 +44,12 @@ pub(crate) fn variable_pwm_mode2<P: Timing>(average_interval: u32, cpu_mhz: u8) 
     };
     // PWM geometry uses the original 2 MHz interval scale, independent of
     // the port's interval timer. Bound first to keep very long intervals safe.
-    let average_interval = (bounded as u64 * 2_000_000 / P::TIMER_HZ as u64) as u32;
+    // At a 2 MHz timer the conversion is the identity and folds away.
+    let average_interval = if P::TIMER_HZ == 2_000_000 {
+        bounded
+    } else {
+        (bounded as u64 * 2_000_000 / P::TIMER_HZ as u64) as u32
+    };
     let scale = cpu_mhz as u32 / 9;
     (average_interval * scale) as u16
 }
@@ -433,19 +438,23 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
                 && diff > (self.timing.average_interval >> 1)
                 && self.timing.average_interval < P::DESYNC_MAX_INTERVAL
             {
-                // Reset interval to 5000 if motor was running (>100 ZCs)
-                // Check before zeroing zero_crosses (C has this after, which is a bug)
-                if zc > 100 {
-                    self.timing.average_interval = P::DESYNC_RESET_INTERVAL;
-                }
+                // AM32's `if (zero_crosses > 100) { average_interval = 5000; }`
+                // sits after `zero_crosses = 0` and is unreachable dead code.
+                // Match that runtime behavior: resetting `average_interval`
+                // before `last_average_interval = average_interval` seeds 5000
+                // into the detector and triggers a false second desync echo on
+                // the following revolution.
                 shared.set_zero_crosses(0);
                 shared.request_duty_kick_down();
+                // DesyncFallback first (Running -> OldRoutine), then StopMotor
+                // conditionally (OldRoutine -> Armed); StopMotor first would
+                // transition directly to Armed where DesyncFallback is ignored.
+                shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
                 if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
                     || shared.commutation_interval() > P::DESYNC_STOP_INTERVAL
                 {
                     shared.transition(crate::motor_mode::MotorEvent::StopMotor);
                 }
-                shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
             }
             self.desync_check = false;
             self.timing.last_average_interval = self.timing.average_interval;
@@ -531,8 +540,12 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             if self.config.stall_protection != 0 && shared.running() {
                 // Board targets and PID gains retain their established 0.5 us
                 // units; changing the timer clock must not retune the controller.
-                let interval =
-                    (shared.commutation_interval() as u64 * 2_000_000 / P::TIMER_HZ as u64) as i32;
+                let ci = shared.commutation_interval();
+                let interval = if P::TIMER_HZ == 2_000_000 {
+                    ci as i32
+                } else {
+                    (ci as u64 * 2_000_000 / P::TIMER_HZ as u64) as i32
+                };
                 let boost = self.pid.tick_stall(interval);
                 shared.set_stall_protection_adjust(boost);
             }
@@ -572,7 +585,7 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
                 self.measurements.consumed_milliamp_hours(),
                 self.timing.e_rpm, // already in units of 100 eRPM (600000/e_com_time)
             );
-            telem.send_dma(&pkt);
+            telem.send(&pkt);
             shared.set_send_telemetry(false);
         }
 
@@ -801,7 +814,7 @@ mod tests {
 
     struct MockTelem;
     impl crate::hal::TelemetryUart for MockTelem {
-        fn send_dma(&mut self, _: &[u8]) {}
+        fn send(&mut self, _: &[u8]) {}
     }
 
     fn make_test_main_state() -> MainState {
@@ -840,7 +853,7 @@ mod tests {
     struct CapturedTelemetry([u8; 10]);
 
     impl crate::hal::TelemetryUart for CapturedTelemetry {
-        fn send_dma(&mut self, packet: &[u8]) {
+        fn send(&mut self, packet: &[u8]) {
             self.0.copy_from_slice(packet);
         }
     }
@@ -1342,19 +1355,93 @@ mod tests {
 
     #[test]
     fn bemf_timeout_requests_commutation_restart_while_running() {
+        for bi_direction in [0u8, 1u8] {
+            let shared = SharedState::new::<crate::platform::TestPlatform>();
+            shared.set_motor_mode(crate::motor_mode::MotorMode::Running);
+            shared.set_adjusted_input(100);
+            shared.set_interval_timer_count(
+                <crate::platform::TestPlatform as Timing>::BEMF_STALL_TIMER_THRESHOLD + 1,
+            );
+            let mut main = make_test_main_state();
+            main.config.bi_direction = bi_direction;
+
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+            assert_eq!(shared.isr_action(), IsrAction::CommutateKick);
+            assert_eq!(shared.zero_crosses(), 0);
+            assert!(shared.old_routine());
+        }
+    }
+
+    #[test]
+    fn desync_recovery_high_zc_does_not_seed_false_echo() {
+        use crate::motor_mode::MotorMode;
+
         let shared = SharedState::new::<crate::platform::TestPlatform>();
-        shared.set_motor_mode(crate::motor_mode::MotorMode::Running);
-        shared.set_adjusted_input(100);
-        shared.set_interval_timer_count(
-            <crate::platform::TestPlatform as Timing>::BEMF_STALL_TIMER_THRESHOLD + 1,
-        );
+        shared.set_motor_mode(MotorMode::Running);
+        shared.set_adjusted_input(0);
+        shared.set_zero_crosses(200);
+        shared.set_commutation_interval(100);
+        shared.set_e_com_time(1500);
+
         let mut main = make_test_main_state();
+        main.config.bi_direction = 1;
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+        main.timing.last_average_interval = 800;
+        main.timing.average_interval = 500;
 
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
-        assert_eq!(shared.isr_action(), IsrAction::CommutateKick);
+        assert_eq!(shared.motor_mode(), MotorMode::OldRoutine);
+        assert!(shared.take_duty_kick_down());
         assert_eq!(shared.zero_crosses(), 0);
-        assert!(shared.old_routine());
+        assert_eq!(main.timing.average_interval, 500);
+        assert_eq!(main.timing.last_average_interval, 500);
+
+        // Once the motor re-enters closed-loop Running at the same 500-tick
+        // average interval, the next settled desync check must not fire a
+        // spurious second desync from a 5000-tick reset seed.
+        shared.set_motor_mode(MotorMode::Running);
+        shared.set_zero_crosses(11);
+        shared.set_e_com_time(1500);
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.motor_mode(), MotorMode::Running);
+        assert!(!shared.take_duty_kick_down());
+    }
+
+    #[test]
+    fn desync_recovery_orders_fallback_before_conditional_stop() {
+        use crate::motor_mode::MotorMode;
+
+        // Unidirectional throttle > 47 triggers DesyncFallback (Running -> OldRoutine)
+        // followed by StopMotor (OldRoutine -> Armed). Reversing the calls would
+        // transition directly Running -> Armed and ignore DesyncFallback.
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        shared.set_motor_mode(MotorMode::Running);
+        shared.set_adjusted_input(100);
+        shared.set_zero_crosses(25);
+        shared.set_commutation_interval(100);
+        shared.set_e_com_time(1500);
+
+        let mut main = make_test_main_state();
+        main.config.bi_direction = 0;
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+        main.timing.last_average_interval = 800;
+        main.timing.average_interval = 500;
+
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+
+        assert_eq!(shared.motor_mode(), MotorMode::Armed);
+        assert_eq!(shared.mode_transition_count(), 2);
+        assert_eq!(shared.last_transition_from(), MotorMode::OldRoutine);
+        assert!(!shared.running());
+        assert!(!shared.old_routine());
     }
 
     #[test]
