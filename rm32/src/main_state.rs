@@ -1418,8 +1418,9 @@ mod tests {
     fn desync_recovery_orders_fallback_before_conditional_stop() {
         use crate::motor_mode::MotorMode;
 
-        // Unidirectional throttle > 47 triggers StopMotor after DesyncFallback,
-        // leaving the motor in Armed (not Running or OldRoutine).
+        // Unidirectional throttle > 47 triggers DesyncFallback (Running -> OldRoutine)
+        // followed by StopMotor (OldRoutine -> Armed). Reversing the calls would
+        // transition directly Running -> Armed and ignore DesyncFallback.
         let shared = SharedState::new::<crate::platform::TestPlatform>();
         shared.set_motor_mode(MotorMode::Running);
         shared.set_adjusted_input(100);
@@ -1437,6 +1438,8 @@ mod tests {
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
 
         assert_eq!(shared.motor_mode(), MotorMode::Armed);
+        assert_eq!(shared.mode_transition_count(), 2);
+        assert_eq!(shared.last_transition_from(), MotorMode::OldRoutine);
         assert!(!shared.running());
         assert!(!shared.old_routine());
     }
