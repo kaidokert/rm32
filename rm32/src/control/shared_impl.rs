@@ -1,12 +1,15 @@
 //! SharedComm test implementation using Cell for interior mutability.
 
-use crate::motor_mode::MotorMode;
-use crate::shared_comm::{IsrAction, IsrTiming, MainControl, MotorState, SharedComm};
+use crate::motor_mode::{MotorEvent, MotorMode};
+use crate::platform::{Platform, TestPlatform};
+use crate::shared_comm::{
+    Commands, Drive, IsrAction, MotorStatus, MotorStatusExt, Protections, Telemetry, Throttle,
+};
+use crate::units::{CentiAmps, CentiVolts};
 use core::cell::Cell;
 
 /// Test-friendly SharedComm that uses Cell for interior mutability.
 pub struct TestShared {
-    pub control_ticks: Cell<u32>,
     pub mode: Cell<MotorMode>,
     pub input_set: Cell<bool>,
     pub dshot_telemetry: Cell<bool>,
@@ -30,6 +33,7 @@ pub struct TestShared {
     pub auto_advance: Cell<u8>,
     pub interval_timer_count: Cell<u32>,
     pub one_khz_counter: Cell<u8>,
+    pub control_ticks: Cell<u32>,
     pub telem_counter: Cell<u16>,
     pub prop_brake_active: Cell<bool>,
     pub tone_active: Cell<bool>,
@@ -37,6 +41,13 @@ pub struct TestShared {
     pub duty_kick_down: Cell<bool>,
     pub changeover_step: Cell<u8>,
     pub desync_check_pending: Cell<bool>,
+    pub stall_protection_adjust: Cell<u16>,
+    pub current_limit_adjust: Cell<u16>,
+    pub battery_voltage: Cell<CentiVolts>,
+    pub actual_current: Cell<CentiAmps>,
+    pub degrees_celsius: Cell<i16>,
+    pub save_settings_flag: Cell<bool>,
+    pub send_esc_info_flag: Cell<bool>,
 }
 
 impl Default for TestShared {
@@ -48,7 +59,6 @@ impl Default for TestShared {
 impl TestShared {
     pub fn new() -> Self {
         Self {
-            control_ticks: Cell::new(0),
             mode: Cell::new(MotorMode::Disarmed),
             input_set: Cell::new(false),
             dshot_telemetry: Cell::new(false),
@@ -64,13 +74,14 @@ impl TestShared {
             gate_avg: Cell::new(0),
             signal_timeout: Cell::new(0),
             send_telemetry: Cell::new(false),
-            tim1_arr: Cell::new(1999),
+            tim1_arr: Cell::new(TestPlatform::PWM_BASE_PERIOD),
             duty_maximum: Cell::new(2000),
             filter_level: Cell::new(5),
             min_bemf_counts: Cell::new(2),
             auto_advance: Cell::new(0),
             interval_timer_count: Cell::new(0),
             one_khz_counter: Cell::new(0),
+            control_ticks: Cell::new(0),
             telem_counter: Cell::new(0),
             prop_brake_active: Cell::new(false),
             tone_active: Cell::new(false),
@@ -78,26 +89,55 @@ impl TestShared {
             duty_kick_down: Cell::new(false),
             changeover_step: Cell::new(0),
             desync_check_pending: Cell::new(false),
+            stall_protection_adjust: Cell::new(0),
+            current_limit_adjust: Cell::new(2000),
+            battery_voltage: Cell::new(CentiVolts::ZERO),
+            actual_current: Cell::new(CentiAmps::ZERO),
+            degrees_celsius: Cell::new(0),
+            save_settings_flag: Cell::new(false),
+            send_esc_info_flag: Cell::new(false),
         }
     }
 }
 
-impl MotorState for TestShared {
+impl MotorStatus for TestShared {
     fn motor_mode(&self) -> MotorMode {
         self.mode.get()
     }
     fn set_motor_mode(&self, mode: MotorMode) {
         self.mode.set(mode);
     }
-}
-
-impl IsrTiming for TestShared {
-    fn control_ticks(&self) -> u32 {
-        self.control_ticks.get()
+    fn transition(&self, event: MotorEvent) {
+        let new = self.mode.get().transition(event);
+        self.mode.set(new);
     }
-    fn increment_control_ticks(&self) {
-        self.control_ticks
-            .set(self.control_ticks.get().wrapping_add(1));
+    fn set_armed(&self, v: bool) {
+        if v && !self.armed() {
+            self.mode.set(MotorMode::Armed);
+        } else if !v {
+            self.mode.set(MotorMode::Disarmed);
+        }
+    }
+    fn set_running(&self, v: bool) {
+        if v && !self.running() {
+            self.mode.set(MotorMode::OldRoutine);
+        } else if !v && self.running() {
+            self.mode.set(MotorMode::Armed);
+        }
+    }
+    fn set_old_routine(&self, v: bool) {
+        if v && self.running() {
+            self.mode.set(MotorMode::OldRoutine);
+        } else if !v && self.old_routine() {
+            self.mode.set(MotorMode::Running);
+        }
+    }
+    fn set_stepper_sine(&self, v: bool) {
+        if v {
+            self.mode.set(MotorMode::StepperSine);
+        } else if self.stepper_sine() {
+            self.mode.set(MotorMode::Armed);
+        }
     }
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses.get()
@@ -135,15 +175,6 @@ impl IsrTiming for TestShared {
     fn set_interval_timer_count(&self, v: u32) {
         self.interval_timer_count.set(v);
     }
-    fn signal_timeout(&self) -> u32 {
-        self.signal_timeout.get()
-    }
-    fn increment_signal_timeout(&self) {
-        let v = self.signal_timeout.get();
-        if v < u32::MAX {
-            self.signal_timeout.set(v + 1);
-        }
-    }
     fn duty_cycle(&self) -> u16 {
         self.duty_cycle.get()
     }
@@ -156,100 +187,11 @@ impl IsrTiming for TestShared {
     fn set_forward(&self, v: bool) {
         self.forward.set(v);
     }
-    fn one_khz_counter_inc(&self) {
-        self.one_khz_counter
-            .set(self.one_khz_counter.get().saturating_add(1));
+    fn desync_check_pending(&self) -> bool {
+        self.desync_check_pending.get()
     }
-    fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
-        if self.one_khz_counter.get() >= divider {
-            self.one_khz_counter.set(0);
-            true
-        } else {
-            false
-        }
-    }
-    fn telem_counter_check_and_inc(&self, limit: u16) -> bool {
-        let next = self.telem_counter.get().saturating_add(1);
-        if next >= limit {
-            self.telem_counter.set(0);
-            true
-        } else {
-            self.telem_counter.set(next);
-            false
-        }
-    }
-}
-
-impl MainControl for TestShared {
-    fn adjusted_input(&self) -> u16 {
-        self.adjusted_input.get()
-    }
-    fn set_adjusted_input(&self, v: u16) {
-        self.adjusted_input.set(v);
-    }
-    fn duty_cycle_setpoint(&self) -> u16 {
-        self.duty_cycle_setpoint.get()
-    }
-    fn set_duty_cycle_setpoint(&self, v: u16) {
-        self.duty_cycle_setpoint.set(v);
-    }
-    fn tim1_arr(&self) -> u16 {
-        self.tim1_arr.get()
-    }
-    fn set_tim1_arr(&self, v: u16) {
-        self.tim1_arr.set(v);
-    }
-    fn duty_maximum(&self) -> u16 {
-        self.duty_maximum.get()
-    }
-    fn set_duty_maximum(&self, v: u16) {
-        self.duty_maximum.set(v);
-    }
-    fn filter_level(&self) -> u8 {
-        self.filter_level.get()
-    }
-    fn set_filter_level(&self, v: u8) {
-        self.filter_level.set(v);
-    }
-    fn min_bemf_counts(&self) -> u8 {
-        self.min_bemf_counts.get()
-    }
-    fn set_min_bemf_counts(&self, v: u8) {
-        self.min_bemf_counts.set(v);
-    }
-    fn auto_advance(&self) -> u8 {
-        self.auto_advance.get()
-    }
-    fn set_auto_advance(&self, v: u8) {
-        self.auto_advance.set(v);
-    }
-    fn prop_brake_active(&self) -> bool {
-        self.prop_brake_active.get()
-    }
-    fn set_prop_brake_active(&self, v: bool) {
-        self.prop_brake_active.set(v);
-    }
-    fn tone_active(&self) -> bool {
-        self.tone_active.get()
-    }
-    fn isr_action(&self) -> IsrAction {
-        self.isr_action.get()
-    }
-    fn request_isr_action(&self, action: IsrAction) {
-        if action as u8 > self.isr_action.get() as u8 {
-            self.isr_action.set(action);
-        }
-    }
-    fn clear_isr_action(&self, action: IsrAction) {
-        if self.isr_action.get() == action {
-            self.isr_action.set(IsrAction::None);
-        }
-    }
-    fn request_duty_kick_down(&self) {
-        self.duty_kick_down.set(true);
-    }
-    fn take_duty_kick_down(&self) -> bool {
-        self.duty_kick_down.replace(false)
+    fn set_desync_check_pending(&self, v: bool) {
+        self.desync_check_pending.set(v);
     }
     fn changeover_step(&self) -> u8 {
         self.changeover_step.get()
@@ -257,15 +199,9 @@ impl MainControl for TestShared {
     fn set_changeover_step(&self, step: u8) {
         self.changeover_step.set(step);
     }
-    fn desync_check_pending(&self) -> bool {
-        self.desync_check_pending.get()
-    }
-    fn set_desync_check_pending(&self, v: bool) {
-        self.desync_check_pending.set(v);
-    }
 }
 
-impl SharedComm for TestShared {
+impl Throttle for TestShared {
     fn input_set(&self) -> bool {
         self.input_set.get()
     }
@@ -287,18 +223,172 @@ impl SharedComm for TestShared {
     fn set_newinput(&self, v: u16) {
         self.newinput.set(v);
     }
+    fn adjusted_input(&self) -> u16 {
+        self.adjusted_input.get()
+    }
+    fn set_adjusted_input(&self, v: u16) {
+        self.adjusted_input.set(v);
+    }
+    fn duty_cycle_setpoint(&self) -> u16 {
+        self.duty_cycle_setpoint.get()
+    }
+    fn set_duty_cycle_setpoint(&self, v: u16) {
+        self.duty_cycle_setpoint.set(v);
+    }
+    fn signal_timeout(&self) -> u32 {
+        self.signal_timeout.get()
+    }
+    fn increment_signal_timeout(&self) {
+        let v = self.signal_timeout.get();
+        if v < u32::MAX {
+            self.signal_timeout.set(v + 1);
+        }
+    }
+    fn prop_brake_active(&self) -> bool {
+        self.prop_brake_active.get()
+    }
+    fn set_prop_brake_active(&self, v: bool) {
+        self.prop_brake_active.set(v);
+    }
+}
+
+impl Drive for TestShared {
+    fn tim1_arr(&self) -> u16 {
+        self.tim1_arr.get()
+    }
+    fn set_tim1_arr(&self, v: u16) {
+        self.tim1_arr.set(v);
+    }
+    fn filter_level(&self) -> u8 {
+        self.filter_level.get()
+    }
+    fn set_filter_level(&self, v: u8) {
+        self.filter_level.set(v);
+    }
+    fn min_bemf_counts(&self) -> u8 {
+        self.min_bemf_counts.get()
+    }
+    fn set_min_bemf_counts(&self, v: u8) {
+        self.min_bemf_counts.set(v);
+    }
+    fn auto_advance(&self) -> u8 {
+        self.auto_advance.get()
+    }
+    fn set_auto_advance(&self, v: u8) {
+        self.auto_advance.set(v);
+    }
+}
+
+impl Protections for TestShared {
+    fn duty_maximum(&self) -> u16 {
+        self.duty_maximum.get()
+    }
+    fn set_duty_maximum(&self, v: u16) {
+        self.duty_maximum.set(v);
+    }
+    fn stall_protection_adjust(&self) -> u16 {
+        self.stall_protection_adjust.get()
+    }
+    fn set_stall_protection_adjust(&self, v: u16) {
+        self.stall_protection_adjust.set(v);
+    }
+    fn current_limit_adjust(&self) -> u16 {
+        self.current_limit_adjust.get()
+    }
+    fn set_current_limit_adjust(&self, v: u16) {
+        self.current_limit_adjust.set(v);
+    }
+}
+
+impl Telemetry for TestShared {
     fn send_telemetry(&self) -> bool {
         self.send_telemetry.get()
     }
     fn set_send_telemetry(&self, v: bool) {
         self.send_telemetry.set(v);
     }
+    fn send_esc_info_flag(&self) -> bool {
+        self.send_esc_info_flag.get()
+    }
+    fn set_send_esc_info_flag(&self, v: bool) {
+        self.send_esc_info_flag.set(v);
+    }
+    fn telem_counter_check_and_inc(&self, limit: u16) -> bool {
+        let next = self.telem_counter.get().saturating_add(1);
+        if next >= limit {
+            self.telem_counter.set(0);
+            true
+        } else {
+            self.telem_counter.set(next);
+            false
+        }
+    }
+    fn battery_voltage(&self) -> CentiVolts {
+        self.battery_voltage.get()
+    }
+    fn set_battery_voltage(&self, v: CentiVolts) {
+        self.battery_voltage.set(v);
+    }
+    fn set_actual_current(&self, v: CentiAmps) {
+        self.actual_current.set(v);
+    }
+    fn set_degrees_celsius(&self, v: i16) {
+        self.degrees_celsius.set(v);
+    }
+}
+
+impl Commands for TestShared {
+    fn isr_action(&self) -> IsrAction {
+        self.isr_action.get()
+    }
+    fn request_isr_action(&self, action: IsrAction) {
+        if action as u8 > self.isr_action.get() as u8 {
+            self.isr_action.set(action);
+        }
+    }
+    fn clear_isr_action(&self, action: IsrAction) {
+        if self.isr_action.get() == action {
+            self.isr_action.set(IsrAction::None);
+        }
+    }
+    fn request_duty_kick_down(&self) {
+        self.duty_kick_down.set(true);
+    }
+    fn take_duty_kick_down(&self) -> bool {
+        self.duty_kick_down.replace(false)
+    }
+    fn save_settings_flag(&self) -> bool {
+        self.save_settings_flag.get()
+    }
+    fn set_save_settings_flag(&self, v: bool) {
+        self.save_settings_flag.set(v);
+    }
+    fn control_ticks(&self) -> u32 {
+        self.control_ticks.get()
+    }
+    fn increment_control_ticks(&self) {
+        self.control_ticks
+            .set(self.control_ticks.get().wrapping_add(1));
+    }
+    fn one_khz_counter_inc(&self) {
+        self.one_khz_counter
+            .set(self.one_khz_counter.get().saturating_add(1));
+    }
+    fn one_khz_counter_check_and_reset(&self, divider: u8) -> bool {
+        if self.one_khz_counter.get() >= divider {
+            self.one_khz_counter.set(0);
+            true
+        } else {
+            false
+        }
+    }
+    fn tone_active(&self) -> bool {
+        self.tone_active.get()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::shared_comm::MainControl;
-
     use super::*;
 
     #[test]
@@ -319,5 +409,96 @@ mod tests {
         assert!(shared.desync_check_pending());
         shared.set_desync_check_pending(false);
         assert!(!shared.desync_check_pending());
+    }
+
+    #[test]
+    fn domain_traits_roundtrip_without_dummy_defaults() {
+        let shared = TestShared::new();
+
+        // MotorStatus & MotorStatusExt
+        assert!(!shared.armed());
+        shared.set_armed(true);
+        assert!(shared.armed());
+        shared.set_running(true);
+        assert!(shared.running());
+        assert!(shared.old_routine());
+        shared.set_old_routine(false);
+        assert!(shared.running());
+        assert!(!shared.old_routine());
+        shared.set_stepper_sine(true);
+        assert!(shared.stepper_sine());
+        shared.set_e_com_time(4321);
+        assert_eq!(shared.e_com_time(), 4321);
+        shared.set_interval_timer_count(999);
+        assert_eq!(shared.interval_timer_count(), 999);
+        shared.set_duty_cycle(777);
+        assert_eq!(shared.duty_cycle(), 777);
+        shared.set_forward(false);
+        assert!(!shared.forward());
+
+        // Throttle
+        shared.set_input_set(true);
+        assert!(shared.input_set());
+        shared.set_is_dshot(true);
+        assert!(shared.is_dshot());
+        shared.set_newinput(1100);
+        assert_eq!(shared.newinput(), 1100);
+        shared.set_adjusted_input(900);
+        assert_eq!(shared.adjusted_input(), 900);
+        shared.set_duty_cycle_setpoint(800);
+        assert_eq!(shared.duty_cycle_setpoint(), 800);
+        shared.increment_signal_timeout();
+        assert_eq!(shared.signal_timeout(), 1);
+        shared.set_prop_brake_active(true);
+        assert!(shared.prop_brake_active());
+
+        // Drive
+        shared.set_tim1_arr(1500);
+        assert_eq!(shared.tim1_arr(), 1500);
+        shared.set_filter_level(8);
+        assert_eq!(shared.filter_level(), 8);
+        shared.set_min_bemf_counts(4);
+        assert_eq!(shared.min_bemf_counts(), 4);
+        shared.set_auto_advance(3);
+        assert_eq!(shared.auto_advance(), 3);
+
+        // Protections
+        shared.set_duty_maximum(1600);
+        assert_eq!(shared.duty_maximum(), 1600);
+        shared.set_stall_protection_adjust(42);
+        assert_eq!(shared.stall_protection_adjust(), 42);
+        shared.set_current_limit_adjust(1400);
+        assert_eq!(shared.current_limit_adjust(), 1400);
+
+        // Telemetry
+        shared.set_send_telemetry(true);
+        assert!(shared.send_telemetry());
+        shared.set_send_esc_info_flag(true);
+        assert!(shared.send_esc_info_flag());
+        shared.set_battery_voltage(CentiVolts(1680));
+        assert_eq!(shared.battery_voltage(), CentiVolts(1680));
+        shared.set_actual_current(CentiAmps(1250));
+        assert_eq!(shared.actual_current.get(), CentiAmps(1250));
+        shared.set_degrees_celsius(55);
+        assert_eq!(shared.degrees_celsius.get(), 55);
+        assert!(!shared.telem_counter_check_and_inc(2));
+        assert!(shared.telem_counter_check_and_inc(2));
+
+        // Commands
+        shared.request_isr_action(IsrAction::CommutateKick);
+        assert_eq!(shared.isr_action(), IsrAction::CommutateKick);
+        shared.clear_isr_action(IsrAction::CommutateKick);
+        assert_eq!(shared.isr_action(), IsrAction::None);
+        shared.request_duty_kick_down();
+        assert!(shared.take_duty_kick_down());
+        assert!(!shared.take_duty_kick_down());
+        shared.set_save_settings_flag(true);
+        assert!(shared.save_settings_flag());
+        shared.increment_control_ticks();
+        assert_eq!(shared.control_ticks(), 1);
+        shared.one_khz_counter_inc();
+        assert!(shared.one_khz_counter_check_and_reset(1));
+        shared.tone_active.set(true);
+        assert!(shared.tone_active());
     }
 }

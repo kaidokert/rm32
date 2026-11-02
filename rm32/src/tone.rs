@@ -230,11 +230,15 @@ pub fn duty(beep_volume: u8) -> u16 {
 /// `ten_khz_tick` yields bridge output to the active scheduler. If motor or
 /// brake output takes ownership, restore timer settings without touching its
 /// phase or duty writes.
+///
+/// Drive follows `config.pwm_mode()` (`PwmMode::Complementary` when
+/// `comp_pwm != 0`, `PwmMode::Diode` when `comp_pwm == 0`), matching AM32
+/// `sounds.c`.
 pub fn step<P, B, M>(
     tone: &mut ToneScheduler,
     request: u16,
     bridge_busy: bool,
-    beep_volume: u8,
+    config: &crate::config::EepromConfig,
     base_period: u16,
     bridge: M,
 ) where
@@ -247,8 +251,8 @@ pub fn step<P, B, M>(
             let mut bridge = bridge();
             bridge.set_period(P::PWM_BASE_PERIOD);
             bridge.set_tone_divider(note.prescaler);
-            bridge.set_duty_all(tone.duty(beep_volume));
-            bridge.com_step(note.step, crate::hal::PwmMode::Diode);
+            bridge.set_duty_all(tone.duty(config.beep_volume));
+            bridge.com_step(note.step, config.pwm_mode());
         }
         ToneAction::Silence => {
             let mut bridge = bridge();
@@ -438,5 +442,74 @@ mod tests {
     fn note_layout_is_word_aligned_for_thumbv6m_loads() {
         assert_eq!(core::mem::size_of::<Note>(), 8);
         assert_eq!(core::mem::align_of::<Note>(), 4);
+    }
+
+    #[test]
+    fn step_applies_configured_pwm_mode_and_preserves_busy_bridge_restoration() {
+        use crate::hal::PwmMode;
+
+        #[derive(Default)]
+        struct MockBridge {
+            last_step: Option<(u8, PwmMode)>,
+            last_duty: Option<u16>,
+            last_divider: Option<u16>,
+            last_period: Option<u16>,
+            all_off_called: bool,
+        }
+
+        impl crate::hal::PhaseOutput for MockBridge {
+            fn com_step(&mut self, step: u8, mode: PwmMode) {
+                self.last_step = Some((step, mode));
+            }
+            fn all_off(&mut self) {
+                self.all_off_called = true;
+            }
+            fn full_brake(&mut self) {}
+            fn all_pwm(&mut self, _mode: PwmMode) {}
+            fn proportional_brake(&mut self) {}
+            fn pulse_toggle(&mut self, _step: u8) {}
+        }
+
+        impl crate::bridge::Bridge for MockBridge {
+            fn set_duty_all(&mut self, compare: u16) {
+                self.last_duty = Some(compare);
+            }
+            fn set_phase_duties(&mut self, _a: u16, _b: u16, _c: u16) {}
+            fn set_period(&mut self, auto_reload: u16) {
+                self.last_period = Some(auto_reload);
+            }
+            fn set_tone_divider(&mut self, divider: u16) {
+                self.last_divider = Some(divider);
+            }
+            fn set_dead_time_override(&mut self, _dto: u16) {}
+            fn latch(&mut self) {}
+        }
+
+        let mut scheduler = ToneScheduler::default();
+        let mut bridge = MockBridge::default();
+        let mut config = crate::config::EepromConfig {
+            comp_pwm: 0,
+            beep_volume: 6,
+            ..Default::default()
+        };
+
+        step::<TestTime, _, _>(&mut scheduler, 1, false, &config, 1555, || &mut bridge);
+        assert_eq!(bridge.last_step, Some((2, PwmMode::Diode)));
+        assert_eq!(bridge.last_duty, Some(18));
+        assert_eq!(bridge.last_divider, Some(50));
+        assert_eq!(bridge.last_period, Some(TestTime::PWM_BASE_PERIOD));
+
+        // Abort due to bridge_busy restores divider and base_period without all_off.
+        bridge = MockBridge::default();
+        step::<TestTime, _, _>(&mut scheduler, 0, true, &config, 1555, || &mut bridge);
+        assert!(!bridge.all_off_called);
+        assert_eq!(bridge.last_divider, Some(0));
+        assert_eq!(bridge.last_period, Some(1555));
+
+        // With comp_pwm != 0, step drives PwmMode::Complementary.
+        config.comp_pwm = 1;
+        bridge = MockBridge::default();
+        step::<TestTime, _, _>(&mut scheduler, 1, false, &config, 1555, || &mut bridge);
+        assert_eq!(bridge.last_step, Some((2, PwmMode::Complementary)));
     }
 }

@@ -576,7 +576,7 @@ impl Harness {
                     tone,
                     request,
                     bridge_busy,
-                    config.beep_volume,
+                    config,
                     shared.tim1_arr(),
                     || hal.bridge(),
                 );
