@@ -128,6 +128,7 @@ impl EdtScheduler {
 /// extended frame or eRPM (the commutation period, read only for an eRPM
 /// slot), and the 12-bit value is GCR-encoded into `gcr` at the port's
 /// padding (`7`) and `gcr_shift`. `on_extended` sees each extended value.
+/// Returns without modifying `edt` or `gcr` if `gcr.len() < 29` (`padding + 22`).
 #[inline(always)]
 pub fn encode_response<F: FnOnce(u16)>(
     edt: &mut EdtScheduler,
@@ -136,6 +137,9 @@ pub fn encode_response<F: FnOnce(u16)>(
     gcr_shift: u8,
     on_extended: F,
 ) {
+    if gcr.len() < 29 {
+        return;
+    }
     let value_12bit = match edt.next_frame(
         shared.actual_current(),
         shared.battery_voltage(),
@@ -329,12 +333,20 @@ mod tests {
     #[test]
     fn encode_response_selects_and_encodes() {
         let shared = crate::shared_state::SharedState::new::<crate::platform::TestPlatform>();
+        shared.set_running(true);
         shared.set_e_com_time(1234);
         let mut edt = EdtScheduler::default();
         let mut seen = None;
         let mut got = [0u32; 37];
         let mut want = [0u32; 37];
         edt.request_init();
+        let mut short = [0u32; 28];
+        encode_response(&mut edt, &shared, &mut short, 7, |v| seen = Some(v));
+        assert_eq!(
+            (seen, short),
+            (None, [0u32; 28]),
+            "short buffer is ignored without advancing EDT"
+        );
         encode_response(&mut edt, &shared, &mut got, 7, |v| seen = Some(v));
         crate::dshot::encode_gcr_frame(EDT_INIT_FRAME, &mut want, 7, 7);
         assert_eq!((seen, got), (Some(EDT_INIT_FRAME), want));
@@ -342,7 +354,8 @@ mod tests {
         encode_response(&mut EdtScheduler::default(), &shared, &mut got, 7, |v| {
             seen = Some(v)
         });
-        let erpm = crate::dshot::erpm_to_12bit(1234, shared.running());
+        let erpm = crate::dshot::erpm_to_12bit(1234, true);
+        assert_ne!(erpm, crate::dshot::erpm_to_12bit(1234, false));
         crate::dshot::encode_gcr_frame(erpm, &mut want, 7, 7);
         assert_eq!((seen, got), (None, want));
     }

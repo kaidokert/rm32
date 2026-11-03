@@ -8,6 +8,8 @@ use std::cell::RefCell;
 
 #[path = "../../rm32_stm32/src/bridge.rs"]
 mod bridge;
+#[path = "../../rm32_stm32/src/emergency.rs"]
+mod emergency;
 #[path = "../../rm32_stm32/src/gpio_pin.rs"]
 mod gpio_pin;
 #[path = "../../rm32_stm32/src/gpio_regs.rs"]
@@ -639,5 +641,34 @@ fn firmware_tones_keep_gpio_timer_and_irq_sequence() {
     expected.queued = [scaled_vol; 3];
     atomic_step(&mut expected, float, low, driven, false);
     expected.writes.push(Write::DelayMs(25));
+    assert_registers(&expected);
+}
+
+#[test]
+fn emergency_off_clears_odr_and_switches_moder_to_output() {
+    use rm32::hal::EmergencyOff;
+
+    let mut driver = phase::G0APhaseDriver::new();
+    REGS.set(Registers::default());
+    driver.all_pwm(PwmMode::Complementary);
+    REGS.with_borrow_mut(|r| r.writes.clear());
+
+    let mut expected = REGS.with_borrow(|r| r.clone());
+    emergency::G0AEmergencyOff::emergency_off();
+
+    let bsrr_a = (1 << (7 + 16)) | (1 << (8 + 16)) | (1 << (9 + 16)) | (1 << (10 + 16));
+    let bsrr_b = (1 << 16) | (1 << (1 + 16));
+    expected.odr[0] &= !(bsrr_a >> 16);
+    expected.odr[1] &= !(bsrr_b >> 16);
+    expected.writes.push(Write::Bsrr(0, bsrr_a));
+    expected.writes.push(Write::Bsrr(1, bsrr_b));
+
+    let mask_a = (0b11 << 14) | (0b11 << 16) | (0b11 << 18) | (0b11 << 20);
+    let out_a = (0b01 << 14) | (0b01 << 16) | (0b01 << 18) | (0b01 << 20);
+    expected.mode[0] = (expected.mode[0] & !mask_a) | out_a;
+    expected.mode[1] = (expected.mode[1] & !0b1111) | 0b0101;
+    expected.writes.push(Write::Mode(0, expected.mode[0]));
+    expected.writes.push(Write::Mode(1, expected.mode[1]));
+
     assert_registers(&expected);
 }
