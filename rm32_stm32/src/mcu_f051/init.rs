@@ -6,7 +6,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
-    bemf_pins: rm32::board::BemfPins,
+    bemf_pins: crate::board_ext::BemfPins,
 ) -> InitResult<super::system::System, super::adc::F051Adc, super::telemetry_uart::F051TelemUart> {
     use stm32f0xx_hal::pac;
     use stm32f0xx_hal::prelude::*;

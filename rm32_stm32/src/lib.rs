@@ -9,10 +9,30 @@
 #[macro_export]
 macro_rules! dprintln {
     ($($arg:tt)*) => {{
-        rtt_target::rprintln!($($arg)*);
+        $crate::dline(format_args!($($arg)*));
     }};
 }
 
+/// Format `args` into RTT outside a critical section.
+///
+/// `rtt_target::rprintln!` runs `core::fmt::write` inside
+/// `critical_section::with` (disabling all interrupts, including priority 0).
+/// Calling `core::fmt::write` here runs formatting with interrupts enabled;
+/// each `write_str` call enters `critical_section::with` only to copy the
+/// already-formatted fragment into the RTT ring buffer.
+pub fn dline(args: core::fmt::Arguments) {
+    struct RttOut;
+    impl core::fmt::Write for RttOut {
+        fn write_str(&mut self, s: &str) -> core::fmt::Result {
+            rtt_target::rprint!("{}", s);
+            Ok(())
+        }
+    }
+    let _ = core::fmt::write(&mut RttOut, args);
+    rtt_target::rprint!("\n");
+}
+
+pub mod board_ext;
 pub mod mcu;
 pub use mcu::pac;
 

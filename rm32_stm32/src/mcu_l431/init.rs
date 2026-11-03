@@ -7,7 +7,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
-    bemf_pins: rm32::board::BemfPins,
+    bemf_pins: crate::board_ext::BemfPins,
 ) -> InitResult<super::system::System, super::adc::L431Adc, super::telemetry_uart::L431TelemUart> {
     use stm32l4xx_hal::pac;
 
@@ -204,20 +204,25 @@ pub fn init(
     let telem = super::telemetry_uart::L431TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
 
-    const CONTROL_RELOAD: u16 = (80_000_000
-        / <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ
-        - 1) as u16;
-    // TIM6: 80MHz / 4000 = 20kHz
+    // TIM6: AM32 peripherals.c:139 — PSC=79 (1 MHz tick), ARR=50 (~19.6 kHz).
+    // (PSC=0 / ARR=3999 gives 20.0 kHz; match AM32's decomposition for register parity.)
+    // TIM7: AM32 peripherals.c:159 — free-running 1 MHz 16-bit counter (PSC=79, ARR=0xFFFF, CEN).
     unsafe {
-        // Enable TIM6 (APB1ENR1 bit 4)
-        rcc_pac.apb1enr1.modify(|_, w| w.tim6en().set_bit());
+        rcc_pac
+            .apb1enr1
+            .modify(|_, w| w.tim6en().set_bit().tim7en().set_bit());
         let tim6 = &*pac::TIM6::ptr();
-        tim6.psc.write(|w| w.bits(0));
-        tim6.arr.write(|w| w.bits(CONTROL_RELOAD as u32));
+        tim6.psc.write(|w| w.bits(0x4F));
+        tim6.arr.write(|w| w.bits(0x32));
         tim6.egr.write(|w| w.ug().set_bit());
         tim6.sr.write(|w| w.uif().clear_bit());
         tim6.dier.write(|w| w.uie().set_bit());
         tim6.cr1.write(|w| w.cen().set_bit());
+
+        let tim7 = &*pac::TIM7::ptr();
+        tim7.psc.write(|w| w.bits(0x4F));
+        tim7.arr.write(|w| w.bits(0xFFFF));
+        tim7.cr1.write(|w| w.cen().set_bit());
     }
 
     // NVIC priorities — AM32-matched. STM32L4 implements 4 priority bits in the

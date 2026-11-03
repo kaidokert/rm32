@@ -1,7 +1,7 @@
+use crate::board_ext::BemfPins;
 use crate::comp_hal::{CompOps, ExtiOps};
 use crate::comparator::BemfComparator;
 use crate::pac::{COMP, EXTI};
-use rm32::board::BemfPins;
 
 const LINE_21: u32 = 1 << 21;
 const LINE_22: u32 = 1 << 22;

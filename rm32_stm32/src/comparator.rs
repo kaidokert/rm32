@@ -1,7 +1,7 @@
 //! Generic BEMF comparator — MCU details via CompOps + ExtiOps traits.
 
+use crate::board_ext::BemfPins;
 use crate::comp_hal::{CompOps, ExtiOps};
-use rm32::board::BemfPins;
 use rm32::hal::{BemfSensor, Phase};
 
 /// Generic BEMF comparator. Zero cfg blocks — MCU differences in trait impls.

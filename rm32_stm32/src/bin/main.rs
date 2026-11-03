@@ -47,13 +47,17 @@ fn main() -> ! {
     }
     rm32_stm32::dprintln!("[rm32] boot");
 
+    // Board-specific GPIO (gate-driver ENABLE held low until armed, nFAULT
+    // input with pull-up) before TIM1 PWM init sets MOE.
+    BOARD_EXT.init_pins();
+
     // --- MCU-specific init (clocks, GPIO, peripherals, NVIC) ---
     let InitResult {
         mut hal,
         mut sys,
         mut adc,
         mut telem,
-    } = rm32_stm32::init::init(BOARD.dead_time, BOARD.bemf_pins);
+    } = rm32_stm32::init::init(BOARD.dead_time, BOARD_EXT.bemf_pins);
 
     // --- WS2812 LED: boot indicator (dim red) ---
     let led_pin = rm32_stm32::ws2812_hal::GpioBPin::new(BOARD.led_pin.unwrap_or(8));
@@ -239,6 +243,10 @@ fn main() -> ! {
         system.tick_input(shared, &mut main_state);
         system.sync_isr_to_main(shared, &mut main_state);
         system.tick_main(shared, &mut main_state, &mut adc, &mut telem);
+
+        // Gate driver + TIM1 MOE follow the armed state (no-op on boards
+        // without `gate_enable_pin`).
+        BOARD_EXT.drive_gate(shared.armed());
 
         // Arming feedback: cell count beeps + LED
         if main_state.just_armed {
