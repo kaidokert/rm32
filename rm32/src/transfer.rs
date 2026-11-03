@@ -159,7 +159,7 @@ impl TransferState {
 
         // --- Input detection ---
         if !input_set {
-            let sig = signal::detect_input(edges, (P::CAPTURE_HZ / 1_000_000) as u8);
+            let sig = signal::detect_input(edges);
             let protocol = match sig {
                 signal::SignalType::Dshot600
                 | signal::SignalType::Dshot300
@@ -548,10 +548,16 @@ pub struct InputContext<'a> {
 /// the shared dispatch used by both firmware and the host harness.
 /// `set_prescaler` receives the bidirectional DShot output prescaler when
 /// detection locks DShot (the port's register work).
-pub fn dispatch<P: FnOnce(crate::hal::DshotOutputPrescaler)>(
+///
+/// `on_command` runs first on a decoded command. Both callbacks run inside
+/// their respective match arms so LLVM does not tail-duplicate shared-state
+/// stores into a second path.
+#[inline(always)]
+pub fn dispatch<C: FnOnce(u16), P: FnOnce(crate::hal::DshotOutputPrescaler)>(
     actions: &TransferActions,
     shared: &crate::shared_state::SharedState,
     mut ctx: InputContext<'_>,
+    on_command: C,
     set_prescaler: P,
 ) {
     // A sequence started while stopped must not survive loss of its gate.
@@ -604,6 +610,7 @@ pub fn dispatch<P: FnOnce(crate::hal::DshotOutputPrescaler)>(
             shared.set_signal_timeout(0);
         }
         TransferAction::DshotCommand { cmd, telemetry } => {
+            on_command(cmd);
             shared.set_newinput(0);
             if telemetry {
                 shared.set_send_telemetry(true);
@@ -654,6 +661,7 @@ pub fn dispatch<P: FnOnce(crate::hal::DshotOutputPrescaler)>(
 /// One command or programming byte. Programming updates the config directly
 /// too: publish each changed byte once, never truncating an unvalidated
 /// programming position to a queue key.
+#[inline(always)]
 fn apply_command(
     value: u16,
     shared: &crate::shared_state::SharedState,
@@ -1465,19 +1473,19 @@ mod tests {
                 ft: (400, 600),
             }
         }
-        /// Dispatch one action; returns prescaler set, if any.
+        /// Dispatch one action; returns (commands hooked, prescaler set).
         fn run(
             &mut self,
             shared: &crate::shared_state::SharedState,
             action: TransferAction,
-        ) -> Option<u16> {
+        ) -> (u32, Option<u16>) {
             let actions = TransferActions {
                 action,
                 next_capture: CaptureConfig::DSHOT300_DETECTED,
                 frametime: None,
                 bidir_detected: false,
             };
-            let mut psc = None;
+            let (mut hooked, mut psc) = (0, None);
             dispatch(
                 &actions,
                 shared,
@@ -1491,9 +1499,10 @@ mod tests {
                     frametime_low: &mut self.ft.0,
                     frametime_high: &mut self.ft.1,
                 },
+                |_| hooked += 1,
                 |p| psc = Some(p.raw()),
             );
-            psc
+            (hooked, psc)
         }
     }
 
@@ -1520,7 +1529,11 @@ mod tests {
         let shared = armed_shared();
         let mut isr = Isr::new(false);
         for _ in 0..6 {
-            isr.run(&shared, command(crate::dshot::commands::DIRECTION_REVERSED));
+            assert_eq!(
+                isr.run(&shared, command(crate::dshot::commands::DIRECTION_REVERSED))
+                    .0,
+                1
+            );
         }
         assert_eq!(isr.config.dir_reversed, 1);
         assert!(!isr.forward);
@@ -1601,16 +1614,16 @@ mod tests {
         assert!(shared.save_settings_flag());
     }
 
-    /// DShot detection hands the port its output prescaler.
+    /// DShot detection hands the port its output prescaler; no command hook.
     #[test]
     fn dispatch_detection_sets_output_prescaler() {
         let shared = crate::shared_state::SharedState::new::<Mhz64>();
         let mut isr = Isr::new(false);
-        let psc = isr.run(
+        let (hooked, psc) = isr.run(
             &shared,
             TransferAction::InputDetected(DetectedProtocol::Dshot),
         );
-        assert_eq!(psc, Some(1));
+        assert_eq!((hooked, psc), (0, Some(1)));
         assert!(shared.input_set() && shared.dshot());
     }
 }

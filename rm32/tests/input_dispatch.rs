@@ -95,6 +95,7 @@ impl Rig {
                 frametime_low: &mut self.low,
                 frametime_high: &mut self.high,
             },
+            |_| {},
             |p| self.prescalers.push(p.raw()),
         );
         let tone = self.shared.take_tone_request();
