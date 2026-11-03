@@ -142,7 +142,13 @@ impl BoardExt {
         self.gate_enable.map(gpio::read_odr).unwrap_or(true)
     }
 
-    /// True while the gate driver reports a fault (nFAULT low).
+    /// True while the gate driver's open-drain `nFAULT` pin is low.
+    ///
+    /// Note: gate drivers such as DRV8304H hold `nFAULT` low while `ENABLE`
+    /// is low (sleep mode) and for ~1–5 ms after `ENABLE` rises while the
+    /// charge pump wakes up, and dropping `ENABLE` clears a latched fault.
+    /// Callers that act on `fault()` must apply wake-up blanking and latch the
+    /// trip rather than feeding `fault()` directly back into `drive_gate`.
     #[inline]
     pub fn fault(&self) -> bool {
         self.nfault.map(|p| !gpio::read(p)).unwrap_or(false)
@@ -161,13 +167,16 @@ impl BoardExt {
         if armed == self.gate_enabled() && armed == pwm::moe() {
             return;
         }
-        if armed {
-            self.set_gate_enable(true);
-            pwm::set_moe(true);
-        } else {
-            pwm::set_moe(false);
-            self.set_gate_enable(false);
-        }
+        cortex_m::interrupt::free(|_| {
+            let armed = armed && crate::isr::shared().armed();
+            if armed {
+                self.set_gate_enable(true);
+                pwm::set_moe(true);
+            } else {
+                pwm::set_moe(false);
+                self.set_gate_enable(false);
+            }
+        });
     }
 }
 

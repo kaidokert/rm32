@@ -204,8 +204,10 @@ pub fn init(
     let telem = super::telemetry_uart::L431TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::L431TelemUart::post_init());
 
-    // TIM6: AM32 peripherals.c:139 — PSC=79 (1 MHz tick), ARR=50 (~19.6 kHz).
-    // (PSC=0 / ARR=3999 gives 20.0 kHz; match AM32's decomposition for register parity.)
+    const TIM6_HZ: u32 = 1_000_000;
+    const CONTROL_RELOAD: u16 =
+        (TIM6_HZ / <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ - 1) as u16;
+    // TIM6: 1 MHz tick (PSC=79), reload derived from StmPlatform::TICK_HZ (ARR=49 -> 20 kHz).
     // TIM7: AM32 peripherals.c:159 — free-running 1 MHz 16-bit counter (PSC=79, ARR=0xFFFF, CEN).
     unsafe {
         rcc_pac
@@ -213,7 +215,7 @@ pub fn init(
             .modify(|_, w| w.tim6en().set_bit().tim7en().set_bit());
         let tim6 = &*pac::TIM6::ptr();
         tim6.psc.write(|w| w.bits(0x4F));
-        tim6.arr.write(|w| w.bits(0x32));
+        tim6.arr.write(|w| w.bits(CONTROL_RELOAD as u32));
         tim6.egr.write(|w| w.ug().set_bit());
         tim6.sr.write(|w| w.uif().clear_bit());
         tim6.dier.write(|w| w.uie().set_bit());
@@ -222,6 +224,8 @@ pub fn init(
         let tim7 = &*pac::TIM7::ptr();
         tim7.psc.write(|w| w.bits(0x4F));
         tim7.arr.write(|w| w.bits(0xFFFF));
+        tim7.egr.write(|w| w.ug().set_bit());
+        tim7.sr.write(|w| w.uif().clear_bit());
         tim7.cr1.write(|w| w.cen().set_bit());
     }
 

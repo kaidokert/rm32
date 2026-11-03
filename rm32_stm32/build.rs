@@ -340,6 +340,14 @@ fn main() {
         "Board MCU '{}' does not match enabled MCU feature '{}'",
         board.mcu, enabled_mcu
     );
+    if board.mcu != "stm32g071" {
+        assert!(
+            board.gate_enable_pin.is_none() && board.nfault_pin.is_none(),
+            "Board config '{}': gate_enable_pin / nfault_pin are implemented for stm32g071 only (MCU is {})",
+            board_path,
+            board.mcu
+        );
+    }
 
     // Resolve BEMF pins from symbolic names to packed register values
     let (bemf_a, bemf_b, bemf_c) = match &board.bemf_pins {
