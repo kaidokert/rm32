@@ -4,32 +4,12 @@
 //! voltage divider ratio, current sensor scaling, ADC channel assignments.
 //! These are compile-time constants in the C firmware (from targets.h).
 
-/// BEMF comparator pin mapping — MCU-specific packed register values.
-///
-/// Each field is a pre-computed value that the per-MCU `set_inmsel()` writes
-/// to the comparator register(s). The encoding is MCU-specific:
-/// - L431: `(inmesel << 8) | inmsel_3bit` — set_inmsel unpacks both fields
-/// - G071: 4-bit INMSEL value (set_inmsel shifts left by 4)
-/// - F051: full lower-16-bit CSR value including COMP1_EN
-/// - G431: `(config << 16) | comp_selector` for dual-comp routing
-///
-/// Values are computed by build.rs from symbolic pin names in the board YAML.
-///
-/// TODO: replace this packed representation with typed comparator routes:
-/// https://github.com/kaidokert/rm32/issues/42
-#[derive(Clone, Copy)]
-pub struct BemfPins {
-    pub phase_a: u32,
-    pub phase_b: u32,
-    pub phase_c: u32,
-}
-
 /// Board-specific hardware configuration.
 #[derive(Clone, Copy)]
 pub struct BoardConfig {
     /// Firmware name (max 12 chars)
     pub name: &'static str,
-    /// PWM dead-time in TIM1 DTG units
+    /// PWM dead-time in AM32's DEAD_TIME units (the port's dead-time register)
     pub dead_time: u8,
     /// Battery/pin voltage ratio times 100 (e.g. 1100 = 11:1 divider).
     pub voltage_divider_x100: u16,
@@ -37,7 +17,7 @@ pub struct BoardConfig {
     pub millivolt_per_amp: u16,
     /// Current sensor zero-current offset in millivolts
     pub current_offset: i16,
-    /// ADC channel for current sense (STM32 channel number)
+    /// ADC channel for current sense (the port's channel number)
     pub current_adc_channel: u8,
     /// ADC channel for voltage sense
     pub voltage_adc_channel: u8,
@@ -48,7 +28,7 @@ pub struct BoardConfig {
     pub min_bemf_counts: u8,
     /// Whether this board has a WS2812 LED
     pub has_led: bool,
-    /// WS2812 LED pin number on GPIOB (e.g. 8 for PB8)
+    /// WS2812 LED pin number (port-defined bank; AM32 WS2812_PIN)
     pub led_pin: Option<u8>,
     /// Use external NTC thermistor instead of internal temp sensor
     pub use_ntc: bool,
@@ -66,10 +46,8 @@ pub struct BoardConfig {
     pub dual_adc: bool,
     /// PWM/enable bridge mode (low-side pins are enable, not complementary PWM)
     pub bridge_enable: bool,
-    /// Custom LED on PB3: blinks with throttle position, solid when armed
+    /// Custom LED (port-defined pin): blinks with throttle position, solid when armed
     pub custom_led: bool,
-    /// BEMF comparator pin mapping (from board YAML)
-    pub bemf_pins: BemfPins,
 }
 
 impl BoardConfig {
@@ -80,8 +58,8 @@ impl BoardConfig {
         voltage_divider_x100: 1100,
         millivolt_per_amp: 20,
         current_offset: 0,
-        current_adc_channel: 4, // PA4
-        voltage_adc_channel: 6, // PA6
+        current_adc_channel: 4, // AM32 default
+        voltage_adc_channel: 6, // AM32 default
         stall_protect_interval: 6500,
         has_led: false,
         led_pin: None,
@@ -95,10 +73,5 @@ impl BoardConfig {
         dual_adc: false,
         bridge_enable: false,
         custom_led: false,
-        bemf_pins: BemfPins {
-            phase_a: 0,
-            phase_b: 0,
-            phase_c: 0,
-        },
     };
 }

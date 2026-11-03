@@ -6,7 +6,7 @@ use crate::timer::{Tim2Interval, Tim14Com};
 
 pub fn init(
     dead_time: u8,
-    bemf_pins: rm32::board::BemfPins,
+    bemf_pins: crate::board_ext::BemfPins,
 ) -> InitResult<super::system::SystemControl, super::adc::AdcReader, super::telemetry_uart::TelemUart>
 {
     use stm32g0xx_hal::prelude::*;
@@ -52,7 +52,12 @@ pub fn init(
     input.start_capture();
 
     let adc = super::adc::new_adc();
-    let _ = adc.init();
+    if let Err(e) = adc.init() {
+        // Format with `{}` (not `{:?}`) so `core::fmt`'s debug-escape tables
+        // are not linked into flash.
+        let (kind, what) = e.parts();
+        crate::dprintln!("[rm32] ADC init FAILED: {} {}", kind, what);
+    }
     let telem = super::telemetry_uart::TelemUart::init()
         .unwrap_or_else(|_| super::telemetry_uart::TelemUart::post_init());
 
