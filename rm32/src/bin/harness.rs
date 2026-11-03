@@ -432,7 +432,7 @@ impl Harness {
         );
 
         let mut forward = self.commutation.forward();
-        let result = rm32::transfer::dispatch(
+        rm32::transfer::dispatch(
             &actions,
             &self.shared,
             rm32::transfer::InputContext {
@@ -450,9 +450,12 @@ impl Harness {
         self.commutation.set_forward(forward);
         self.dshot = self.shared.dshot();
         self.servo_pwm = self.shared.servo_pwm();
-        if let Some(tone) = result.tone {
-            self.play_tone_flag = tone;
-            self.shared.set_tone_request(tone);
+        let tone = self.shared.take_tone_request();
+        if (1..=5).contains(&tone) {
+            self.play_tone_flag = tone as u8;
+            self.shared.set_tone_request(tone as u8);
+        } else if tone != 0 {
+            self.shared.set_arming_tone_request((tone >> 8) as u8);
         }
     }
 

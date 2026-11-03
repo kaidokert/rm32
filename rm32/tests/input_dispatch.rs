@@ -82,7 +82,7 @@ impl Rig {
             self.high,
         );
         self.shared.set_zero_input_count(zero);
-        let result = transfer::dispatch(
+        transfer::dispatch(
             &actions,
             &self.shared,
             InputContext {
@@ -97,7 +97,8 @@ impl Rig {
             },
             |p| self.prescalers.push(p.raw()),
         );
-        (actions.next_capture, result.tone)
+        let tone = self.shared.take_tone_request();
+        (actions.next_capture, (tone != 0).then_some(tone as u8))
     }
     fn frame(&mut self, value: u16) -> Option<u8> {
         self.edges(&capture(value, false, false), false).1

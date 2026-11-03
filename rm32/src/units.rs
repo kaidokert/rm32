@@ -64,24 +64,29 @@ impl TimerTicks {
     }
 }
 
-/// Raw ADC count (12-bit, 0-4095).
+/// Raw ADC count (nominally 12-bit, 0-4095, or wider `u16` encoded readings).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[repr(transparent)]
 pub struct AdcCount(pub u16);
 
 impl AdcCount {
-    /// Convert a 12-bit, 3.3 V ADC reading to battery centivolts.
+    /// Convert a 3.3 V ADC reading (nominally 4095 full scale) to battery
+    /// centivolts across the full `u16` input range.
     /// `voltage_divider_x100` is the battery/pin voltage ratio times 100:
-    /// 1100 means 11:1. Truncate once, after scaling the pin voltage.
-    /// Out-of-range counts clamp to full scale; output saturates at 655.35 V.
+    /// 1100 means 11:1. Truncate once, after scaling the pin voltage;
+    /// output saturates at 655.35 V (`u16::MAX` centivolts).
     pub fn to_centivolts(self, voltage_divider_x100: u16) -> CentiVolts {
-        // raw * 3300 * ratio / (4095 * 100 * 10), reduced to fit u32
-        // even at raw=4095 and ratio=u16::MAX (product < 2^32).
-        let cv = self.0.min(4095) as u32 * voltage_divider_x100 as u32 * 11 / 13650;
-        CentiVolts(cv.min(u16::MAX as u32) as u16)
+        // raw * 3300 * ratio / (4095 * 100 * 10) = (raw * ratio * 11) / 13650.
+        // Clamping `raw * ratio` at 81_322_978 (the smallest product where
+        // `prod * 11 / 13650` reaches `u16::MAX = 65535`) keeps `prod * 11`
+        // within `u32` across the entire `u16 x u16` domain without 64-bit
+        // division.
+        let prod = (self.0 as u32 * voltage_divider_x100 as u32).min(81_322_978);
+        CentiVolts((prod * 11 / 13650) as u16)
     }
 
-    /// Convert a 12-bit, 3.3 V ADC reading to centiamps.
+    /// Convert a 3.3 V ADC reading (nominally 4095 full scale) to centiamps
+    /// across the full `u16` input range.
     /// Offset is in millivolts; sensitivity is millivolts per amp.
     /// A zero sensitivity disables the sensor. Truncate toward zero once,
     /// then saturate to the signed current range instead of wrapping.
@@ -91,9 +96,13 @@ impl AdcCount {
         }
         // 3300/4095 = 220/273. Keeping this rational until the final
         // division avoids losing resolution before subtracting the offset.
-        // All products fit i32 for every i16 offset and u16 sensitivity.
-        let numerator = (self.0.min(4095) as i32 * 220 - current_offset_mv as i32 * 273) * 100;
-        let ca = numerator / (273 * mv_per_amp as i32);
+        // `diff` spans `-8_945_391..=23_363_364` across all `u16` counts and
+        // `i16` offsets, so `diff.unsigned_abs() * 100 <= 2_336_336_400` fits
+        // in `u32` without 64-bit division.
+        let diff = self.0 as i32 * 220 - current_offset_mv as i32 * 273;
+        let mag = ((diff.unsigned_abs() * 100) / (273 * mv_per_amp as u32)).min(i16::MAX as u32 + 1)
+            as i32;
+        let ca = if diff < 0 { -mag } else { mag };
         CentiAmps(ca.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
     }
 }
@@ -175,15 +184,23 @@ mod tests {
     #[test]
     fn adc_voltage_matches_wide_physical_reference() {
         for divider in [0, 1, 100, 1100, 1234, 2100, u16::MAX] {
-            for raw in 0..=4095 {
+            for raw in 0..=u16::MAX {
                 // Independent unreduced formula in microvolts, using u64.
                 let battery_uv = raw as u64 * 3_300_000 * divider as u64;
                 let expected_cv = (battery_uv / (4095 * 100 * 10_000)).min(65535);
                 assert_eq!(AdcCount(raw).to_centivolts(divider).0 as u64, expected_cv);
             }
         }
-        assert_eq!(AdcCount(u16::MAX).to_centivolts(1100), CentiVolts(3630));
+        // Readings above 4095 scale monotonically instead of clamping at 4095,
+        // and saturate at u16::MAX centivolts (655.35 V).
+        assert_eq!(AdcCount(4095).to_centivolts(1100), CentiVolts(3630));
+        assert_eq!(AdcCount(8190).to_centivolts(1100), CentiVolts(7260));
+        assert_eq!(AdcCount(u16::MAX).to_centivolts(1100), CentiVolts(58093));
         assert_eq!(AdcCount(4095).to_centivolts(u16::MAX), CentiVolts(u16::MAX));
+        assert_eq!(
+            AdcCount(u16::MAX).to_centivolts(u16::MAX),
+            CentiVolts(u16::MAX)
+        );
     }
 
     #[test]
@@ -203,7 +220,9 @@ mod tests {
     fn adc_current_matches_wide_physical_reference() {
         for offset in [i16::MIN, -498, 0, 498, 1100, i16::MAX] {
             for sensitivity in [1, 8, 16, 20, 25, 30, u16::MAX] {
-                for raw in 0..=4095 {
+                for raw in
+                    (0..=4095).chain([4096, 5000, 8190, 10_000, 20_000, 32_768, 50_000, u16::MAX])
+                {
                     let pin_uv = raw as i64 * 3_300_000;
                     let offset_uv = offset as i64 * 1000 * 4095;
                     let ca = (pin_uv - offset_uv) / (4095 * 10 * sensitivity as i64);
@@ -215,7 +234,12 @@ mod tests {
                 }
             }
         }
-        assert_eq!(AdcCount(u16::MAX).to_centiamps(0, 20), CentiAmps(16500));
+        // Readings above 4095 continue scaling past 12-bit full scale up to
+        // i16::MAX centiamps (327.67 A) without clamping at 4095.
+        assert_eq!(AdcCount(4095).to_centiamps(0, 20), CentiAmps(16500));
+        assert_eq!(AdcCount(5460).to_centiamps(0, 20), CentiAmps(22000));
+        assert_eq!(AdcCount(8190).to_centiamps(0, 20), CentiAmps(i16::MAX));
+        assert_eq!(AdcCount(u16::MAX).to_centiamps(0, 20), CentiAmps(i16::MAX));
     }
 
     #[test]

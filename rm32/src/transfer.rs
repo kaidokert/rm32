@@ -6,6 +6,7 @@
 
 use crate::dshot;
 use crate::functions::get_abs_dif;
+use crate::platform::Platform;
 use crate::servo::{ServoResult, ServoState};
 use crate::signal;
 
@@ -70,7 +71,7 @@ impl CaptureConfig {
     };
     /// DShot detection uses one full frame. Using 33 edges consumes the next
     /// frame's first edge and can leave steady-state capture misaligned.
-    pub const fn dshot_detection<P: crate::platform::Platform>() -> Self {
+    pub const fn dshot_detection<P: Platform>() -> Self {
         Self {
             edges_per_burst: 32,
             prescaler: Some((P::CAPTURE_HZ / 6_000_000) as u16),
@@ -98,7 +99,7 @@ impl CaptureConfig {
         prescaler: Some(3),
     };
 
-    pub const fn servo_detected<P: crate::platform::Platform>() -> Self {
+    pub const fn servo_detected<P: Platform>() -> Self {
         Self {
             edges_per_burst: 2,
             prescaler: Some((P::CAPTURE_HZ / 1_000_000).saturating_sub(1) as u16),
@@ -134,9 +135,9 @@ impl TransferState {
     /// `disable_stick_cal`: config disable_stick_calibration flag
     /// `zero_input_count`: current zero input counter
     /// `frametime_low/high`: current DShot frame timing bounds
-    /// `P`: port capture clock for protocol-detection prescalers
+    /// `P`: the port's `Platform` (`CAPTURE_HZ` sets the detection prescalers)
     #[allow(clippy::too_many_arguments)]
-    pub fn process<P: crate::platform::Platform>(
+    pub fn process<P: Platform>(
         &mut self,
         edges: &[u32],
         input_set: bool,
@@ -340,10 +341,198 @@ impl TransferState {
             bidir_detected,
         }
     }
+
+    /// Process one DShot packet from a port that slices bits in hardware
+    /// (PIO, RMT, SPI; no edge capture): [`process`](Self::process)'s DShot
+    /// path at layer 1 ([`dshot::unpack`]). The port is DShot-only, so
+    /// detection is two consecutive packets with a valid CRC (normal or
+    /// bidirectional), like `process`'s two matching frames. Because a
+    /// pre-sliced 16-bit word carries no edge timestamps, wire-rate
+    /// configuration stays with the port (`next_capture` is always
+    /// [`CaptureConfig::DSHOT`] with `prescaler: None`, and there is no
+    /// frame time to average); everything else matches `process`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_packet(
+        &mut self,
+        packet: u16,
+        input_set: bool,
+        dshot_telemetry: bool,
+        armed: bool,
+        input_pin_high: bool,
+        adjusted_input: u16,
+        disable_stick_cal: bool,
+        zero_input_count: &mut u16,
+    ) -> TransferActions {
+        if !input_set {
+            let valid = |f| {
+                matches!(
+                    f,
+                    dshot::DshotFrame::Throttle { .. } | dshot::DshotFrame::Command { .. }
+                )
+            };
+            let protocol = (valid(dshot::unpack(packet, false))
+                || valid(dshot::unpack(packet, true)))
+            .then_some(DetectedProtocol::Dshot);
+            let action = match self.confirm_protocol(protocol) {
+                Some(p) => TransferAction::InputDetected(p),
+                None => TransferAction::None,
+            };
+            return TransferActions {
+                action,
+                next_capture: CaptureConfig::DSHOT,
+                frametime: None,
+                bidir_detected: false,
+            };
+        }
+        let frame = dshot::unpack(packet, dshot_telemetry);
+        let bidir_detected =
+            self.bidir_probe(frame, armed, dshot_telemetry, input_pin_high, || {
+                dshot::unpack(packet, true)
+            });
+        let action = frame_action(frame);
+        self.idle_high_count(armed, true, dshot_telemetry, input_pin_high);
+        if !armed {
+            self.calibration_entry(adjusted_input, disable_stick_cal, zero_input_count);
+        }
+        TransferActions {
+            action,
+            next_capture: CaptureConfig::DSHOT,
+            frametime: None,
+            bidir_detected,
+        }
+    }
+
+    /// Protocol re-confirmation: commit only on the second consecutive
+    /// matching detection.
+    #[inline(always)]
+    fn confirm_protocol(&mut self, protocol: Option<DetectedProtocol>) -> Option<DetectedProtocol> {
+        match (protocol, self.pending_protocol) {
+            (Some(protocol), Some(pending)) if protocol == pending => {
+                self.pending_protocol = None;
+                Some(protocol)
+            }
+            (Some(protocol), _) => {
+                self.pending_protocol = Some(protocol);
+                None
+            }
+            (None, _) => {
+                self.pending_protocol = None;
+                None
+            }
+        }
+    }
+
+    /// Bidirectional DShot auto-detect: while unarmed with the line idling
+    /// high, count consecutive frames that decode under the inverted CRC
+    /// (`inverted` decodes this frame that way); true once confirmed.
+    #[inline(always)]
+    fn bidir_probe(
+        &mut self,
+        frame: dshot::DshotFrame,
+        armed: bool,
+        dshot_telemetry: bool,
+        input_pin_high: bool,
+        inverted: impl FnOnce() -> dshot::DshotFrame,
+    ) -> bool {
+        let mut bidir_detected = false;
+        if !armed
+            && !dshot_telemetry
+            && input_pin_high
+            && self.high_pin_count >= crate::constants::BIDIR_IDLE_HIGH_FRAMES
+        {
+            let inverted_ok = matches!(
+                inverted(),
+                dshot::DshotFrame::Throttle { .. } | dshot::DshotFrame::Command { .. }
+            );
+            if inverted_ok {
+                self.bidir_confirms = self.bidir_confirms.saturating_add(1);
+                if self.bidir_confirms >= crate::constants::BIDIR_CONFIRM_FRAMES {
+                    bidir_detected = true;
+                }
+            } else {
+                self.bidir_confirms = 0;
+                if matches!(
+                    frame,
+                    dshot::DshotFrame::Throttle { .. } | dshot::DshotFrame::Command { .. }
+                ) {
+                    self.high_pin_count = 0;
+                }
+            }
+        }
+        bidir_detected
+    }
+
+    /// Idle-high frame count for the bidir auto-detect (unarmed only).
+    #[inline(always)]
+    fn idle_high_count(
+        &mut self,
+        armed: bool,
+        dshot_mode: bool,
+        dshot_telemetry: bool,
+        input_pin_high: bool,
+    ) {
+        if !armed {
+            if dshot_mode && !dshot_telemetry && input_pin_high {
+                self.high_pin_count = self.high_pin_count.saturating_add(1);
+            } else {
+                self.high_pin_count = 0;
+                self.bidir_confirms = 0;
+            }
+        } else {
+            self.high_pin_count = 0;
+            self.bidir_confirms = 0;
+        }
+    }
+
+    /// Stick-calibration entry detection (unarmed only).
+    #[inline(always)]
+    fn calibration_entry(
+        &mut self,
+        adjusted_input: u16,
+        disable_stick_cal: bool,
+        zero_input_count: &mut u16,
+    ) {
+        if adjusted_input == 0 && !self.servo.calibration_required() {
+            *zero_input_count += 1;
+        } else if !disable_stick_cal {
+            *zero_input_count = 0;
+            if adjusted_input > crate::constants::CALIBRATION_MIN_THROTTLE {
+                if get_abs_dif(adjusted_input as i32, self.last_input as i32)
+                    > crate::constants::CALIBRATION_MAX_JITTER
+                {
+                    self.enter_calibration_count = 0;
+                } else {
+                    self.enter_calibration_count += 1;
+                }
+                if self.enter_calibration_count > crate::constants::CALIBRATION_ENTRY_COUNT
+                    && !self.servo.high_calibration_set()
+                {
+                    self.servo.set_calibration_required(true);
+                    self.enter_calibration_count = 0;
+                }
+                self.last_input = adjusted_input;
+            }
+        }
+    }
 }
 
-/// Input state owned by the frame-processing caller. Shared dispatch updates
-/// the ISR configuration and publishes changes to the main-loop consumer.
+/// A decoded frame's dispatch action.
+#[inline(always)]
+fn frame_action(frame: dshot::DshotFrame) -> TransferAction {
+    match frame {
+        dshot::DshotFrame::Throttle { value, telemetry } => {
+            TransferAction::DshotThrottle { value, telemetry }
+        }
+        dshot::DshotFrame::Command { cmd, telemetry } => {
+            TransferAction::DshotCommand { cmd, telemetry }
+        }
+        _ => TransferAction::None,
+    }
+}
+
+/// ISR-side input state the transfer dispatch reads and updates (AM32
+/// `transfercomplete`'s globals). Firmware and harness both build it from
+/// their own fields.
 pub struct InputContext<'a> {
     pub config: &'a mut crate::config::EepromConfig,
     pub cmd: &'a mut crate::dshot_commands::CommandProcessor,
@@ -355,24 +544,16 @@ pub struct InputContext<'a> {
     pub frametime_high: &'a mut u16,
 }
 
-/// Side effects that belong to the caller, not to input-state dispatch.
-#[derive(Default, Debug, PartialEq, Eq)]
-pub struct DispatchResult {
-    /// A requested tone. Firmware may leave this unsupported; dispatch never
-    /// drives the bridge or changes interrupt ownership to play it.
-    pub tone: Option<u8>,
-}
-
-/// Apply decoded input identically in firmware and the host harness.
-/// The caller performs the returned capture setup and owns any requested tone.
-/// `set_prescaler` applies the output timer setting when DShot is detected.
-pub fn dispatch(
+/// Apply one frame's `TransferActions` to the shared and ISR-side state:
+/// the shared dispatch used by both firmware and the host harness.
+/// `set_prescaler` receives the bidirectional DShot output prescaler when
+/// detection locks DShot (the port's register work).
+pub fn dispatch<P: FnOnce(crate::hal::DshotOutputPrescaler)>(
     actions: &TransferActions,
     shared: &crate::shared_state::SharedState,
     mut ctx: InputContext<'_>,
-    set_prescaler: impl FnOnce(crate::hal::DshotOutputPrescaler),
-) -> DispatchResult {
-    let mut result = DispatchResult::default();
+    set_prescaler: P,
+) {
     // A sequence started while stopped must not survive loss of its gate.
     // Drop a decoded DShot frame in this call as well: its programming bytes
     // are not throttle. An invalid frame still cancels an ineligible sequence,
@@ -402,13 +583,19 @@ pub fn dispatch(
                 shared.set_newinput(0);
             } else if ctx.cmd.in_programming_mode() {
                 shared.set_newinput(0);
-                apply_command(value, shared, &mut ctx, &mut result);
+                apply_command(value, shared, &mut ctx);
             } else {
-                if !ctx.edt_arm_enable || *ctx.edt_armed || value == 0 {
-                    shared.set_newinput(value);
-                }
+                // EDT arm gate: throttle passes once armed (or EDT not
+                // required); zero always passes and disarms. The gate reads
+                // `edt_armed` before the disarm; the store comes last so LLVM
+                // keeps one `newinput` store (store-then-disarm got
+                // tail-duplicated).
+                let pass = !ctx.edt_arm_enable || *ctx.edt_armed || value == 0;
                 if value == 0 && ctx.edt_arm_enable {
                     *ctx.edt_armed = false;
+                }
+                if pass {
+                    shared.set_newinput(value);
                 }
             }
             if telemetry {
@@ -423,18 +610,22 @@ pub fn dispatch(
             }
             shared.set_signal_timeout(0);
             if !cancelled {
-                apply_command(cmd, shared, &mut ctx, &mut result);
+                apply_command(cmd, shared, &mut ctx);
             }
         }
         TransferAction::ServoThrottle(value) => {
             shared.set_newinput(value);
             shared.set_signal_timeout(0);
         }
-        TransferAction::ServoCalibrating => shared.set_signal_timeout(0),
+        TransferAction::ServoCalibrating => {
+            shared.set_signal_timeout(0);
+        }
         TransferAction::ServoCalibrationDone {
             low_threshold,
             high_threshold,
         } => {
+            // Persist to the config; publish the bytes so main's copy is
+            // current when it acts on the save flag.
             ctx.config.servo_low_threshold = low_threshold;
             ctx.config.servo_high_threshold = high_threshold;
             shared.publish_servo_calibration(low_threshold, high_threshold);
@@ -458,14 +649,15 @@ pub fn dispatch(
     if actions.bidir_detected {
         shared.set_dshot_telemetry(true);
     }
-    result
 }
 
+/// One command or programming byte. Programming updates the config directly
+/// too: publish each changed byte once, never truncating an unvalidated
+/// programming position to a queue key.
 fn apply_command(
     value: u16,
     shared: &crate::shared_state::SharedState,
     ctx: &mut InputContext<'_>,
-    dispatch_result: &mut DispatchResult,
 ) {
     use crate::dshot_commands::CommandResult;
     let old_config = *ctx.config;
@@ -484,12 +676,10 @@ fn apply_command(
             ctx.edt_arm_enable,
         )
     };
-    // Programming updates the config directly too. Publish each changed byte
-    // once; never truncate an unvalidated programming position to a queue key.
     for (offset, (old, new)) in old_config
         .as_bytes()
         .iter()
-        .zip(ctx.config.as_bytes())
+        .zip(ctx.config.as_bytes().iter())
         .enumerate()
     {
         if old != new {
@@ -498,7 +688,7 @@ fn apply_command(
     }
     match result {
         CommandResult::SaveSettings => shared.set_save_settings_flag(true),
-        CommandResult::PlayTone(tone) => dispatch_result.tone = Some(tone),
+        CommandResult::PlayTone(tone) => shared.set_tone_request(tone),
         CommandResult::SendEscInfo => shared.set_send_esc_info_flag(true),
         CommandResult::ProgrammingCommit { .. } | CommandResult::None => {}
     }
@@ -514,14 +704,21 @@ fn apply_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    struct CapturePlatform<const MHZ: u32>;
-    impl<const MHZ: u32> crate::platform::Platform for CapturePlatform<MHZ> {
-        const TICK_HZ: u32 = 20_000;
-        const TIMER_HZ: u32 = 2_000_000;
-        const CAPTURE_HZ: u32 = MHZ * 1_000_000;
-        const GCR_SHIFT: u8 = 7;
-        const PWM_BASE_PERIOD: u16 = 1999;
+
+    /// Test platforms at the capture clocks the tests were written for.
+    macro_rules! mhz {
+        ($($name:ident = $mhz:expr),*) => {$(
+            struct $name;
+            impl Platform for $name {
+                const TICK_HZ: u32 = 20_000;
+                const TIMER_HZ: u32 = 2_000_000;
+                const CAPTURE_HZ: u32 = $mhz * 1_000_000;
+                const GCR_SHIFT: u8 = 7;
+                const PWM_BASE_PERIOD: u16 = 1999;
+            }
+        )*};
     }
+    mhz!(Mhz60 = 60, Mhz64 = 64, Mhz80 = 80);
 
     const DSHOT300_START_TICKS: u32 = 5000;
     const DSHOT300_ZERO_HIGHS: [u32; 16] = [
@@ -598,7 +795,7 @@ mod tests {
     fn servo_pin_high_requests_realign_capture() {
         let mut state = TransferState::default();
         let mut zic = 0;
-        let actions = state.process::<CapturePlatform<64>>(
+        let actions = state.process::<Mhz64>(
             &[0, 0, 0],
             true,
             false,
@@ -623,7 +820,7 @@ mod tests {
         let mut state = TransferState::default();
         state.servo.set_calibration(1100, 1900, 1500, 100);
         let mut zic = 0;
-        let actions = state.process::<CapturePlatform<64>>(
+        let actions = state.process::<Mhz64>(
             &[1000, 2500],
             true,
             false,
@@ -648,7 +845,7 @@ mod tests {
     fn dshot_mode_requests_dshot_capture() {
         let mut state = TransferState::default();
         let mut zic = 0;
-        let actions = state.process::<CapturePlatform<64>>(
+        let actions = state.process::<Mhz64>(
             &[0; 32], true, true, false, false, false, false, 0, 0, false, false, &mut zic, 400,
             600,
         );
@@ -659,13 +856,253 @@ mod tests {
     #[test]
     fn dshot_detection_uses_one_frame_capture_window() {
         assert_eq!(
-            CaptureConfig::dshot_detection::<CapturePlatform<60>>().edges_per_burst,
+            CaptureConfig::dshot_detection::<Mhz60>().edges_per_burst,
             32
         );
         assert_eq!(
-            CaptureConfig::dshot_detection::<CapturePlatform<60>>().prescaler,
+            CaptureConfig::dshot_detection::<Mhz60>().prescaler,
             Some(10)
         );
+    }
+
+    /// The 16-bit packet `dshot_dma_buffer` captures.
+    fn dshot_packet(value: u16, telem: bool, inverted_crc: bool) -> u16 {
+        let head = value << 1 | u16::from(telem);
+        let mut crc = (head ^ head >> 4 ^ head >> 8) & 0xF;
+        if inverted_crc {
+            crc = !crc & 0xF;
+        }
+        head << 4 | crc
+    }
+
+    /// One frame through both paths, from the same state: identical
+    /// actions and state, or panic. Returns `process_packet`'s result.
+    struct Twin {
+        edges: TransferState,
+        packet: TransferState,
+        zic_e: u16,
+        zic_p: u16,
+        frames: u32,
+    }
+
+    #[derive(Clone, Copy)]
+    struct Frame {
+        value: u16,
+        telem: bool,
+        inverted: bool,
+        corrupt_bit: Option<usize>,
+        armed: bool,
+        dshot_telemetry: bool,
+        pin_high: bool,
+        adjusted: u16,
+        no_cal: bool,
+    }
+
+    impl Twin {
+        /// Create a fresh pair of edge-capture and packet-slicing transfer states.
+        fn new() -> Self {
+            Self {
+                edges: TransferState::default(),
+                packet: TransferState::default(),
+                zic_e: 0,
+                zic_p: 0,
+                frames: 0,
+            }
+        }
+
+        /// Advance both `process` and `process_packet` by one frame and assert identical state.
+        fn step(&mut self, f: Frame) -> TransferActions {
+            extern crate std;
+            use std::format;
+            let mut buf = dshot_dma_buffer(f.value, f.telem, f.inverted);
+            let mut packet = dshot_packet(f.value, f.telem, f.inverted);
+            if let Some(bit) = f.corrupt_bit {
+                let one = packet >> (15 - bit) & 1 != 0;
+                buf[bit * 2 + 1] = buf[bit * 2] + if one { 10 } else { 22 };
+                packet ^= 1 << (15 - bit);
+            }
+            assert_eq!(
+                dshot::decode_frame(&buf, 400, 600, false),
+                dshot::unpack(packet, false)
+            );
+            let e = self.edges.process::<Mhz64>(
+                &buf,
+                true,
+                true,
+                false,
+                f.dshot_telemetry,
+                f.armed,
+                f.pin_high,
+                f.adjusted,
+                0,
+                false,
+                f.no_cal,
+                &mut self.zic_e,
+                400,
+                600,
+            );
+            let p = self.packet.process_packet(
+                packet,
+                true,
+                f.dshot_telemetry,
+                f.armed,
+                f.pin_high,
+                f.adjusted,
+                f.no_cal,
+                &mut self.zic_p,
+            );
+            let ctx = format!(
+                "frame {}: value {} packet {packet:#06x}",
+                self.frames, f.value
+            );
+            self.frames += 1;
+            assert_eq!(
+                format!("{:?}", e.action),
+                format!("{:?}", p.action),
+                "{ctx}"
+            );
+            assert_eq!(e.bidir_detected, p.bidir_detected, "{ctx}");
+            assert_eq!(e.next_capture, p.next_capture, "{ctx}");
+            assert_eq!(self.zic_e, self.zic_p, "{ctx}");
+            let (a, b) = (&self.edges, &self.packet);
+            assert_eq!(a.high_pin_count, b.high_pin_count, "{ctx}");
+            assert_eq!(a.bidir_confirms, b.bidir_confirms, "{ctx}");
+            assert_eq!(
+                a.enter_calibration_count, b.enter_calibration_count,
+                "{ctx}"
+            );
+            assert_eq!(a.last_input, b.last_input, "{ctx}");
+            assert_eq!(
+                a.servo.calibration_required(),
+                b.servo.calibration_required(),
+                "{ctx}"
+            );
+            p
+        }
+    }
+
+    /// `process_packet` is `process`'s DShot path at layer 1. The bidir
+    /// probe, idle-high count and calibration entry exist twice (`process`
+    /// keeps its own copy so the firmware's DShot ISR stays as compiled),
+    /// so drive both with the same frames and states and require identical
+    /// actions and state: 20k pseudo-random frames, then the two stateful
+    /// paths random frames rarely complete (calibration entry, bidir
+    /// commit), each asserted to have fired. Frame-time averaging is
+    /// `process`-only (a packet port has no frame time) and not compared.
+    #[test]
+    fn packet_path_matches_capture_path() {
+        let mut t = Twin::new();
+        let mut seed = 0x1234_5678u32;
+        let mut next = |n: u32| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) % n
+        };
+        // The bidir probe needs 100 consecutive idle-high frames first,
+        // which random states never give: the last phase covers it.
+        let (mut throttles, mut commands, mut bad) = (0, 0, 0);
+        for _ in 0..20_000 {
+            let corrupt = next(8) == 0;
+            let f = Frame {
+                value: next(2048) as u16,
+                telem: next(2) == 1,
+                inverted: next(3) == 0,
+                corrupt_bit: corrupt.then(|| next(16) as usize),
+                armed: next(4) == 0,
+                dshot_telemetry: next(4) == 0,
+                pin_high: next(5) != 0,
+                adjusted: [0, 0, 100, 1800, 1830, next(2048) as u16][next(6) as usize],
+                no_cal: next(10) == 0,
+            };
+            match t.step(f).action {
+                TransferAction::DshotThrottle { .. } => throttles += 1,
+                TransferAction::DshotCommand { .. } => commands += 1,
+                _ => bad += 1,
+            }
+        }
+        let counts = (throttles, commands, bad);
+        assert!(
+            throttles > 1000 && commands > 10 && bad > 1000,
+            "(throttles, commands, bad) = {counts:?}"
+        );
+
+        // Stick-calibration entry: unarmed, steady high stick (> 1500).
+        let steady = Frame {
+            value: 1000,
+            telem: false,
+            inverted: false,
+            corrupt_bit: None,
+            armed: false,
+            dshot_telemetry: false,
+            pin_high: false,
+            adjusted: 1800,
+            no_cal: false,
+        };
+        let mut t = Twin::new();
+        for _ in 0..200 {
+            t.step(steady);
+        }
+        assert!(
+            t.packet.servo.calibration_required(),
+            "calibration entry never fired"
+        );
+
+        // Bidir commit: unarmed, line idling high, inverted-CRC frames.
+        // First exercise an interrupted confirm sequence (valid normal frame
+        // after idle-high threshold resets `bidir_confirms` and `high_pin_count`),
+        // then run a full uninterrupted confirm sequence to completion.
+        let mut t = Twin::new();
+        for _ in 0..105 {
+            t.step(Frame {
+                inverted: true,
+                pin_high: true,
+                adjusted: 0,
+                ..steady
+            });
+        }
+        assert!(t.packet.bidir_confirms > 0);
+        t.step(Frame {
+            inverted: false,
+            pin_high: true,
+            adjusted: 0,
+            ..steady
+        });
+        assert_eq!(t.packet.bidir_confirms, 0);
+        assert_eq!(t.packet.high_pin_count, 1);
+
+        let mut committed = false;
+        for _ in 0..300 {
+            committed |= t
+                .step(Frame {
+                    inverted: true,
+                    pin_high: true,
+                    adjusted: 0,
+                    ..steady
+                })
+                .bidir_detected;
+        }
+        assert!(committed, "bidir auto-detect never committed");
+    }
+
+    #[test]
+    fn packet_detection_needs_two_valid_packets() {
+        let mut s = TransferState::default();
+        let mut zic = 0;
+        let good = dshot_packet(1000, false, false);
+        let r = s.process_packet(good, false, false, false, false, 0, false, &mut zic);
+        assert!(matches!(r.action, TransferAction::None));
+        let r = s.process_packet(good ^ 1, false, false, false, false, 0, false, &mut zic);
+        assert!(
+            matches!(r.action, TransferAction::None),
+            "bad CRC clears the pending detection"
+        );
+        let r = s.process_packet(good, false, false, false, false, 0, false, &mut zic);
+        assert!(matches!(r.action, TransferAction::None));
+        let bidir = dshot_packet(1000, false, true);
+        let r = s.process_packet(bidir, false, false, false, false, 0, false, &mut zic);
+        assert!(matches!(
+            r.action,
+            TransferAction::InputDetected(DetectedProtocol::Dshot)
+        ));
     }
 
     #[test]
@@ -675,7 +1112,7 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, false);
 
         for _ in 0..200 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -699,7 +1136,7 @@ mod tests {
             - 1;
 
         for tick in 0..150 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -720,7 +1157,7 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, true, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -736,7 +1173,7 @@ mod tests {
         let frame = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -753,7 +1190,7 @@ mod tests {
         let inverted = dshot_dma_buffer(0, false, true);
 
         for _ in 0..150 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &normal, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -761,7 +1198,7 @@ mod tests {
         }
 
         for _ in 0..10 {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &inverted, true, true, false, false, false, false, 0, 0, false, false, &mut zic,
                 400, 600,
             );
@@ -779,20 +1216,20 @@ mod tests {
             - 1;
 
         for _ in 0..partial_confirm_frames {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
             assert!(!actions.bidir_detected);
         }
 
-        let armed = state.process::<CapturePlatform<64>>(
+        let armed = state.process::<Mhz64>(
             &frame, true, true, false, false, true, true, 0, 0, false, false, &mut zic, 400, 600,
         );
         assert!(!armed.bidir_detected);
 
         for _ in 0..crate::constants::BIDIR_CONFIRM_FRAMES {
-            let actions = state.process::<CapturePlatform<64>>(
+            let actions = state.process::<Mhz64>(
                 &frame, true, true, false, false, false, true, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -809,14 +1246,14 @@ mod tests {
             *slot = 100 + i as u32 * 5;
         }
 
-        let actions = state.process::<CapturePlatform<60>>(
+        let actions = state.process::<Mhz60>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
         );
 
         assert!(matches!(actions.action, TransferAction::None));
         assert_eq!(
             actions.next_capture,
-            CaptureConfig::dshot_detection::<CapturePlatform<60>>()
+            CaptureConfig::dshot_detection::<Mhz60>()
         );
         assert_eq!(
             actions.next_capture.edges_per_burst,
@@ -834,15 +1271,15 @@ mod tests {
         }
         let invalid = [0u32; 33];
 
-        let _ = state.process::<CapturePlatform<60>>(
+        let _ = state.process::<Mhz60>(
             &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
             600,
         );
-        let _ = state.process::<CapturePlatform<60>>(
+        let _ = state.process::<Mhz60>(
             &invalid, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
             600,
         );
-        let actions = state.process::<CapturePlatform<60>>(
+        let actions = state.process::<Mhz60>(
             &dshot, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
             600,
         );
@@ -850,7 +1287,7 @@ mod tests {
         assert!(matches!(actions.action, TransferAction::None));
         assert_eq!(
             actions.next_capture,
-            CaptureConfig::dshot_detection::<CapturePlatform<60>>()
+            CaptureConfig::dshot_detection::<Mhz60>()
         );
     }
 
@@ -859,7 +1296,7 @@ mod tests {
         let buf = dshot300_disarm_capture();
         let mut state = TransferState::default();
         let mut zic = 0u16;
-        let actions = state.process::<CapturePlatform<80>>(
+        let actions = state.process::<Mhz80>(
             &buf, true, true, false, false, false, false, 0, 0, false, false, &mut zic, 100, 60000,
         );
 
@@ -899,11 +1336,11 @@ mod tests {
                 *slot = 100 + i as u32 * step;
             }
 
-            let _ = state.process::<CapturePlatform<60>>(
+            let _ = state.process::<Mhz60>(
                 &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
                 600,
             );
-            let actions = state.process::<CapturePlatform<60>>(
+            let actions = state.process::<Mhz60>(
                 &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400,
                 600,
             );
@@ -925,10 +1362,10 @@ mod tests {
             *slot = 100 + i as u32 * 1000;
         }
 
-        let _ = state.process::<CapturePlatform<60>>(
+        let _ = state.process::<Mhz60>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
         );
-        let actions = state.process::<CapturePlatform<60>>(
+        let actions = state.process::<Mhz60>(
             &buf, false, false, false, false, false, false, 0, 0, false, false, &mut zic, 400, 600,
         );
 
@@ -938,7 +1375,7 @@ mod tests {
         ));
         assert_eq!(
             actions.next_capture,
-            CaptureConfig::servo_detected::<CapturePlatform<60>>()
+            CaptureConfig::servo_detected::<Mhz60>()
         );
     }
 
@@ -949,7 +1386,7 @@ mod tests {
         let mut zic = 0;
 
         for _ in 0..51 {
-            let high = state.process::<CapturePlatform<64>>(
+            let high = state.process::<Mhz64>(
                 &[1000, 2900],
                 true,
                 false,
@@ -974,7 +1411,7 @@ mod tests {
         let mut done = TransferAction::None;
         for _ in 0..76 {
             done = state
-                .process::<CapturePlatform<64>>(
+                .process::<Mhz64>(
                     &[1000, 2100],
                     true,
                     false,
@@ -1000,5 +1437,180 @@ mod tests {
                 high_threshold: _
             }
         ));
+    }
+
+    // ---- Shared dispatch tests -----------------------------------------
+
+    /// Test fixture holding the ISR-owned input context fields for `dispatch`.
+    struct Isr {
+        config: crate::config::EepromConfig,
+        cmd: crate::dshot_commands::CommandProcessor,
+        edt: crate::edt::EdtScheduler,
+        forward: bool,
+        edt_armed: bool,
+        edt_arm_enable: bool,
+        ft: (u16, u16),
+    }
+
+    impl Isr {
+        /// Create default ISR input state with the given `edt_arm_enable` setting.
+        fn new(edt_arm_enable: bool) -> Self {
+            Self {
+                config: crate::config::EepromConfig::default(),
+                cmd: Default::default(),
+                edt: Default::default(),
+                forward: true,
+                edt_armed: false,
+                edt_arm_enable,
+                ft: (400, 600),
+            }
+        }
+        /// Dispatch one action; returns prescaler set, if any.
+        fn run(
+            &mut self,
+            shared: &crate::shared_state::SharedState,
+            action: TransferAction,
+        ) -> Option<u16> {
+            let actions = TransferActions {
+                action,
+                next_capture: CaptureConfig::DSHOT300_DETECTED,
+                frametime: None,
+                bidir_detected: false,
+            };
+            let mut psc = None;
+            dispatch(
+                &actions,
+                shared,
+                InputContext {
+                    config: &mut self.config,
+                    cmd: &mut self.cmd,
+                    edt: &mut self.edt,
+                    forward: &mut self.forward,
+                    edt_armed: &mut self.edt_armed,
+                    edt_arm_enable: self.edt_arm_enable,
+                    frametime_low: &mut self.ft.0,
+                    frametime_high: &mut self.ft.1,
+                },
+                |p| psc = Some(p.raw()),
+            );
+            psc
+        }
+    }
+
+    /// Create a `SharedState` instance pre-Transitioned to the armed state.
+    fn armed_shared() -> crate::shared_state::SharedState {
+        let shared = crate::shared_state::SharedState::new::<Mhz64>();
+        shared.set_armed(true);
+        assert!(shared.armed());
+        shared
+    }
+
+    /// Build a non-telemetry `TransferAction::DshotCommand` for tests.
+    fn command(cmd: u16) -> TransferAction {
+        TransferAction::DshotCommand {
+            cmd,
+            telemetry: false,
+        }
+    }
+
+    /// A config-changing command publishes exactly the changed byte to main
+    /// and updates the direction.
+    #[test]
+    fn dispatch_command_publishes_config_diff() {
+        let shared = armed_shared();
+        let mut isr = Isr::new(false);
+        for _ in 0..6 {
+            isr.run(&shared, command(crate::dshot::commands::DIRECTION_REVERSED));
+        }
+        assert_eq!(isr.config.dir_reversed, 1);
+        assert!(!isr.forward);
+        assert!(!shared.forward());
+        let off = core::mem::offset_of!(crate::config::EepromConfig, dir_reversed) as u8;
+        assert_eq!(shared.pop_config_write(), Some((off, 1)));
+        assert_eq!(shared.pop_config_write(), None);
+    }
+
+    /// Beacon commands become the tick tone request.
+    #[test]
+    fn dispatch_beacon_requests_tone() {
+        let shared = armed_shared();
+        let mut isr = Isr::new(false);
+        isr.run(&shared, command(3));
+        assert_eq!(shared.take_tone_request(), 3);
+    }
+
+    /// EDT arm gate: throttle is held until EDT_ENABLE arms it, zero always
+    /// passes and disarms, and EDT_ENABLE queues the EDT init frame.
+    #[test]
+    fn dispatch_edt_arm_gate() {
+        let shared = armed_shared();
+        let mut isr = Isr::new(true);
+        let throttle = |value| TransferAction::DshotThrottle {
+            value,
+            telemetry: false,
+        };
+        shared.set_newinput(7);
+        isr.run(&shared, throttle(500));
+        assert_eq!(shared.newinput(), 7, "held before EDT arms");
+        for _ in 0..6 {
+            isr.run(&shared, command(crate::dshot::commands::EDT_ENABLE));
+        }
+        assert!(isr.edt_armed);
+        assert!(matches!(
+            isr.edt.next_frame(
+                crate::units::CentiAmps::ZERO,
+                crate::units::CentiVolts::ZERO,
+                0
+            ),
+            crate::edt::EdtFrame::Extended(crate::edt::EDT_INIT_FRAME)
+        ));
+        isr.run(&shared, throttle(500));
+        assert_eq!(shared.newinput(), 500, "passes once armed");
+        isr.run(&shared, throttle(0));
+        assert_eq!(shared.newinput(), 0);
+        assert!(!isr.edt_armed, "zero disarms");
+        isr.run(&shared, throttle(500));
+        assert_eq!(shared.newinput(), 0, "held again");
+    }
+
+    /// Servo calibration persists both thresholds, publishes both bytes and
+    /// asks main to save.
+    #[test]
+    fn dispatch_servo_calibration_publishes_thresholds() {
+        let shared = armed_shared();
+        let mut isr = Isr::new(false);
+        isr.run(
+            &shared,
+            TransferAction::ServoCalibrationDone {
+                low_threshold: 51,
+                high_threshold: 99,
+            },
+        );
+        use crate::config::EepromConfig;
+        assert_eq!(
+            (
+                isr.config.servo_low_threshold,
+                isr.config.servo_high_threshold
+            ),
+            (51, 99)
+        );
+        let lo = core::mem::offset_of!(EepromConfig, servo_low_threshold) as u8;
+        let hi = core::mem::offset_of!(EepromConfig, servo_high_threshold) as u8;
+        assert_eq!(shared.pop_config_write(), Some((lo, 51)));
+        assert_eq!(shared.pop_config_write(), Some((hi, 99)));
+        assert!(shared.save_settings_flag());
+    }
+
+    /// DShot detection hands the port its output prescaler.
+    #[test]
+    fn dispatch_detection_sets_output_prescaler() {
+        let shared = crate::shared_state::SharedState::new::<Mhz64>();
+        let mut isr = Isr::new(false);
+        let psc = isr.run(
+            &shared,
+            TransferAction::InputDetected(DetectedProtocol::Dshot),
+        );
+        assert_eq!(psc, Some(1));
+        assert!(shared.input_set() && shared.dshot());
     }
 }

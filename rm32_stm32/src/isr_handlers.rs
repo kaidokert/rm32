@@ -586,7 +586,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
                     | rm32::transfer::TransferAction::ServoCalibrationDone { .. }
             );
         let prev_config = may_mutate_config.then_some(inp.config);
-        let result = rm32::transfer::dispatch(
+        rm32::transfer::dispatch(
             &actions,
             shared,
             rm32::transfer::InputContext {
@@ -607,9 +607,6 @@ pub fn handle_exti_frame() -> CaptureConfig {
         }
         if let Some(psc) = actions.next_capture.prescaler {
             inp.input.set_capture_prescaler(psc);
-        }
-        if let Some(tone) = result.tone {
-            shared.set_tone_request(tone);
         }
         actions.next_capture
     })
