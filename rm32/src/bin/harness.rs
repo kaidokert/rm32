@@ -445,6 +445,7 @@ impl Harness {
                 frametime_low: &mut self.frametime_low,
                 frametime_high: &mut self.frametime_high,
             },
+            |_| {},
             |prescaler| self.dshot_output_prescaler = prescaler.raw(),
         );
         self.commutation.set_forward(forward);
@@ -472,6 +473,15 @@ impl Harness {
             rm32::edt::EdtFrame::Erpm => -1,
             rm32::edt::EdtFrame::Extended(v) => v as i32,
         }
+    }
+
+    #[cfg(test)]
+    fn encode_telemetry_response(&mut self, gcr: &mut [u32]) -> Option<u16> {
+        let mut extended = None;
+        rm32::edt::encode_response(&mut self.edt, &self.shared, gcr, dshot::GCR_SHIFT_F0, |v| {
+            extended = Some(v)
+        });
+        extended
     }
 
     fn run_edt_next_command(&mut self, args: &str) -> i32 {
@@ -1061,9 +1071,15 @@ mod dispatch_regressions {
     fn edt_commands_reach_the_response_scheduler() {
         let mut h = armed_input();
         repeat(&mut h, 13);
-        assert_eq!(h.edt_next_frame(0, 0, 0), 0xe00);
+        let mut gcr = [0u32; 37];
+        let mut expected = [0u32; 37];
+        dshot::encode_gcr_frame(0xe00, &mut expected, 7, dshot::GCR_SHIFT_F0);
+        assert_eq!(h.encode_telemetry_response(&mut gcr), Some(0xe00));
+        assert_eq!(gcr, expected);
         repeat(&mut h, 14);
-        assert_eq!(h.edt_next_frame(0, 0, 0), 0xeff);
+        dshot::encode_gcr_frame(0xeff, &mut expected, 7, dshot::GCR_SHIFT_F0);
+        assert_eq!(h.encode_telemetry_response(&mut gcr), Some(0xeff));
+        assert_eq!(gcr, expected);
     }
 
     #[test]

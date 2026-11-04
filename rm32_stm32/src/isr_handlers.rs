@@ -525,24 +525,12 @@ pub fn handle_dma_tc() {
             if inp.input.is_output() {
                 inp.input.start_capture();
             } else {
-                let gcr = inp.input.gcr_buffer();
-
-                // EDT: decide whether to send eRPM or extended data frame
-                let value_12bit = match inp.edt.next_frame(
-                    shared.actual_current(),
-                    shared.battery_voltage(),
-                    shared.degrees_celsius(),
-                ) {
-                    rm32::edt::EdtFrame::Extended(v) => v,
-                    rm32::edt::EdtFrame::Erpm => {
-                        rm32::dshot::erpm_to_12bit(shared.e_com_time() as u16, shared.running())
-                    }
-                };
-                rm32::dshot::encode_gcr_frame(
-                    value_12bit,
-                    gcr,
-                    7,
+                rm32::edt::encode_response(
+                    &mut inp.edt,
+                    shared,
+                    inp.input.gcr_buffer(),
                     <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT,
+                    |_| {},
                 );
 
                 inp.input.start_gcr_output();
@@ -599,6 +587,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
                 frametime_low: &mut inp.frametime_low,
                 frametime_high: &mut inp.frametime_high,
             },
+            |_| {},
             |prescaler| inp.input.set_output_prescaler(prescaler),
         );
         if prev_config.is_some_and(|prev| prev.as_bytes() != inp.config.as_bytes()) {

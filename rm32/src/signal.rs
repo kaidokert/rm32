@@ -1,5 +1,7 @@
 //! Input signal detection and processing (DShot/Servo/auto-detect).
 
+use crate::functions::map;
+
 /// Signal detection result
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SignalType {
@@ -10,8 +12,11 @@ pub enum SignalType {
     ServoPwm,
 }
 
-/// Detect input type from DMA buffer pulse pattern.
-pub fn detect_input(edges: &[u32], _cpu_mhz: u8) -> SignalType {
+/// Detect input type from a burst of captured edge timestamps.
+/// The thresholds are in detection-prescaler ticks (~6 MHz on every port:
+/// the prescaler is `CAPTURE_HZ / 6 MHz`, `CaptureConfig::dshot_detection`),
+/// so they are clock-independent.
+pub fn detect_input(edges: &[u32]) -> SignalType {
     if edges.len() < 3 {
         return SignalType::None;
     }
@@ -67,7 +72,6 @@ pub fn detect_input(edges: &[u32], _cpu_mhz: u8) -> SignalType {
 /// Compute MultiShot input from DMA buffer.
 /// MultiShot uses a single pulse width (243-1200µs → 0-2000 throttle).
 pub fn compute_multishot(edges: &[u32]) -> Option<u16> {
-    use crate::functions::map;
     if edges.len() < 2 {
         return None;
     }
@@ -86,7 +90,6 @@ pub fn compute_servo_unidirectional(
     low_threshold: u16,
     high_threshold: u16,
 ) -> u16 {
-    use crate::functions::map;
     let raw = map(
         pulse_width as i32,
         low_threshold as i32,
@@ -103,26 +106,26 @@ mod tests {
 
     #[test]
     fn detect_dshot600() {
-        let mut buf = [0u32; 32];
-        for i in 0..32 {
-            buf[i] = 100 + i as u32 * 3;
+        let mut buf = [0u32; 33];
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 3;
         }
-        assert_eq!(detect_input(&buf, 48), SignalType::Dshot600);
+        assert_eq!(detect_input(&buf), SignalType::Dshot600);
     }
 
     #[test]
     fn detect_servo() {
-        let mut buf = [0u32; 32];
-        for i in 0..32 {
-            buf[i] = 100 + i as u32 * 1000;
+        let mut buf = [0u32; 33];
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 1000;
         }
-        assert_eq!(detect_input(&buf, 48), SignalType::ServoPwm);
+        assert_eq!(detect_input(&buf), SignalType::ServoPwm);
     }
 
     #[test]
     fn detect_out_of_range() {
-        let buf = [0u32; 32]; // all zeros, no valid pulses
-        assert_eq!(detect_input(&buf, 48), SignalType::None);
+        let buf = [0u32; 33]; // all zeros, no valid pulses
+        assert_eq!(detect_input(&buf), SignalType::None);
     }
 
     #[test]
@@ -133,7 +136,7 @@ mod tests {
             *slot = t & 0xFFFF;
             t += if i % 2 == 0 { 5 } else { 15 };
         }
-        assert_eq!(detect_input(&buf, 80), SignalType::Dshot300);
+        assert_eq!(detect_input(&buf), SignalType::Dshot300);
     }
 
     #[test]
@@ -144,7 +147,7 @@ mod tests {
             *slot = t & 0xFFFF;
             t += if i % 2 == 0 { 2 } else { 6 };
         }
-        assert_eq!(detect_input(&buf, 80), SignalType::Dshot600);
+        assert_eq!(detect_input(&buf), SignalType::Dshot600);
     }
 
     #[test]
@@ -157,7 +160,7 @@ mod tests {
             t += if i % 2 == 0 { 7 } else { 13 };
             *slot = t & 0xFFFF;
         }
-        assert_eq!(detect_input(&buf, 80), SignalType::Dshot300);
+        assert_eq!(detect_input(&buf), SignalType::Dshot300);
     }
 
     #[test]
@@ -180,11 +183,11 @@ mod tests {
 
     #[test]
     fn detect_dshot300() {
-        let mut buf = [0u32; 32];
-        for i in 0..32 {
-            buf[i] = 100 + i as u32 * 5;
+        let mut buf = [0u32; 33];
+        for (i, slot) in buf.iter_mut().enumerate() {
+            *slot = 100 + i as u32 * 5;
         }
-        assert_eq!(detect_input(&buf, 48), SignalType::Dshot300);
+        assert_eq!(detect_input(&buf), SignalType::Dshot300);
     }
 
     #[test]
@@ -193,7 +196,7 @@ mod tests {
         for i in 0..32 {
             buf[i] = 100 + i as u32 * 10;
         }
-        assert_eq!(detect_input(&buf, 48), SignalType::Dshot150);
+        assert_eq!(detect_input(&buf), SignalType::Dshot150);
     }
 
     #[test]
@@ -202,7 +205,7 @@ mod tests {
         for i in 0..32 {
             buf[i] = 100 + i as u32 * 20;
         } // smallest=20, >16 (past DShot150), <200 (not servo)
-        assert_eq!(detect_input(&buf, 48), SignalType::None);
+        assert_eq!(detect_input(&buf), SignalType::None);
     }
 
     #[test]

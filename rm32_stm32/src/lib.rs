@@ -17,19 +17,23 @@ macro_rules! dprintln {
 ///
 /// `rtt_target::rprintln!` runs `core::fmt::write` inside
 /// `critical_section::with` (disabling all interrupts, including priority 0).
-/// Calling `core::fmt::write` here runs formatting with interrupts enabled;
-/// each `write_str` call enters `critical_section::with` only to copy the
-/// already-formatted fragment into the RTT ring buffer.
+/// Calling `write_fmt` here runs formatting with interrupts enabled; each
+/// already-formatted fragment goes to RTT under its own short critical section
+/// (a buffer copy), followed by the trailing newline.
 pub fn dline(args: core::fmt::Arguments) {
-    struct RttOut;
-    impl core::fmt::Write for RttOut {
+    struct Sinks;
+    impl core::fmt::Write for Sinks {
         fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            rtt_target::rprint!("{}", s);
+            fragment(s);
             Ok(())
         }
     }
-    let _ = core::fmt::write(&mut RttOut, args);
-    rtt_target::rprint!("\n");
+    fn fragment(s: &str) {
+        rtt_target::print_impl::write_str(0, s);
+    }
+    use core::fmt::Write as _;
+    let _ = Sinks.write_fmt(args);
+    fragment("\n");
 }
 
 pub mod board_ext;
