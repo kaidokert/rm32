@@ -57,6 +57,7 @@ fn main() -> ! {
         mut sys,
         mut adc,
         mut telem,
+        writer,
     } = rm32_stm32::init::init(BOARD.dead_time, BOARD_EXT.bemf_pins);
 
     // --- WS2812 LED: boot indicator (dim red) ---
@@ -111,6 +112,7 @@ fn main() -> ! {
         frametime_low: 400,
         frametime_high: 600,
         voltage_based_ramp: BOARD.voltage_based_ramp,
+        writer,
     };
     isr::init_isr_state(isr_state);
 

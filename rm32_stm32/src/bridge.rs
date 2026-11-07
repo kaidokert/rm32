@@ -14,7 +14,7 @@ pub trait TimerPwm {
     fn set_compare2(&mut self, val: u16);
     fn set_compare3(&mut self, val: u16);
     fn generate_update_event(&mut self);
-    /// Apply the port's existing TIM1 dead-time override semantics.
+    /// Override dead-time in TIM1 BDTR register (OR'd with existing DTG value).
     fn set_dead_time_override(&mut self, dtg: u16);
 }
 

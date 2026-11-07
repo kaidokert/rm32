@@ -531,23 +531,26 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     }
 }
 
-/// Commutation timer expired (TIM14/TIM16 ISR body).
+/// Commutation timer expired (the commutation-timer ISR body).
 #[allow(clippy::too_many_arguments)]
-pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
+pub fn commutation_timer_expired<P, S, C, B, T, W>(
     commutation: &mut Commutation,
     bemf: &mut BemfState,
     shared: &S,
+    writer: &W,
     com_timer: &mut T,
     comp: &mut C,
-    phase: &mut Ph,
+    bridge: &mut B,
     pwm_mode: hal::PwmMode,
     bidirectional: bool,
     strict_changeover: bool,
 ) where
+    P: Timing,
     S: SharedComm,
     C: hal::BemfSensor,
-    Ph: hal::PhaseOutput,
+    B: hal::PhaseOutput,
     T: hal::ComTimer,
+    W: crate::shared_comm::ModeWriter,
 {
     com_timer.disable_interrupt();
     if !shared.running() {
@@ -563,8 +566,8 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
     let ci0 = shared.commutation_interval();
     let e_com = commutation.record_interval::<P>(ci0 as u16);
     shared.set_e_com_time(e_com);
-    phase.com_step(step, pwm_mode);
-    phase.pulse_toggle(step);
+    bridge.com_step(step, pwm_mode);
+    bridge.pulse_toggle(step);
     route_bemf(comp, commutation);
 
     let exit_interval = if bidirectional {
@@ -577,7 +580,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
         let to_old = crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
             > exit_interval + P::OLD_ROUTINE_REENTRY_MARGIN;
         if to_old {
-            shared.set_old_routine(true);
+            writer.set_old_routine(shared, true);
         }
         let new_ci = bemf.update_timing_from_timer(ci0);
         shared.set_commutation_interval(new_ci);
@@ -585,11 +588,11 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
             comp.enable_irq();
         }
         bemf.reset_after_commutation();
-        shared.increment_zero_crosses();
+        writer.increment_zero_crosses(shared);
     } else {
         // Polling mode (old_routine): comparator interrupts stay off until changeover.
         bemf.reset_after_commutation();
-        shared.increment_zero_crosses();
+        writer.increment_zero_crosses(shared);
         let zc = shared.zero_crosses();
         let changeover_met = if strict_changeover {
             zc >= OLD_ROUTINE_EXIT_ZC && ci0 <= exit_interval
@@ -601,7 +604,7 @@ pub fn commutation_timer_expired<P: Timing, S, C, Ph, T>(
                 let avg = crate::platform::e_com_us_to_avg_ticks::<P>(e_com).max(1) as u32;
                 shared.set_gate_avg(avg);
             }
-            shared.transition(MotorEvent::BemfLocked);
+            writer.transition(shared, MotorEvent::BemfLocked);
             comp.enable_irq();
         }
     }

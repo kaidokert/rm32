@@ -440,6 +440,7 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
         frametime_high: 1650,
         armed_timeout_count: 0,
         voltage_based_ramp: false,
+        writer: unsafe { rm32::shared_comm::SingleWriter::new() },
     });
     let mut staged_input_addr = 0usize;
     isr::with_isr_state(|s| {

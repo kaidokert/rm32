@@ -270,7 +270,7 @@ pub struct MotorConfig {
     pub min_startup_duty: u16,
     /// Maximum duty during startup ramp
     pub startup_max_duty: u16,
-    /// TIM1 auto-reload value for requested PWM frequency
+    /// PWM timer auto-reload value for requested PWM frequency
     pub timer1_max_arr: u16,
     /// Dead-time override from driving_brake_strength (0 = no override)
     pub dead_time_override: u16,
@@ -317,7 +317,7 @@ impl EepromConfig {
 
     /// Derive motor configuration from EEPROM settings and board hardware.
     ///
-    /// `default_arr`: TIM1 auto-reload at default 24kHz (MCU-specific: CPU_MHZ*1e6/24000-1)
+    /// `default_arr`: PWM timer auto-reload at default 24kHz (port-specific: timer_hz/24000-1)
     /// `dead_time`: board dead-time from YAML
     /// `kv_divider`: board KV divider (1=normal, 2=3-cell max, 16=1-2 cell max)
     /// `startup_boost`: board flag for heavy-prop startup boost
@@ -416,6 +416,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn temp_advance_maps_both_eeprom_formats() {
+        let mut cfg = EepromConfig::default();
+        // old format 0-3: ×8 (7.5° steps)
+        for (level, want) in [(0u8, 0u8), (1, 8), (2, 16), (3, 24)] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), want, "old format {level}");
+        }
+        // new format 10-42: value-10
+        for (level, want) in [(10u8, 0u8), (26, 16), (42, 32)] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), want, "new format {level}");
+        }
+        // out of range: 4-9 and >42 → 16 (AM32 main.c:628-630)
+        for level in [4u8, 9, 43, 255] {
+            cfg.advance_level = level;
+            assert_eq!(cfg.temp_advance(), 16, "fallback {level}");
+        }
+    }
+
+    #[test]
     fn absolute_cutoff_keeps_eeprom_byte_and_decodes_half_volts() {
         for (stored, cv) in [(0, 0), (1, 50), (10, 500), (22, 1100), (255, 12750)] {
             let mut bytes = [0u8; EepromConfig::SIZE];
@@ -469,6 +489,12 @@ mod tests {
         assert_eq!(cfg.current_p, 100);
         assert_eq!(cfg.current_d, 100);
         assert_eq!(cfg.absolute_voltage_cutoff, 10);
+        // Servo cal must land on the AM32 Configurator window (see
+        // apply_version_defaults).
+        let mc = cfg.derive_motor_config(3332, 45, 1, false);
+        assert_eq!(mc.servo_low, 1006);
+        assert_eq!(mc.servo_high, 2006);
+        assert_eq!(mc.servo_neutral, 1502);
     }
 
     #[test]
