@@ -49,6 +49,17 @@ where
     const TIMER_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TIMER_HZ;
     const CAPTURE_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::CAPTURE_HZ;
     const GCR_SHIFT: u8 = <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT;
+    const VOLTAGE_DIVIDER_X100: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::VOLTAGE_DIVIDER_X100;
+    const MILLIVOLT_PER_AMP: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::MILLIVOLT_PER_AMP;
+    const CURRENT_OFFSET: i16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::CURRENT_OFFSET;
+    const USE_NTC: bool = <crate::platform::StmPlatform as rm32::platform::Platform>::USE_NTC;
+    const ADC_FULL_SCALE: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::ADC_FULL_SCALE;
+    const ADC_VREF_MV: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::ADC_VREF_MV;
     const PWM_BASE_PERIOD: u16 =
         <crate::platform::StmPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
 }
@@ -162,6 +173,17 @@ where
     const TIMER_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::TIMER_HZ;
     const CAPTURE_HZ: u32 = <crate::platform::StmPlatform as rm32::platform::Platform>::CAPTURE_HZ;
     const GCR_SHIFT: u8 = <crate::platform::StmPlatform as rm32::platform::Platform>::GCR_SHIFT;
+    const VOLTAGE_DIVIDER_X100: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::VOLTAGE_DIVIDER_X100;
+    const MILLIVOLT_PER_AMP: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::MILLIVOLT_PER_AMP;
+    const CURRENT_OFFSET: i16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::CURRENT_OFFSET;
+    const USE_NTC: bool = <crate::platform::StmPlatform as rm32::platform::Platform>::USE_NTC;
+    const ADC_FULL_SCALE: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::ADC_FULL_SCALE;
+    const ADC_VREF_MV: u16 =
+        <crate::platform::StmPlatform as rm32::platform::Platform>::ADC_VREF_MV;
     const PWM_BASE_PERIOD: u16 =
         <crate::platform::StmPlatform as rm32::platform::Platform>::PWM_BASE_PERIOD;
 }

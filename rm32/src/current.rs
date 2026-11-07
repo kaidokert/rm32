@@ -1,4 +1,4 @@
-//! Current smoothing and consumed-charge accounting.
+//! Current smoothing (moving average filter) and consumed charge.
 
 use crate::units::CentiAmps;
 

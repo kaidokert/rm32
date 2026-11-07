@@ -154,6 +154,12 @@ impl rm32::platform::Platform for TestPlatform {
     const TIMER_HZ: u32 = 2_000_000;
     const CAPTURE_HZ: u32 = 64_000_000;
     const GCR_SHIFT: u8 = 7;
+    const VOLTAGE_DIVIDER_X100: u16 = 1100;
+    const MILLIVOLT_PER_AMP: u16 = 20;
+    const CURRENT_OFFSET: i16 = 0;
+    const USE_NTC: bool = false;
+    const ADC_FULL_SCALE: u16 = 4095;
+    const ADC_VREF_MV: u16 = 3300;
     const PWM_BASE_PERIOD: u16 = 1999;
 }
 impl<P: rm32::platform::Platform> rm32::platform::Platform for Hal<P> {
@@ -161,6 +167,12 @@ impl<P: rm32::platform::Platform> rm32::platform::Platform for Hal<P> {
     const TIMER_HZ: u32 = P::TIMER_HZ;
     const CAPTURE_HZ: u32 = P::CAPTURE_HZ;
     const GCR_SHIFT: u8 = P::GCR_SHIFT;
+    const VOLTAGE_DIVIDER_X100: u16 = P::VOLTAGE_DIVIDER_X100;
+    const MILLIVOLT_PER_AMP: u16 = P::MILLIVOLT_PER_AMP;
+    const CURRENT_OFFSET: i16 = P::CURRENT_OFFSET;
+    const USE_NTC: bool = P::USE_NTC;
+    const ADC_FULL_SCALE: u16 = P::ADC_FULL_SCALE;
+    const ADC_VREF_MV: u16 = P::ADC_VREF_MV;
     const PWM_BASE_PERIOD: u16 = P::PWM_BASE_PERIOD;
 }
 impl<P: rm32::platform::Platform> rm32::hal::PhaseOutput for Hal<P> {
@@ -703,6 +715,12 @@ impl rm32::platform::Platform for AlternatePlatform {
     const TIMER_HZ: u32 = 1_000_000;
     const CAPTURE_HZ: u32 = 48_000_000;
     const GCR_SHIFT: u8 = 6;
+    const VOLTAGE_DIVIDER_X100: u16 = 1100;
+    const MILLIVOLT_PER_AMP: u16 = 20;
+    const CURRENT_OFFSET: i16 = 0;
+    const USE_NTC: bool = false;
+    const ADC_FULL_SCALE: u16 = 4095;
+    const ADC_VREF_MV: u16 = 3300;
     const PWM_BASE_PERIOD: u16 = 2399;
 }
 
