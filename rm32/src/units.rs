@@ -64,12 +64,341 @@ impl TimerTicks {
     }
 }
 
+use crate::platform::Platform;
+
 /// Raw ADC count (nominally 12-bit, 0-4095, or wider `u16` encoded readings).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[repr(transparent)]
 pub struct AdcCount(pub u16);
 
+/// Largest reading the `Adc` trait can return. Conversions are exact across the
+/// full `u16` range, not only a 12-bit ADC range.
+const ADC_MAX: u32 = u16::MAX as u32;
+
+const fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a
+}
+
+/// `floor((a * x + b) / d)` for every `x` in `0..=x_max` with a multiply,
+/// add and shift and no divide (cores without hardware divide would
+/// otherwise call `__aeabi_*div`). [`AffineDiv::new`] runs at compile time,
+/// checks every `x` against the exact quotient and fails the build if no
+/// exact form exists.
+///
+/// Three forms, first exact one wins (`a = A*d + a1`, `a2 = d - a1`):
+/// direct `floor((a x + b) / d)`; `A x + floor((a1 x + b) / d)`; and
+/// `(A + 1) x - ceil((a2 x - b) / d)`. Peeling off the integer part keeps the
+/// multiplier small enough for the precision a large `d` needs. A 32-bit
+/// multiply is preferred; only when none of the three has an exact 32-bit
+/// form over the whole domain does it take a 64-bit multiply (on M0 a
+/// constant-time `__aeabi_lmul`, still no divide).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AffineDiv {
+    lin: i32,
+    core: MulShift,
+    negate: bool,
+    /// The domain [`AffineDiv::new`] proved exact; `apply` beyond it wraps.
+    x_max: u32,
+}
+
+/// `((x * mul + add) >> shift) - sub` = `floor((alpha x + beta) / d)`, in
+/// 32-bit arithmetic, or 64-bit when `wide`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MulShift {
+    mul: u64,
+    add: u64,
+    shift: u32,
+    sub: i32,
+    wide: bool,
+}
+
+impl MulShift {
+    const ZERO: Self = Self {
+        mul: 0,
+        add: 0,
+        shift: 0,
+        sub: 0,
+        wide: false,
+    };
+
+    /// Exact form of `floor((alpha x + beta) / d)` for `x <= x_max`, if one
+    /// exists with `x * mul + add` inside u32 (u64 when `wide`).
+    const fn find(alpha: i32, beta: i32, d: i32, x_max: u32, wide: bool) -> Option<Self> {
+        // beta = d * t + r with 0 <= r < d: floor((alpha x + r) / d) + t.
+        let t = beta.div_euclid(d);
+        let r = beta.rem_euclid(d);
+        let limit = if wide {
+            u64::MAX as u128
+        } else {
+            u32::MAX as u128
+        };
+        let mut shift = if wide { 63 } else { 31 };
+        loop {
+            let mul_lo = ((alpha as u128) << shift) / d as u128;
+            let add_lo = ((r as u128) << shift) / d as u128;
+            let mut k = 0;
+            while k < 4 {
+                let mul = mul_lo + (k & 1);
+                let add = add_lo + (k >> 1);
+                if x_max as u128 * mul + add <= limit {
+                    let c = Self {
+                        mul: mul as u64,
+                        add: add as u64,
+                        shift,
+                        sub: -t,
+                        wide,
+                    };
+                    if c.exact(alpha, r, d, x_max) {
+                        return Some(c);
+                    }
+                }
+                k += 1;
+            }
+            if shift == 0 {
+                return None;
+            }
+            shift -= 1;
+        }
+    }
+
+    const fn exact(self, alpha: i32, r: i32, d: i32, x_max: u32) -> bool {
+        let mut x = 0;
+        while x <= x_max {
+            let want = ((alpha as i64 * x as i64 + r as i64) / d as i64) as i32;
+            if self.apply(x) + self.sub != want {
+                return false;
+            }
+            x += 1;
+        }
+        true
+    }
+
+    #[inline(always)]
+    const fn apply(self, x: u32) -> i32 {
+        let q = if self.wide {
+            ((x as u64 * self.mul + self.add) >> self.shift) as u32
+        } else {
+            (x * self.mul as u32 + self.add as u32) >> self.shift
+        };
+        q as i32 - self.sub
+    }
+}
+
+impl AffineDiv {
+    /// Always 0 (a board without the sensor).
+    pub const ZERO: Self = Self {
+        lin: 0,
+        core: MulShift::ZERO,
+        negate: false,
+        x_max: u32::MAX,
+    };
+
+    /// Exact divide-free form of `floor((a * x + b) / d)`, `x <= x_max`.
+    pub const fn new(a: i32, b: i32, d: i32, x_max: u32) -> Self {
+        assert!(a >= 0 && d > 0);
+        let a1 = a % d;
+        let mut wide = false;
+        loop {
+            if let Some(core) = MulShift::find(a, b, d, x_max, wide) {
+                return Self {
+                    lin: 0,
+                    core,
+                    negate: false,
+                    x_max,
+                };
+            }
+            if let Some(core) = MulShift::find(a1, b, d, x_max, wide) {
+                return Self {
+                    lin: a / d,
+                    core,
+                    negate: false,
+                    x_max,
+                };
+            }
+            // ceil((a2 x - b) / d) = floor((a2 x - b + d - 1) / d)
+            if let Some(core) = MulShift::find(d - a1, d - 1 - b, d, x_max, wide) {
+                return Self {
+                    lin: a / d + 1,
+                    core,
+                    negate: true,
+                    x_max,
+                };
+            }
+            if wide {
+                panic!("no exact multiply-shift form for this board constant");
+            }
+            wide = true;
+        }
+    }
+
+    /// The quotient for `x <= x_max` (debug builds assert it; beyond it
+    /// the 32-bit multiply wraps).
+    #[inline(always)]
+    pub const fn apply(self, x: u32) -> i32 {
+        debug_assert!(x <= self.x_max);
+        let c = self.core.apply(x);
+        self.lin * x as i32 + if self.negate { -c } else { c }
+    }
+}
+
+/// Compile-time ADC conversions of a platform's board constants.
+/// Blanket-implemented; read through [`AdcCount::centivolts`] and
+/// [`AdcCount::centiamps`].
+pub(crate) trait AdcScale: Platform + Sized {
+    /// Largest raw ADC count before the battery voltage conversion reaches
+    /// `u16::MAX` centivolts (655.35 V).
+    const VOLTAGE_RAW_MAX: u32 = {
+        let num0 = Self::ADC_VREF_MV as u64 * Self::VOLTAGE_DIVIDER_X100 as u64;
+        let den0 = Self::ADC_FULL_SCALE as u64 * 1000;
+        if num0 == 0 {
+            ADC_MAX
+        } else {
+            let limit = (u16::MAX as u64 * den0).div_ceil(num0);
+            if limit < ADC_MAX as u64 {
+                limit as u32
+            } else {
+                ADC_MAX
+            }
+        }
+    };
+
+    /// Whether any `u16` ADC reading can reach or exceed `u16::MAX` centivolts.
+    const VOLTAGE_SATURATES: bool = {
+        let num0 = Self::ADC_VREF_MV as u64 * Self::VOLTAGE_DIVIDER_X100 as u64;
+        let den0 = Self::ADC_FULL_SCALE as u64 * 1000;
+        (ADC_MAX as u64 * num0) / den0 >= u16::MAX as u64
+    };
+
+    /// Raw ADC count -> battery centivolts:
+    /// `floor(raw * ADC_VREF_MV * VOLTAGE_DIVIDER_X100 / (ADC_FULL_SCALE * 1000))`.
+    const VOLTAGE_DIV: AffineDiv = {
+        let num0 = Self::ADC_VREF_MV as u64 * Self::VOLTAGE_DIVIDER_X100 as u64;
+        let den0 = Self::ADC_FULL_SCALE as u64 * 1000;
+        if num0 == 0 {
+            AffineDiv::ZERO
+        } else {
+            let g = gcd_u64(num0, den0);
+            AffineDiv::new(
+                (num0 / g) as i32,
+                0,
+                (den0 / g) as i32,
+                Self::VOLTAGE_RAW_MAX,
+            )
+        }
+    };
+
+    /// First raw count with a non-negative current numerator
+    /// `raw * ADC_VREF_MV - CURRENT_OFFSET * ADC_FULL_SCALE >= 0`.
+    const CURRENT_NEG_BELOW: u32 = if Self::MILLIVOLT_PER_AMP == 0 || Self::CURRENT_OFFSET <= 0 {
+        0
+    } else {
+        let num = Self::CURRENT_OFFSET as u64 * Self::ADC_FULL_SCALE as u64;
+        let den = Self::ADC_VREF_MV as u64;
+        let threshold = num.div_ceil(den);
+        if threshold <= ADC_MAX as u64 {
+            threshold as u32
+        } else {
+            ADC_MAX + 1
+        }
+    };
+
+    /// Non-negative current branch (`raw >= CURRENT_NEG_BELOW`):
+    /// `floor((raw * ADC_VREF_MV - CURRENT_OFFSET * ADC_FULL_SCALE) * 100 / (ADC_FULL_SCALE * MILLIVOLT_PER_AMP))`.
+    const CURRENT_POS: AffineDiv = if Self::MILLIVOLT_PER_AMP == 0 {
+        AffineDiv::ZERO
+    } else {
+        let a0 = Self::ADC_VREF_MV as u64 * 100;
+        let b0_abs =
+            (Self::CURRENT_OFFSET as i64).unsigned_abs() * Self::ADC_FULL_SCALE as u64 * 100;
+        let d0 = Self::ADC_FULL_SCALE as u64 * Self::MILLIVOLT_PER_AMP as u64;
+        let g = gcd_u64(gcd_u64(a0, b0_abs), d0);
+        let a = (a0 / g) as i32;
+        let b_mag = (b0_abs / g) as i32;
+        let b = if Self::CURRENT_OFFSET >= 0 {
+            -b_mag
+        } else {
+            b_mag
+        };
+        let d = (d0 / g) as i32;
+        AffineDiv::new(a, b, d, ADC_MAX)
+    };
+
+    /// Negative current branch (`raw < CURRENT_NEG_BELOW`), truncated toward zero:
+    /// `ceil(n / d) = floor((n + d - 1) / d)`.
+    const CURRENT_NEG: AffineDiv = if Self::MILLIVOLT_PER_AMP == 0 || Self::CURRENT_OFFSET <= 0 {
+        AffineDiv::ZERO
+    } else {
+        let a0 = Self::ADC_VREF_MV as u64 * 100;
+        let b0_abs =
+            (Self::CURRENT_OFFSET as i64).unsigned_abs() * Self::ADC_FULL_SCALE as u64 * 100;
+        let d0 = Self::ADC_FULL_SCALE as u64 * Self::MILLIVOLT_PER_AMP as u64;
+        let g = gcd_u64(gcd_u64(a0, b0_abs), d0);
+        let a = (a0 / g) as i32;
+        let b_mag = (b0_abs / g) as i32;
+        let d = (d0 / g) as i32;
+        let b = -b_mag + d - 1;
+        AffineDiv::new(a, b, d, Self::CURRENT_NEG_BELOW.saturating_sub(1))
+    };
+
+    /// Whether any `u16` ADC reading can exceed the signed `i16` centiamp range.
+    const CURRENT_SATURATES: bool = Self::MILLIVOLT_PER_AMP != 0
+        && (Self::CURRENT_POS.apply(ADC_MAX) > i16::MAX as i32
+            || (Self::CURRENT_NEG_BELOW > 0 && Self::CURRENT_NEG.apply(0) < i16::MIN as i32));
+}
+
+impl<P: Platform> AdcScale for P {}
+
+/// Convert a raw ADC reading to battery centivolts using `P`'s compile-time
+/// board constants.
+#[inline]
+pub fn adc_to_centivolts<P: Platform>(raw: AdcCount) -> CentiVolts {
+    raw.centivolts::<P>()
+}
+
+/// Convert a raw ADC reading to motor current in centiamps using `P`'s
+/// compile-time board constants.
+#[inline]
+pub fn adc_to_centiamps<P: Platform>(raw: AdcCount) -> CentiAmps {
+    raw.centiamps::<P>()
+}
+
 impl AdcCount {
+    /// Battery voltage in centivolts from `P`'s compile-time ADC reference,
+    /// full-scale count, and voltage divider ratio. Truncates once after
+    /// scaling the pin voltage and saturates at `u16::MAX` centivolts.
+    #[inline]
+    pub fn centivolts<P: Platform>(self) -> CentiVolts {
+        if <P as AdcScale>::VOLTAGE_SATURATES {
+            let raw = (self.0 as u32).min(<P as AdcScale>::VOLTAGE_RAW_MAX);
+            CentiVolts(<P as AdcScale>::VOLTAGE_DIV.apply(raw).min(u16::MAX as i32) as u16)
+        } else {
+            CentiVolts(<P as AdcScale>::VOLTAGE_DIV.apply(self.0 as u32) as u16)
+        }
+    }
+
+    /// Motor current in centiamps from `P`'s compile-time ADC reference,
+    /// full-scale count, offset (mV), and sensitivity (mV/A). Truncates toward
+    /// zero once and saturates to `i16::MIN..=i16::MAX` (0 without a sensor).
+    #[inline]
+    pub fn centiamps<P: Platform>(self) -> CentiAmps {
+        let raw = self.0 as u32;
+        let q = if raw < <P as AdcScale>::CURRENT_NEG_BELOW {
+            <P as AdcScale>::CURRENT_NEG.apply(raw)
+        } else {
+            <P as AdcScale>::CURRENT_POS.apply(raw)
+        };
+        if <P as AdcScale>::CURRENT_SATURATES {
+            CentiAmps(q.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
+        } else {
+            CentiAmps(q as i16)
+        }
+    }
+
     /// Convert a 3.3 V ADC reading (nominally 4095 full scale) to battery
     /// centivolts across the full `u16` input range.
     /// `voltage_divider_x100` is the battery/pin voltage ratio times 100:
@@ -342,5 +671,184 @@ mod tests {
     #[test]
     fn adc_zero_mvperamp_returns_zero() {
         assert_eq!(AdcCount(2048).to_centiamps(498, 0), CentiAmps::ZERO);
+    }
+
+    macro_rules! board {
+        ($name:ident, $div:expr, $mvpa:expr, $off:expr) => {
+            board!($name, $div, $mvpa, $off, 4095, 3300);
+        };
+        ($name:ident, $div:expr, $mvpa:expr, $off:expr, $full:expr, $vref:expr) => {
+            struct $name;
+            impl Platform for $name {
+                const TICK_HZ: u32 = 20_000;
+                const TIMER_HZ: u32 = 2_000_000;
+                const CAPTURE_HZ: u32 = 64_000_000;
+                const GCR_SHIFT: u8 = 7;
+                const VOLTAGE_DIVIDER_X100: u16 = $div;
+                const MILLIVOLT_PER_AMP: u16 = $mvpa;
+                const CURRENT_OFFSET: i16 = $off;
+                const USE_NTC: bool = false;
+                const ADC_FULL_SCALE: u16 = $full;
+                const ADC_VREF_MV: u16 = $vref;
+                const PWM_BASE_PERIOD: u16 = 1999;
+            }
+        };
+    }
+
+    board!(Board1194, 1194, 80, 1600);
+    board!(Neutron, 933, 3, 0);
+    board!(Am32Default, 1100, 20, 0);
+    board!(TwelveS, 2100, 25, 0);
+    board!(IflightF051, 1100, 30, 0);
+    board!(Offset498, 1100, 20, 498);
+    board!(NegOffset, 1100, 20, -100);
+    board!(NoSensor, 1100, 0, 498);
+    board!(ZeroDivider, 0, 20, 0);
+    board!(MaxDivider, u16::MAX, 1, i16::MAX);
+    board!(Adc10Bit3V0, 1100, 20, 0, 1023, 3000);
+
+    #[test]
+    fn mul_shift_covers_common_divisors() {
+        for (a, b, d, x_max) in [
+            (80, 0, 3, 4095),
+            (242, 0, 273, 65535),
+            (11, 0, 15, 65535),
+            (220, -498 * 273, 273 * 20, 65535),
+            (933, 0, 1000, 4095),
+            (1194, 0, 1000, 4095),
+        ] {
+            let f = AffineDiv::new(a, b, d, x_max);
+            for x in 0..=x_max {
+                let want = ((a as i64 * x as i64 + b as i64).div_euclid(d as i64)) as i32;
+                assert_eq!(f.apply(x), want, "a={a} b={b} d={d} x={x}");
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn apply_beyond_proved_domain_asserts() {
+        let f = AffineDiv::new(933, 0, 1000, 4095);
+        assert_eq!(f.apply(4095), 933 * 4095 / 1000);
+        let _ = f.apply(4096);
+    }
+
+    #[test]
+    fn affine_div_matches_division() {
+        // No single u32 multiply-shift is exact for (raw * 80) / 3; the affine
+        // form on raw peels off the integer quotient and is exact across 0..=4095.
+        let f = AffineDiv::new(80, 0, 3, 4095);
+        for raw in 0..=4095 {
+            assert_eq!(f.apply(raw), (raw as i32 * 80) / 3);
+        }
+    }
+
+    fn verify_platform_voltage<P: Platform>() {
+        for raw in 0..=u16::MAX {
+            let expected = AdcCount(raw).to_centivolts(P::VOLTAGE_DIVIDER_X100);
+            assert_eq!(
+                AdcCount(raw).centivolts::<P>(),
+                expected,
+                "cV raw {raw} div {}",
+                P::VOLTAGE_DIVIDER_X100
+            );
+            assert_eq!(super::adc_to_centivolts::<P>(AdcCount(raw)), expected);
+        }
+    }
+
+    fn verify_platform_current<P: Platform>() {
+        for raw in 0..=u16::MAX {
+            let expected = AdcCount(raw).to_centiamps(P::CURRENT_OFFSET, P::MILLIVOLT_PER_AMP);
+            assert_eq!(
+                AdcCount(raw).centiamps::<P>(),
+                expected,
+                "cA raw {raw} mVpA {} off {}",
+                P::MILLIVOLT_PER_AMP,
+                P::CURRENT_OFFSET
+            );
+            assert_eq!(super::adc_to_centiamps::<P>(AdcCount(raw)), expected);
+        }
+    }
+
+    #[test]
+    fn voltage_matches_reference_across_full_adc_range() {
+        verify_platform_voltage::<Board1194>();
+        verify_platform_voltage::<Neutron>();
+        verify_platform_voltage::<Am32Default>();
+        verify_platform_voltage::<TwelveS>();
+        verify_platform_voltage::<IflightF051>();
+        verify_platform_voltage::<Offset498>();
+        verify_platform_voltage::<NoSensor>();
+        verify_platform_voltage::<ZeroDivider>();
+        verify_platform_voltage::<MaxDivider>();
+        verify_platform_voltage::<crate::platform::TestPlatform>();
+    }
+
+    #[test]
+    fn current_matches_reference_across_full_adc_range() {
+        verify_platform_current::<Board1194>();
+        verify_platform_current::<Neutron>();
+        verify_platform_current::<Am32Default>();
+        verify_platform_current::<TwelveS>();
+        verify_platform_current::<IflightF051>();
+        verify_platform_current::<Offset498>();
+        verify_platform_current::<NegOffset>();
+        verify_platform_current::<NoSensor>();
+        verify_platform_current::<MaxDivider>();
+        verify_platform_current::<crate::platform::TestPlatform>();
+    }
+
+    #[test]
+    fn adc_scale_follows_the_platform() {
+        // A 10-bit 3.0 V platform scales from its own ADC_FULL_SCALE and ADC_VREF_MV:
+        // full scale (1023 counts) is 3.000 V at the pin -> 33.00 V (3300 cV) at 11:1.
+        assert_eq!(AdcCount(1023).centivolts::<Adc10Bit3V0>(), CentiVolts(3300));
+        assert_eq!(AdcCount(4095).centivolts::<Am32Default>(), CentiVolts(3630));
+        assert_eq!(AdcCount(1023).centiamps::<Adc10Bit3V0>(), CentiAmps(15000));
+    }
+
+    #[test]
+    fn ntc_linear_segment_matches_reference() {
+        // Verify AffineDiv on the three linear NTC interpolation segments
+        // (200..500, 500..1500, 1500..3000) and the lookup table across 0..=4095.
+        let seg1 = AffineDiv::new(50, -200 * 50, 300, 499);
+        for adc in 200..500u32 {
+            assert_eq!(
+                150 - seg1.apply(adc),
+                150 - (adc as i32 - 200) * 50 / 300,
+                "seg1 adc={adc}"
+            );
+        }
+        let seg2 = AffineDiv::new(60, -500 * 60, 1000, 1499);
+        for adc in 500..1500u32 {
+            assert_eq!(
+                100 - seg2.apply(adc),
+                100 - (adc as i32 - 500) * 60 / 1000,
+                "seg2 adc={adc}"
+            );
+        }
+        let seg3 = AffineDiv::new(40, -1500 * 40, 1500, 2999);
+        for adc in 1500..3000u32 {
+            assert_eq!(
+                40 - seg3.apply(adc),
+                40 - (adc as i32 - 1500) * 40 / 1500,
+                "seg3 adc={adc}"
+            );
+        }
+        for raw in 0..=4095u16 {
+            let adc = ((raw >> 4) as i32) * 16;
+            let expected = if adc < 200 {
+                150
+            } else if adc < 500 {
+                150 - (adc - 200) * 50 / 300
+            } else if adc < 1500 {
+                100 - (adc - 500) * 60 / 1000
+            } else if adc < 3000 {
+                40 - (adc - 1500) * 40 / 1500
+            } else {
+                0
+            } as i16;
+            assert_eq!(crate::ntc::ntc_degrees(raw), DegreesCelsius(expected));
+        }
     }
 }
