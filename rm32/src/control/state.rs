@@ -791,6 +791,7 @@ mod tests {
         assert_eq!(reset, 2000);
     }
 
+    /// Verify that the foreground-published current ceiling caps both requested duty and stall boost.
     #[test]
     fn current_ceiling_has_final_authority_over_command_and_stall_boost() {
         let mut duty = DutyState::default();
@@ -978,6 +979,7 @@ mod tests {
         assert_eq!(d.cycle(), 402);
     }
 
+    /// Verify `compute_setpoint` matches `functions::map` over the full throttle and minimum-duty domain.
     #[test]
     fn m0_setpoint_math_matches_original_map_over_complete_domain() {
         for minimum in 0..=crate::constants::DUTY_SCALE_MAX {
@@ -998,6 +1000,7 @@ mod tests {
         }
     }
 
+    /// Verify sine-start `compute_setpoint` matches AM32's `[137..2047] -> [minimum+40..2000]` map.
     #[test]
     fn sine_start_setpoint_matches_am32_map() {
         for minimum in [0u16, 40, 100, 500] {
@@ -1016,6 +1019,7 @@ mod tests {
         }
     }
 
+    /// Verify `pwm_compare` and `brake_compare` match integer division across supported timer reloads.
     #[test]
     fn m0_pwm_math_matches_original_division_on_all_supported_timers() {
         for arr in [1999, 2665, 7082] {

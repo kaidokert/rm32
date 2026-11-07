@@ -261,8 +261,11 @@ pub trait Commands {
 /// [`SingleWriter`] only where its priority layout makes the plain stores
 /// sound.
 pub trait ModeWriter {
+    /// Apply `event` to `shared`'s `motor_mode`.
     fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent);
+    /// Set or clear the polling-demotion bit on `shared`'s `motor_mode`.
     fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool);
+    /// Increment `shared`'s `zero_crosses` counter by one.
     fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S);
 }
 
@@ -270,14 +273,17 @@ pub trait ModeWriter {
 pub struct AtomicWriter;
 
 impl ModeWriter for AtomicWriter {
+    /// Apply `event` using [`MotorStatus::transition`].
     #[inline(always)]
     fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent) {
         shared.transition(event);
     }
+    /// Update `old_routine` using [`MotorStatus::set_old_routine`].
     #[inline(always)]
     fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool) {
         shared.set_old_routine(v);
     }
+    /// Increment `zero_crosses` using [`MotorStatus::increment_zero_crosses`].
     #[inline(always)]
     fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S) {
         shared.increment_zero_crosses();
@@ -292,30 +298,37 @@ pub struct SingleWriter {
 }
 
 impl SingleWriter {
+    /// Construct a priority-0 single-writer token.
+    ///
     /// # Safety
     ///
     /// For as long as the token lives, the context that uses it must meet
     /// the precondition of [`MotorStatus::transition_isr0`]: no context
     /// that writes `motor_mode` or `zero_crosses` can preempt it, and every
-    /// lower-priority writer uses an update that a preempting store
-    /// invalidates. Single-core only. The port documents why its priority
-    /// layout and core give that.
+    /// lower-priority read-modify-write writer uses an update that a
+    /// preempting store invalidates (plain stores such as
+    /// `set_zero_crosses(0)` have no read phase and are last-writer-wins).
+    /// Single-core only. The port documents why its priority layout and
+    /// core give that.
     pub const unsafe fn new() -> Self {
         Self { _private: () }
     }
 }
 
 impl ModeWriter for SingleWriter {
+    /// Apply `event` using [`MotorStatus::transition_isr0`].
     #[inline(always)]
     fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent) {
         // SAFETY: the token's existence carries the precondition (`new`).
         unsafe { shared.transition_isr0(event) }
     }
+    /// Update `old_routine` using [`MotorStatus::set_old_routine_isr0`].
     #[inline(always)]
     fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool) {
         // SAFETY: as `transition`.
         unsafe { shared.set_old_routine_isr0(v) }
     }
+    /// Increment `zero_crosses` using [`MotorStatus::increment_zero_crosses_isr0`].
     #[inline(always)]
     fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S) {
         // SAFETY: as `transition`.

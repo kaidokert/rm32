@@ -317,7 +317,7 @@ impl EepromConfig {
 
     /// Derive motor configuration from EEPROM settings and board hardware.
     ///
-    /// `default_arr`: PWM timer auto-reload at default 24kHz (port-specific: timer_hz/24000-1)
+    /// `default_arr`: PWM timer auto-reload at default 24kHz (port-specific: CPU_FREQUENCY_MHZ * 1_000_000 / 24000 - 1)
     /// `dead_time`: board dead-time from YAML
     /// `kv_divider`: board KV divider (1=normal, 2=3-cell max, 16=1-2 cell max)
     /// `startup_boost`: board flag for heavy-prop startup boost
@@ -415,6 +415,7 @@ impl Default for EepromConfig {
 mod tests {
     use super::*;
 
+    /// Verify `temp_advance` across legacy 0..=3, finer 10..=42, and fallback EEPROM values.
     #[test]
     fn temp_advance_maps_both_eeprom_formats() {
         let mut cfg = EepromConfig::default();

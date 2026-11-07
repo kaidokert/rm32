@@ -665,8 +665,7 @@ impl crate::shared_comm::MotorStatus for SharedState {
     fn set_stepper_sine(&self, v: bool) {
         SharedState::set_stepper_sine(self, v);
     }
-    // Plain load + store; the caller holds the trait's precondition
-    // (reached only through `SingleWriter`).
+    /// Plain load + store transition for priority-0 `SingleWriter`.
     unsafe fn transition_isr0(&self, event: crate::motor_mode::MotorEvent) {
         let mode = MotorMode::from_u8(self.motor_mode.load(Ordering::Relaxed));
         let new = mode.transition(event);
@@ -679,6 +678,7 @@ impl crate::shared_comm::MotorStatus for SharedState {
             }
         }
     }
+    /// Plain load + store `old_routine` update for priority-0 `SingleWriter`.
     unsafe fn set_old_routine_isr0(&self, v: bool) {
         let mode = MotorMode::from_u8(self.motor_mode.load(Ordering::Relaxed));
         if v && mode.is_running() {
@@ -698,6 +698,7 @@ impl crate::shared_comm::MotorStatus for SharedState {
     fn increment_zero_crosses(&self) {
         self.increment_zero_crosses();
     }
+    /// Plain load + store `zero_crosses` increment for priority-0 `SingleWriter`.
     unsafe fn increment_zero_crosses_isr0(&self) {
         let v = self.zero_crosses.load(Ordering::Relaxed);
         if v < 10000 {
@@ -1211,6 +1212,7 @@ mod tests {
         assert!(Commands::tone_active(&shared));
     }
 
+    /// Verify `SingleWriter` and `AtomicWriter` produce identical `motor_mode` and `zero_crosses` transitions.
     #[test]
     fn single_writer_and_atomic_writer_match_on_mode_and_zero_cross_updates() {
         use crate::motor_mode::MotorEvent;

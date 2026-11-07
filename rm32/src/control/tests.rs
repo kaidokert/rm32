@@ -1470,6 +1470,7 @@ mod tests {
         assert_eq!(comp.enable_calls, 0);
     }
 
+    /// Verify `commutation_timer_expired` produces identical changeover and demotion state under `SingleWriter` and `AtomicWriter`.
     #[test]
     fn isr_commutation_timer_single_writer_matches_atomic_writer_on_shared_state() {
         let single = unsafe { crate::shared_comm::SingleWriter::new() };
@@ -1528,6 +1529,13 @@ mod tests {
             false,
             true,
         );
+        assert_eq!(
+            shared_single.motor_mode(),
+            crate::motor_mode::MotorMode::Running
+        );
+        assert_eq!(shared_single.zero_crosses(), 20);
+        assert_ne!(shared_single.gate_avg(), 0);
+        assert_eq!(comp_single.enable_calls, 1);
         assert_eq!(shared_single.motor_mode(), shared_atomic.motor_mode());
         assert_eq!(shared_single.zero_crosses(), shared_atomic.zero_crosses());
         assert_eq!(shared_single.gate_avg(), shared_atomic.gate_avg());

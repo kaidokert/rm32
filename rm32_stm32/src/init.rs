@@ -33,12 +33,15 @@ where
 ///   the control tick, the frame-processing EXTI and the main loop are
 ///   below it). So nothing that writes those words runs between its load
 ///   and its store.
-/// - The lower-priority writers use read-modify-write updates that a
+/// - Lower-priority read-modify-write writers use updates that a
 ///   preempting store invalidates. M4 (L431, G431): `LDREX`/`STREX`, and
 ///   exception entry and return clear the local exclusive monitor, so a
 ///   preempted `STREX` fails and retries against the stored value. M0
 ///   (G071, F051): no exclusives; the atomics are critical sections with
-///   interrupts masked, so the ISR cannot land inside one.
+///   interrupts masked, so the ISR cannot land inside one. Lower-priority
+///   plain stores (such as `set_zero_crosses(0)`) have no read phase and
+///   are simply last-writer-wins, so they never lose an ISR
+///   read-modify-write update.
 /// - The DShot DMA ISR may outrank the commutation timer (L431
 ///   `adjust_irq_priorities` swaps them for bidirectional telemetry) and
 ///   it writes neither word.
