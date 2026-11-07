@@ -124,11 +124,6 @@ pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
 
     // Timing (main-loop side — ISR timing is in SharedComm)
     pub(crate) timing: TimingState,
-    // Board-level hardware constants (set once from BoardConfig, never change)
-    pub(crate) voltage_divider_x100: u16,
-    pub(crate) millivolt_per_amp: u16,
-    pub(crate) current_offset: i16,
-    pub(crate) use_ntc: bool,
     /// CPU MHz for variable PWM mode 2 scaling
     pub(crate) cpu_mhz: u8,
     pub cell_count: u8,
@@ -192,10 +187,6 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             pid: PidState::with_stall_target(board.stall_protect_interval),
             timing: TimingState::default(),
             timer1_max_arr: chip.timer1_max_arr,
-            voltage_divider_x100: board.voltage_divider_x100,
-            millivolt_per_amp: board.millivolt_per_amp,
-            current_offset: board.current_offset,
-            use_ntc: board.use_ntc,
             cpu_mhz: chip.cpu_mhz,
             cell_count: 0,
             motor_kv: 2000,
@@ -494,10 +485,9 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             // ADC measurements — typed conversions via AdcCount
             let smoothed_v = AdcCount(self.measurements.voltage_filter.update(adc.raw_voltage()));
             let smoothed_c = AdcCount(self.measurements.current_filter.update(adc.raw_current()));
-            self.measurements.battery_voltage = smoothed_v.to_centivolts(self.voltage_divider_x100);
-            self.measurements.actual_current =
-                smoothed_c.to_centiamps(self.current_offset, self.millivolt_per_amp);
-            self.measurements.degrees_celsius = if self.use_ntc {
+            self.measurements.battery_voltage = smoothed_v.centivolts::<P>();
+            self.measurements.actual_current = smoothed_c.centiamps::<P>();
+            self.measurements.degrees_celsius = if P::USE_NTC {
                 crate::ntc::ntc_degrees(adc.raw_temperature())
             } else {
                 adc.calc_temperature(adc.raw_temperature())
@@ -1157,6 +1147,21 @@ mod tests {
 
     #[test]
     fn adc_cutoff_boundaries_preserve_strict_comparison_and_disabled_threshold() {
+        struct TenToOnePlatform;
+        impl crate::platform::Platform for TenToOnePlatform {
+            const TICK_HZ: u32 = 20_000;
+            const TIMER_HZ: u32 = 2_000_000;
+            const CAPTURE_HZ: u32 = 64_000_000;
+            const GCR_SHIFT: u8 = 7;
+            const VOLTAGE_DIVIDER_X100: u16 = 1000;
+            const MILLIVOLT_PER_AMP: u16 = 20;
+            const CURRENT_OFFSET: i16 = 0;
+            const USE_NTC: bool = false;
+            const ADC_FULL_SCALE: u16 = 4095;
+            const ADC_VREF_MV: u16 = 3300;
+            const PWM_BASE_PERIOD: u16 = 1999;
+        }
+
         // A 10:1 divider makes ADC=1365 exactly 11 V; 1229 truncates to 9.90 V.
         for (mode, absolute, raw, should_trip) in [
             (2, 22, 1364, true),
@@ -1168,10 +1173,15 @@ mod tests {
             (1, 0, 1229, false),
             (1, 0, 1230, false),
         ] {
-            let shared = SharedState::new::<crate::platform::TestPlatform>();
+            let shared = SharedState::new::<TenToOnePlatform>();
             shared.set_motor_mode(crate::motor_mode::MotorMode::OldRoutine);
-            let mut main = make_test_main_state();
-            main.voltage_divider_x100 = 1000;
+            let mut main = super::MainState::<TenToOnePlatform>::new(
+                &crate::board::BoardConfig::DEFAULT,
+                ChipParams {
+                    timer1_max_arr: 1999,
+                    cpu_mhz: 64,
+                },
+            );
             main.config.low_voltage_cut_off = mode;
             main.config.absolute_voltage_cutoff = absolute;
             main.cell_count = 3;
@@ -1181,6 +1191,58 @@ mod tests {
             main.tick(&shared, &mut MockAdc::with_raw_voltage(raw), &mut MockTelem);
             assert_eq!(!shared.armed(), should_trip, "mode={mode}, raw={raw}");
         }
+    }
+
+    #[test]
+    fn platform_use_ntc_selects_ntc_table_over_internal_sensor() {
+        struct NtcPlatform;
+        impl crate::platform::Platform for NtcPlatform {
+            const TICK_HZ: u32 = 20_000;
+            const TIMER_HZ: u32 = 2_000_000;
+            const CAPTURE_HZ: u32 = 64_000_000;
+            const GCR_SHIFT: u8 = 7;
+            const VOLTAGE_DIVIDER_X100: u16 = 1100;
+            const MILLIVOLT_PER_AMP: u16 = 20;
+            const CURRENT_OFFSET: i16 = 0;
+            const USE_NTC: bool = true;
+            const ADC_FULL_SCALE: u16 = 4095;
+            const ADC_VREF_MV: u16 = 3300;
+            const PWM_BASE_PERIOD: u16 = 1999;
+        }
+        struct TempAdc(u16);
+        impl crate::hal::Adc for TempAdc {
+            fn start_conversion(&mut self) {}
+            fn raw_voltage(&self) -> u16 {
+                0
+            }
+            fn raw_current(&self) -> u16 {
+                0
+            }
+            fn raw_temperature(&self) -> u16 {
+                self.0
+            }
+            fn calc_temperature(&self, _: u16) -> crate::units::DegreesCelsius {
+                crate::units::DegreesCelsius(25)
+            }
+        }
+
+        let shared_ntc = SharedState::new::<NtcPlatform>();
+        let mut main_ntc = super::MainState::<NtcPlatform>::new(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+        trip_one_khz(&shared_ntc);
+        main_ntc.tick(&shared_ntc, &mut TempAdc(100), &mut MockTelem);
+        assert_eq!(shared_ntc.degrees_celsius(), 150);
+
+        let shared_int = SharedState::new::<crate::platform::TestPlatform>();
+        let mut main_int = make_test_main_state();
+        trip_one_khz(&shared_int);
+        main_int.tick(&shared_int, &mut TempAdc(100), &mut MockTelem);
+        assert_eq!(shared_int.degrees_celsius(), 25);
     }
 
     #[test]
