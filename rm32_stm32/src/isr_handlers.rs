@@ -12,7 +12,7 @@
 //! the live state is split on first entry into three disjoint static cells:
 //!
 //! 1. [`COM_LOCAL`] (`ComIsrState`): `commutation`, `bemf`, `comp`, `interval`,
-//!    `com_timer`, and `phase`.
+//!    `com_timer`, `phase`, and `writer`.
 //!    - Priority-0 handlers (`handle_comp_irq`, `handle_comp`, `handle_tim14`)
 //!      share the same NVIC preemption priority on every MCU and never preempt
 //!      one another, so they borrow `COM_LOCAL` without `cortex_m::interrupt::free`.
@@ -56,6 +56,7 @@ struct ComIsrState<C, IT, CT, PH> {
     interval: IT,
     com_timer: CT,
     phase: PH,
+    writer: rm32::shared_comm::SingleWriter,
 }
 
 struct TickIsrState<P> {
@@ -198,6 +199,7 @@ fn install_staged_isr_state() {
                     interval,
                     com_timer,
                     phase,
+                    writer: state.writer,
                 });
                 TICK_LOCAL.set(TickIsrState {
                     duty: state.duty,
@@ -468,10 +470,18 @@ pub fn handle_tim14() {
         false => rm32::hal::PwmMode::Diode,
         true => rm32::hal::PwmMode::Complementary,
     };
-    rm32::control::isr_logic::commutation_timer_expired::<crate::platform::StmPlatform, _, _, _, _>(
+    rm32::control::isr_logic::commutation_timer_expired::<
+        crate::platform::StmPlatform,
+        _,
+        _,
+        _,
+        _,
+        _,
+    >(
         &mut com.commutation,
         &mut com.bemf,
         shared,
+        &com.writer,
         &mut com.com_timer,
         &mut com.comp,
         &mut com.phase,

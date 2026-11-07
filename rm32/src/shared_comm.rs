@@ -63,9 +63,33 @@ pub trait MotorStatus {
     fn set_old_routine(&self, v: bool);
     fn set_stepper_sine(&self, v: bool);
 
+    /// `transition` as a plain load + store (AM32 assigns the plain
+    /// globals in the commutation ISR). Reach it through [`SingleWriter`].
+    ///
+    /// # Safety
+    ///
+    /// No other context that writes `motor_mode` may run between this
+    /// call's read and its write, and every such context must use an
+    /// update that a store from this call invalidates (a compare-and-swap,
+    /// or a critical section). [`SingleWriter::new`] states where that holds.
+    unsafe fn transition_isr0(&self, event: MotorEvent);
+    /// `set_old_routine` as a plain load + store.
+    ///
+    /// # Safety
+    ///
+    /// As [`MotorStatus::transition_isr0`].
+    unsafe fn set_old_routine_isr0(&self, v: bool);
+
     fn zero_crosses(&self) -> u32;
     fn set_zero_crosses(&self, v: u32);
     fn increment_zero_crosses(&self);
+    /// `increment_zero_crosses` as a plain load + store (AM32
+    /// `if (zero_crosses < 10000) zero_crosses++`).
+    ///
+    /// # Safety
+    ///
+    /// As [`MotorStatus::transition_isr0`], for `zero_crosses`.
+    unsafe fn increment_zero_crosses_isr0(&self);
     fn commutation_interval(&self) -> u32;
     fn set_commutation_interval(&self, v: u32);
     fn e_com_time(&self) -> i32;
@@ -228,6 +252,88 @@ pub trait Commands {
     /// Whether the ISR tone scheduler owns the bridge PWM until its next
     /// sequence transition. Motor output and braking take priority.
     fn tone_active(&self) -> bool;
+}
+
+/// How the commutation ISR writes `motor_mode` and `zero_crosses`.
+///
+/// The ISR is generic over it, so the choice costs nothing at run time.
+/// [`AtomicWriter`] is sound under any interrupt controller; a port uses
+/// [`SingleWriter`] only where its priority layout makes the plain stores
+/// sound.
+pub trait ModeWriter {
+    /// Apply `event` to `shared`'s `motor_mode`.
+    fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent);
+    /// Set or clear the polling-demotion bit on `shared`'s `motor_mode`.
+    fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool);
+    /// Increment `shared`'s `zero_crosses` counter by one.
+    fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S);
+}
+
+/// Atomic read-modify-write updates. The default for every port.
+pub struct AtomicWriter;
+
+impl ModeWriter for AtomicWriter {
+    /// Apply `event` using [`MotorStatus::transition`].
+    #[inline(always)]
+    fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent) {
+        shared.transition(event);
+    }
+    /// Update `old_routine` using [`MotorStatus::set_old_routine`].
+    #[inline(always)]
+    fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool) {
+        shared.set_old_routine(v);
+    }
+    /// Increment `zero_crosses` using [`MotorStatus::increment_zero_crosses`].
+    #[inline(always)]
+    fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S) {
+        shared.increment_zero_crosses();
+    }
+}
+
+/// Zero-sized proof that the context holding it may use the plain-store
+/// `_isr0` updates. Neither `Clone` nor `Copy`: a port mints one, after it
+/// sets interrupt priorities, and hands it to the commutation ISR.
+pub struct SingleWriter {
+    _private: (),
+}
+
+impl SingleWriter {
+    /// Construct a priority-0 single-writer token.
+    ///
+    /// # Safety
+    ///
+    /// For as long as the token lives, the context that uses it must meet
+    /// the precondition of [`MotorStatus::transition_isr0`]: no context
+    /// that writes `motor_mode` or `zero_crosses` can preempt it, and every
+    /// lower-priority read-modify-write writer uses an update that a
+    /// preempting store invalidates (plain stores such as
+    /// `set_zero_crosses(0)` have no read phase and are last-writer-wins).
+    /// Single-core only. The port documents why its priority layout and
+    /// core give that.
+    pub const unsafe fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl ModeWriter for SingleWriter {
+    /// Apply `event` using [`MotorStatus::transition_isr0`].
+    #[inline(always)]
+    fn transition<S: MotorStatus + ?Sized>(&self, shared: &S, event: MotorEvent) {
+        // SAFETY: the token's existence carries the precondition (`new`).
+        unsafe { shared.transition_isr0(event) }
+    }
+    /// Update `old_routine` using [`MotorStatus::set_old_routine_isr0`].
+    #[inline(always)]
+    fn set_old_routine<S: MotorStatus + ?Sized>(&self, shared: &S, v: bool) {
+        // SAFETY: as `transition`.
+        unsafe { shared.set_old_routine_isr0(v) }
+    }
+    /// Increment `zero_crosses` using [`MotorStatus::increment_zero_crosses_isr0`].
+    #[inline(always)]
+    fn increment_zero_crosses<S: MotorStatus + ?Sized>(&self, shared: &S) {
+        // SAFETY: as `transition`.
+        unsafe { shared.increment_zero_crosses_isr0() }
+    }
 }
 
 /// All shared state. Blanket implemented for any type with every group.

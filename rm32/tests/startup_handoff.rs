@@ -559,10 +559,11 @@ fn active_braking_waits_for_stop_and_restarts_consistently() {
         assert_eq!(r.hal.pwm.active.get(), [490; 3]);
         r.log.borrow_mut().clear();
         // Even a callback already pending at the stop cannot replace the brake.
-        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _>(
+        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _, _>(
             &mut r.comm,
             &mut r.bemf,
             &r.shared,
+            &rm32::shared_comm::AtomicWriter,
             &mut r.hal.com,
             &mut r.hal.comp,
             &mut r.hal.phase,
@@ -795,10 +796,11 @@ fn alternate_timer_commutation_reports_microseconds_and_switches_at_one_ms() {
     for _ in 0..6 {
         // Keep the actual measured interval fixed while filling all six slots.
         r.shared.set_old_routine(true);
-        isr_logic::commutation_timer_expired::<AlternatePlatform, _, _, _, _>(
+        isr_logic::commutation_timer_expired::<AlternatePlatform, _, _, _, _, _>(
             &mut r.comm,
             &mut r.bemf,
             &r.shared,
+            &rm32::shared_comm::AtomicWriter,
             &mut r.hal.com,
             &mut r.hal.comp,
             &mut r.hal.phase,
@@ -845,10 +847,11 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
 
         // Commutation timer expiration uses configured comp_pwm.
         r.hal.phase.pwm_mode = opposite;
-        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _>(
+        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _, _>(
             &mut r.comm,
             &mut r.bemf,
             &r.shared,
+            &rm32::shared_comm::AtomicWriter,
             &mut r.hal.com,
             &mut r.hal.comp,
             &mut r.hal.phase,

@@ -57,7 +57,8 @@ impl Sounds {
 
     /// Startup tune: plays BlueJay tune if present in EEPROM, else default 3-note tune.
     ///
-    /// The boot path owns global IRQ state while ISR globals are being initialized.
+    /// Called from boot path with interrupts already disabled. Does not enable
+    /// interrupts on exit — caller controls global IRQ state.
     /// Panics in debug builds if called with interrupts enabled.
     pub fn play_startup(&self, bridge: &mut impl Bridge, sys: &mut impl System) {
         debug_assert!(

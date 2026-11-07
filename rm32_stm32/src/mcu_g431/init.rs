@@ -146,10 +146,13 @@ pub fn init(
         com_timer,
         phase,
     };
+    // SAFETY: priorities set above (TIM1_UP_TIM16 and COMP1_2_3 at level 0); see `single_writer`.
+    let writer = unsafe { crate::init::single_writer() };
     InitResult {
         hal,
         sys,
         adc,
         telem,
+        writer,
     }
 }

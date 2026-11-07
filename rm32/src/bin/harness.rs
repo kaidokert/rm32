@@ -715,10 +715,11 @@ impl Harness {
                         &mut self.hal.interval,
                         &mut self.hal.com_timer,
                     );
-                    isr_logic::commutation_timer_expired::<HarnessPlatform, _, _, _, _>(
+                    isr_logic::commutation_timer_expired::<HarnessPlatform, _, _, _, _, _>(
                         &mut self.commutation,
                         &mut self.bemf,
                         &self.shared,
+                        &rm32::shared_comm::AtomicWriter,
                         &mut self.hal.com_timer,
                         &mut self.hal.comp,
                         &mut self.hal.phase,

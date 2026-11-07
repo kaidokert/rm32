@@ -139,6 +139,14 @@ impl MotorStatus for TestShared {
             self.mode.set(MotorMode::Armed);
         }
     }
+    /// Single-threaded `_isr0` transition delegate.
+    unsafe fn transition_isr0(&self, event: MotorEvent) {
+        self.transition(event);
+    }
+    /// Single-threaded `_isr0` `old_routine` delegate.
+    unsafe fn set_old_routine_isr0(&self, v: bool) {
+        self.set_old_routine(v);
+    }
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses.get()
     }
@@ -150,6 +158,10 @@ impl MotorStatus for TestShared {
         if v < 10000 {
             self.zero_crosses.set(v + 1);
         }
+    }
+    /// Single-threaded `_isr0` `zero_crosses` increment delegate.
+    unsafe fn increment_zero_crosses_isr0(&self) {
+        self.increment_zero_crosses();
     }
     fn commutation_interval(&self) -> u32 {
         self.commutation_interval.get()

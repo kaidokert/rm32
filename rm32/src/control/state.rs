@@ -359,6 +359,31 @@ pub struct Measurements<P: crate::platform::Platform> {
     pub(crate) current_filter: crate::current::CurrentFilter,
 }
 
+impl<P: crate::platform::Platform> Default for Measurements<P> {
+    fn default() -> Self {
+        Self {
+            battery_voltage: Default::default(),
+            actual_current: Default::default(),
+            degrees_celsius: Default::default(),
+            consumed_charge: Default::default(),
+            voltage_filter: Default::default(),
+            current_filter: Default::default(),
+        }
+    }
+}
+impl<P: crate::platform::Platform> Clone for Measurements<P> {
+    fn clone(&self) -> Self {
+        Self {
+            battery_voltage: self.battery_voltage,
+            actual_current: self.actual_current,
+            degrees_celsius: self.degrees_celsius,
+            consumed_charge: self.consumed_charge.clone(),
+            voltage_filter: self.voltage_filter.clone(),
+            current_filter: self.current_filter.clone(),
+        }
+    }
+}
+
 impl<P: crate::platform::Platform> Measurements<P> {
     /// Consumed charge in whole mAh, saturated to the KISS telemetry range.
     pub fn consumed_milliamp_hours(&self) -> u16 {
@@ -387,31 +412,6 @@ impl<P: crate::platform::Platform> Measurements<P> {
     /// Read temperature in degrees Celsius.
     pub fn degrees_celsius(&self) -> crate::units::DegreesCelsius {
         self.degrees_celsius
-    }
-}
-
-impl<P: crate::platform::Platform> Default for Measurements<P> {
-    fn default() -> Self {
-        Self {
-            battery_voltage: Default::default(),
-            actual_current: Default::default(),
-            degrees_celsius: Default::default(),
-            consumed_charge: Default::default(),
-            voltage_filter: Default::default(),
-            current_filter: Default::default(),
-        }
-    }
-}
-impl<P: crate::platform::Platform> Clone for Measurements<P> {
-    fn clone(&self) -> Self {
-        Self {
-            battery_voltage: self.battery_voltage,
-            actual_current: self.actual_current,
-            degrees_celsius: self.degrees_celsius,
-            consumed_charge: self.consumed_charge.clone(),
-            voltage_filter: self.voltage_filter.clone(),
-            current_filter: self.current_filter.clone(),
-        }
     }
 }
 
@@ -791,6 +791,25 @@ mod tests {
         assert_eq!(reset, 2000);
     }
 
+    /// Verify that the foreground-published current ceiling caps both requested duty and stall boost.
+    #[test]
+    fn current_ceiling_has_final_authority_over_command_and_stall_boost() {
+        let mut duty = DutyState::default();
+        duty.cycle = 1800;
+
+        // A large requested duty plus positive stall boost cannot exceed the
+        // current controller's foreground-published ceiling.
+        duty.clamp_ceilings(300, 1900, 1250);
+        assert_eq!(duty.cycle, 1250);
+        assert_eq!(duty.maximum, 1900);
+
+        // A later high command cannot silently undo the same ceiling; only
+        // the main current policy may publish a different value.
+        duty.cycle = 2000;
+        duty.clamp_ceilings(150, 2000, 1250);
+        assert_eq!(duty.cycle, 1250);
+    }
+
     /// Mirrors C: "tenKhzRoutine stall protection PID"
     /// C setup: stallPid.Kp=1, commutation_interval=8000, target=6500,
     ///          stall_protection_adjust=0
@@ -879,19 +898,6 @@ mod tests {
     }
 
     #[test]
-    fn desync_kick_down_caps_ramp_origin_at_half_startup_duty() {
-        let mut duty = DutyState::default();
-        duty.set_duty_limits(5, 201, 300);
-        duty.set_last(900);
-        duty.kick_down();
-        assert_eq!(duty.last(), 100);
-
-        duty.set_last(50);
-        duty.kick_down();
-        assert_eq!(duty.last(), 50);
-    }
-
-    #[test]
     fn apply_dead_time_override_shifts_all_thresholds() {
         let mut d = DutyState::default();
         d.set_duty_limits(5, 120, 200);
@@ -971,6 +977,64 @@ mod tests {
         );
 
         assert_eq!(d.cycle(), 402);
+    }
+
+    /// Verify `compute_setpoint` matches `functions::map` over the full throttle and minimum-duty domain.
+    #[test]
+    fn m0_setpoint_math_matches_original_map_over_complete_domain() {
+        for minimum in 0..=crate::constants::DUTY_SCALE_MAX {
+            let mut duty = DutyState::default();
+            duty.set_duty_limits(minimum, 0, crate::constants::DUTY_SCALE_MAX);
+            for input in
+                crate::constants::THROTTLE_MIN_SIGNAL..=crate::constants::DSHOT_MAX_THROTTLE
+            {
+                let expected = crate::functions::map(
+                    input as i32,
+                    crate::constants::THROTTLE_MIN_SIGNAL as i32,
+                    crate::constants::DSHOT_MAX_THROTTLE as i32,
+                    minimum as i32,
+                    crate::constants::DUTY_SCALE_MAX as i32,
+                ) as u16;
+                assert_eq!(duty.compute_setpoint(input, u32::MAX, 0, false), expected);
+            }
+        }
+    }
+
+    /// Verify sine-start `compute_setpoint` matches AM32's `[137..2047] -> [minimum+40..2000]` map.
+    #[test]
+    fn sine_start_setpoint_matches_am32_map() {
+        for minimum in [0u16, 40, 100, 500] {
+            let mut duty = DutyState::default();
+            duty.set_duty_limits(minimum, 0, crate::constants::DUTY_SCALE_MAX);
+            for input in 0..=crate::constants::DSHOT_MAX_THROTTLE {
+                let expected =
+                    crate::functions::map(input as i32, 137, 2047, minimum as i32 + 40, 2000)
+                        as u16;
+                assert_eq!(
+                    duty.compute_setpoint(input, u32::MAX, 0, true),
+                    expected,
+                    "in={input}"
+                );
+            }
+        }
+    }
+
+    /// Verify `pwm_compare` and `brake_compare` match integer division across supported timer reloads.
+    #[test]
+    fn m0_pwm_math_matches_original_division_on_all_supported_timers() {
+        for arr in [1999, 2665, 7082] {
+            let mut duty = DutyState::default();
+            for cycle in 0..=crate::constants::DUTY_SCALE_MAX {
+                duty.set_cycle(cycle);
+                let expected = (cycle as u32 * arr as u32 / 2000 + 1) as u16;
+                assert_eq!(duty.pwm_compare(arr), expected);
+            }
+            for strength in 0..=10 {
+                let scaled = strength as u32 * crate::constants::BRAKE_STRENGTH_SCALE;
+                let expected = arr.saturating_sub((scaled * arr as u32 / 2000) as u16);
+                assert_eq!(DutyState::brake_compare(strength, arr), expected);
+            }
+        }
     }
 
     // --- ProtectionState tests ---
@@ -1236,5 +1300,18 @@ mod tests {
             430,
             "fast commutation should apply 3x multiplier"
         );
+    }
+
+    #[test]
+    fn desync_kick_down_caps_ramp_origin_at_half_startup_duty() {
+        let mut duty = DutyState::default();
+        duty.set_duty_limits(5, 201, 300);
+        duty.set_last(900);
+        duty.kick_down();
+        assert_eq!(duty.last(), 100);
+
+        duty.set_last(50);
+        duty.kick_down();
+        assert_eq!(duty.last(), 50);
     }
 }

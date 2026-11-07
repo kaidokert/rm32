@@ -665,6 +665,30 @@ impl crate::shared_comm::MotorStatus for SharedState {
     fn set_stepper_sine(&self, v: bool) {
         SharedState::set_stepper_sine(self, v);
     }
+    /// Plain load + store transition for priority-0 `SingleWriter`.
+    unsafe fn transition_isr0(&self, event: crate::motor_mode::MotorEvent) {
+        let mode = MotorMode::from_u8(self.motor_mode.load(Ordering::Relaxed));
+        let new = mode.transition(event);
+        if new != mode {
+            self.motor_mode.store(new as u8, Ordering::Release);
+            #[cfg(test)]
+            {
+                self.mode_transition_count.fetch_add(1, REL);
+                self.last_transition_from.store(mode as u8, REL);
+            }
+        }
+    }
+    /// Plain load + store `old_routine` update for priority-0 `SingleWriter`.
+    unsafe fn set_old_routine_isr0(&self, v: bool) {
+        let mode = MotorMode::from_u8(self.motor_mode.load(Ordering::Relaxed));
+        if v && mode.is_running() {
+            self.motor_mode
+                .store(MotorMode::OldRoutine as u8, Ordering::Release);
+        } else if !v && mode.is_old_routine() {
+            self.motor_mode
+                .store(MotorMode::Running as u8, Ordering::Release);
+        }
+    }
     fn zero_crosses(&self) -> u32 {
         self.zero_crosses()
     }
@@ -673,6 +697,13 @@ impl crate::shared_comm::MotorStatus for SharedState {
     }
     fn increment_zero_crosses(&self) {
         self.increment_zero_crosses();
+    }
+    /// Plain load + store `zero_crosses` increment for priority-0 `SingleWriter`.
+    unsafe fn increment_zero_crosses_isr0(&self) {
+        let v = self.zero_crosses.load(Ordering::Relaxed);
+        if v < 10000 {
+            self.zero_crosses.store(v + 1, Ordering::Release);
+        }
     }
     fn commutation_interval(&self) -> u32 {
         self.commutation_interval()
@@ -1179,5 +1210,65 @@ mod tests {
         assert!(Commands::one_khz_counter_check_and_reset(&shared, 1));
         shared.set_tone_active(true);
         assert!(Commands::tone_active(&shared));
+    }
+
+    /// Verify `SingleWriter` and `AtomicWriter` produce identical `motor_mode` and `zero_crosses` transitions.
+    #[test]
+    fn single_writer_and_atomic_writer_match_on_mode_and_zero_cross_updates() {
+        use crate::motor_mode::MotorEvent;
+        use crate::shared_comm::{AtomicWriter, ModeWriter as _, SingleWriter};
+
+        let shared_atomic = SharedState::new::<crate::platform::TestPlatform>();
+        let shared_single = SharedState::new::<crate::platform::TestPlatform>();
+        let single = unsafe { SingleWriter::new() };
+
+        // Start in OldRoutine and promote via BemfLocked.
+        shared_atomic.set_motor_mode(MotorMode::OldRoutine);
+        shared_single.set_motor_mode(MotorMode::OldRoutine);
+        AtomicWriter.transition(&shared_atomic, MotorEvent::BemfLocked);
+        single.transition(&shared_single, MotorEvent::BemfLocked);
+        assert_eq!(shared_atomic.motor_mode(), MotorMode::Running);
+        assert_eq!(shared_single.motor_mode(), MotorMode::Running);
+        assert_eq!(
+            shared_single.mode_transition_count(),
+            shared_atomic.mode_transition_count()
+        );
+        assert_eq!(
+            shared_single.last_transition_from(),
+            shared_atomic.last_transition_from()
+        );
+
+        // No-op transition when already Running does not bump count.
+        single.transition(&shared_single, MotorEvent::BemfLocked);
+        assert_eq!(shared_single.mode_transition_count(), 1);
+
+        // Demote to OldRoutine and promote back to Running via set_old_routine.
+        AtomicWriter.set_old_routine(&shared_atomic, true);
+        single.set_old_routine(&shared_single, true);
+        assert_eq!(shared_atomic.motor_mode(), MotorMode::OldRoutine);
+        assert_eq!(shared_single.motor_mode(), MotorMode::OldRoutine);
+
+        AtomicWriter.set_old_routine(&shared_atomic, false);
+        single.set_old_routine(&shared_single, false);
+        assert_eq!(shared_atomic.motor_mode(), MotorMode::Running);
+        assert_eq!(shared_single.motor_mode(), MotorMode::Running);
+
+        // set_old_routine is a no-op when not running.
+        shared_single.set_motor_mode(MotorMode::Armed);
+        single.set_old_routine(&shared_single, true);
+        assert_eq!(shared_single.motor_mode(), MotorMode::Armed);
+
+        // increment_zero_crosses increments below 10_000 and saturates at 10_000.
+        shared_atomic.set_zero_crosses(9_999);
+        shared_single.set_zero_crosses(9_999);
+        AtomicWriter.increment_zero_crosses(&shared_atomic);
+        single.increment_zero_crosses(&shared_single);
+        assert_eq!(shared_atomic.zero_crosses(), 10_000);
+        assert_eq!(shared_single.zero_crosses(), 10_000);
+
+        AtomicWriter.increment_zero_crosses(&shared_atomic);
+        single.increment_zero_crosses(&shared_single);
+        assert_eq!(shared_atomic.zero_crosses(), 10_000);
+        assert_eq!(shared_single.zero_crosses(), 10_000);
     }
 }
