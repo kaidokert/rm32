@@ -75,6 +75,7 @@ pub struct AdcCount(pub u16);
 /// full `u16` range, not only a 12-bit ADC range.
 const ADC_MAX: u32 = u16::MAX as u32;
 
+/// Greatest common divisor of `a` and `b` via Euclid's algorithm.
 const fn gcd_u64(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         let r = a % b;
@@ -166,6 +167,8 @@ impl MulShift {
         }
     }
 
+    /// Verify that `self.apply(x) + self.sub` equals `floor((alpha * x + r) / d)`
+    /// for every `x` in `0..=x_max`.
     const fn exact(self, alpha: i32, r: i32, d: i32, x_max: u32) -> bool {
         let mut x = 0;
         while x <= x_max {
@@ -178,6 +181,7 @@ impl MulShift {
         true
     }
 
+    /// Evaluate `((x * mul + add) >> shift) - sub`.
     #[inline(always)]
     const fn apply(self, x: u32) -> i32 {
         let q = if self.wide {
@@ -709,11 +713,14 @@ mod tests {
 
     #[test]
     fn mul_shift_covers_common_divisors() {
+        assert_eq!(gcd_u64(3_300 * 1_100, 4_095 * 1_000), 15_000);
+        assert_eq!(gcd_u64(0, 42), 42);
         for (a, b, d, x_max) in [
             (80, 0, 3, 4095),
             (242, 0, 273, 65535),
             (11, 0, 15, 65535),
             (220, -498 * 273, 273 * 20, 65535),
+            (4400, -450_450, 3549, 65535),
             (933, 0, 1000, 4095),
             (1194, 0, 1000, 4095),
         ] {
@@ -725,6 +732,7 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic]
     fn apply_beyond_proved_domain_asserts() {
@@ -743,6 +751,7 @@ mod tests {
         }
     }
 
+    /// Check `AdcCount::centivolts::<P>` and `adc_to_centivolts::<P>` across `0..=u16::MAX`.
     fn verify_platform_voltage<P: Platform>() {
         for raw in 0..=u16::MAX {
             let expected = AdcCount(raw).to_centivolts(P::VOLTAGE_DIVIDER_X100);
@@ -756,6 +765,7 @@ mod tests {
         }
     }
 
+    /// Check `AdcCount::centiamps::<P>` and `adc_to_centiamps::<P>` across `0..=u16::MAX`.
     fn verify_platform_current<P: Platform>() {
         for raw in 0..=u16::MAX {
             let expected = AdcCount(raw).to_centiamps(P::CURRENT_OFFSET, P::MILLIVOLT_PER_AMP);
