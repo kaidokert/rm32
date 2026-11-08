@@ -909,17 +909,37 @@ mod am32_parity_tests {
     }
 
     /// Verify `AdcCount::centiamps::<P>` tracks AM32's C current formula within
-    /// the bounded per-count `3300/4095` vs `3300/41` truncation difference.
+    /// the bounded per-count `3300/4095` vs `3300/41` truncation difference
+    /// across all 4,096 12-bit counts, including negative-offset and saturated
+    /// regions.
     fn current_within<P: Platform>() {
         for raw in 0..=4095u16 {
             let am = am32_current(raw, P::CURRENT_OFFSET, P::MILLIVOLT_PER_AMP);
             let ours = AdcCount(raw).centiamps::<P>().0 as i32;
-            if ours < 0 || ours >= i16::MAX as i32 {
-                continue;
-            }
             // The per-count gap (3300 * 100 / 4095 - 3300 / 41 = 0.098) over
             // raw counts, plus one for the two truncations.
             let slack = raw as i32 / (10 * P::MILLIVOLT_PER_AMP as i32) + 1;
+            if ours < 0 {
+                let signed_am = (raw as i32 * 3300 / 41 - P::CURRENT_OFFSET as i32 * 100)
+                    / P::MILLIVOLT_PER_AMP as i32;
+                assert_eq!(
+                    am, 0,
+                    "raw {raw}: negative ours {ours} must clamp to 0 in AM32"
+                );
+                assert!(
+                    ours >= signed_am && ours - signed_am <= slack,
+                    "raw {raw}: ours {ours} signed AM32 {signed_am}"
+                );
+                continue;
+            }
+            if ours >= i16::MAX as i32 {
+                assert_eq!(ours, i16::MAX as i32);
+                assert!(
+                    am + slack >= i16::MAX as i32,
+                    "raw {raw}: saturated ours {ours} must be within slack {slack} of i16::MAX in AM32 ({am})"
+                );
+                continue;
+            }
             assert!(
                 ours >= am && ours - am <= slack,
                 "raw {raw}: ours {ours} AM32 {am}"
@@ -927,6 +947,7 @@ mod am32_parity_tests {
         }
     }
 
+    /// Verify current conversion parity against AM32 across representative boards.
     #[test]
     fn current_tracks_am32_per_count_gap() {
         current_within::<Neutron>();
@@ -934,6 +955,7 @@ mod am32_parity_tests {
         current_within::<Am32Default>();
     }
 
+    /// Verify voltage conversion stays within 1 centivolt of AM32 across all 12-bit counts.
     #[test]
     fn voltage_tracks_am32_within_one_centivolt() {
         for raw in 0..=4095u16 {
