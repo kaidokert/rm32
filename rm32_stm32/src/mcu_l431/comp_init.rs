@@ -1,15 +1,18 @@
 //! COMP2 initialization for BEMF zero-cross detection on STM32L431.
 //!
-//! L431 uses COMP2:
+//! L431 uses COMP2 (Vimdrones L4_B / Neutron L4_N):
 //!   INP: PB4 (IO1)
 //!   INM: switched per step — PB7 (IO2), PA5 (IO5), PA4 (IO4)
 //!   EXTI line 22
+//!
+//! Initial INMSEL value comes from board YAML via `BoardExt.bemf_pins`.
 
 use crate::pac::{COMP, EXTI, GPIOA, GPIOB, RCC};
 
 /// Initialize COMP2 for BEMF sensing on L431.
 ///
-/// `initial_phase` is packed as `(INMESEL << 8) | INMSEL`.
+/// `initial_phase` is the packed INMSEL value for the initial comparator
+/// input (typically phase_a). Encoding: `(inmesel << 8) | inmsel_3bit`.
 pub fn init_comp2(initial_phase: u32) {
     let rcc = unsafe { &*RCC::ptr() };
     let gpioa = unsafe { &*GPIOA::ptr() };
@@ -24,6 +27,8 @@ pub fn init_comp2(initial_phase: u32) {
         rcc.ahb2enr
             .modify(|_, w| w.gpioaen().set_bit().gpioben().set_bit());
         // COMP registers are clocked through SYSCFG on STM32L4.
+        // L4: COMP shares its register clock with SYSCFG. Without SYSCFGEN,
+        // writes to COMP_CSR are silently dropped (readback = 0).
         rcc.apb2enr.modify(|_, w| w.syscfgen().set_bit());
 
         // PA4, PA5 as analog (INM inputs)
@@ -35,12 +40,14 @@ pub fn init_comp2(initial_phase: u32) {
             .moder
             .modify(|_, w| w.moder4().bits(0b11).moder7().bits(0b11));
 
-        let csr = (inmsel as u32) << 4
-            | (0b00u32) << 7 // INPSEL=IO1/PB4
-            | (0b00u32) << 2 // high speed
-            | 1u32
-            | (inmesel as u32) << 25;
-        comp.comp2_csr.write(|w| w.bits(csr));
+        // Configure COMP2: INMSEL + INMESEL from board config, INP=IO1(PB4)
+        // PAC write() resets all bits, so we must set INMESEL via raw bits.
+        let csr_val = (inmsel as u32) << 4    // INMSEL[2:0] at bits 6:4
+            | (0b00u32) << 7                   // INPSEL=IO1(PB4) at bit 7
+            | (0b00u32) << 2                   // PWRMODE=high-speed at bits 3:2
+            | (1u32) << 0                      // EN
+            | (inmesel as u32) << 25; // INMESEL[1:0] at bits 26:25
+        comp.comp2_csr.write(|w| w.bits(csr_val));
 
         // Wait for startup (~5us at 80MHz)
         cortex_m::asm::delay(400);

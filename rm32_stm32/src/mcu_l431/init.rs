@@ -26,6 +26,9 @@ pub fn init(
         "PWR VOS1",
     );
 
+    // PRFTEN: deliberately ON, a documented divergence from AM32 (which runs
+    // prefetch off). PRFTEN off + 4WS makes hot-ISR fetch timing depend on
+    // code alignment, so any rebuild moves marginal timing.
     dp.FLASH.acr.write(|w| unsafe {
         w.latency()
             .bits(4)
@@ -184,7 +187,7 @@ pub fn init(
     let pwm = super::pwm::Pwm::new();
     let phase = G0APhaseDriver::new(); // same pins for L4_N
 
-    // COMP2 init
+    // COMP2 init — use phase_a from board config for initial INMSEL
     super::comp_init::init_comp2(bemf_pins.phase_a);
     let comp = super::comparator::new_comparator(bemf_pins);
     let interval = Tim2Interval::new();
@@ -208,7 +211,10 @@ pub fn init(
     const CONTROL_RELOAD: u16 =
         (TIM6_HZ / <crate::platform::StmPlatform as rm32::platform::Platform>::TICK_HZ - 1) as u16;
     // TIM6: 1 MHz tick (PSC=79), reload derived from StmPlatform::TICK_HZ (ARR=49 -> 20 kHz).
-    // TIM7: AM32 peripherals.c:159 — free-running 1 MHz 16-bit counter (PSC=79, ARR=0xFFFF, CEN).
+    // AM32 writes ARR = 1000000/LOOP_FREQUENCY_HZ = 50, a 51-tick period and so
+    // 19.6 kHz, not its stated 20 kHz. Not carried: every tick-derived time here
+    // assumes TICK_HZ.
+    // TIM7: AM32 peripherals.c:159, free-running 1 MHz 16-bit counter (PSC=79, ARR=0xFFFF, CEN).
     unsafe {
         rcc_pac
             .apb1enr1

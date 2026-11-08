@@ -44,14 +44,17 @@ enum BemfPinsYaml {
 
 #[derive(Deserialize)]
 struct BoardYaml {
-    /// Reject the legacy x10 key instead of silently selecting a default.
-    #[serde(default)]
-    voltage_divider: Option<u16>,
     name: String,
     mcu: String,
     dead_time: u8,
+    /// Bus divider as its true ratio x100 (11:1 = 1100). Battery voltage is
+    /// centivolts everywhere; AM32's VOLTAGE_DIVIDER 110 is written 1100.
     #[serde(default = "default_voltage_divider_x100")]
     voltage_divider_x100: u16,
+    /// Retired key: AM32 boards wrote ratio x10, custom boards ratio x100
+    /// under the same name. Present = build error (see main()).
+    #[serde(default)]
+    voltage_divider: Option<u16>,
     #[serde(default = "default_mv_per_amp")]
     millivolt_per_amp: u16,
     #[serde(default)]
@@ -292,9 +295,11 @@ fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
     let dest = Path::new(&out_dir).join("board_config.rs");
 
-    println!("cargo:rerun-if-env-changed=BOARD");
-
     // Determine board YAML path
+    // Unconditional: printed only when BOARD was set, a default-board
+    // build never registered the env var, so a later `BOARD=...` build
+    // silently reused the cached default-board config and memory.x.
+    println!("cargo:rerun-if-env-changed=BOARD");
     let board_path = if let Ok(path) = env::var("BOARD") {
         path
     } else {
@@ -319,10 +324,14 @@ fn main() {
         .unwrap_or_else(|e| panic!("Failed to read board config '{}': {}", board_path, e));
     let board: BoardYaml = serde_yaml::from_str(&yaml)
         .unwrap_or_else(|e| panic!("Failed to parse board config '{}': {}", board_path, e));
-    assert!(
-        board.voltage_divider.is_none(),
-        "voltage_divider was replaced by voltage_divider_x100; multiply the old x10 value by 10"
-    );
+    if let Some(v) = board.voltage_divider {
+        panic!(
+            "Board config '{}' uses the retired key voltage_divider: {} — write \
+             voltage_divider_x100 as the true ratio x100 (AM32 VOLTAGE_DIVIDER 110 = \
+             11:1 -> 1100)",
+            board_path, v
+        );
+    }
     assert!(
         board.voltage_divider_x100 > 0,
         "voltage_divider_x100 must be positive"
@@ -440,6 +449,9 @@ pub const BOARD_EXT: rm32_stm32::board_ext::BoardExt = rm32_stm32::board_ext::Bo
     );
     fs::write(Path::new(&out_dir).join("board_platform.rs"), platform).unwrap();
 
+    // Library-side cfg for PWM/enable-style bridges: lets the commutation
+    // path compile out the writer the board cannot use (the sequential
+    // writer would otherwise stay on the COM ISR's static longest path).
     println!("cargo::rustc-check-cfg=cfg(rm32_bridge_enable)");
     if board.bridge_enable {
         println!("cargo:rustc-cfg=rm32_bridge_enable");
@@ -449,7 +461,8 @@ pub const BOARD_EXT: rm32_stm32::board_ext::BoardExt = rm32_stm32::board_ext::Bo
     // 0x08000000, app at 0x08001000, EEPROM page reserved at the top
     // of the app region, matching each AM32 target's EEPROM_START_ADD).
     // Emitted into OUT_DIR so the one linked always matches the MCU
-    // being built.
+    // being built; previously a single L431 file (58K/48K) linked into
+    // all four families — an 8K-RAM F051 build would claim 48K.
     let (flash_app_kb, ram_kb) = match board.mcu.as_str() {
         "stm32l431" => (58, 48), // EEPROM @ 0x0800F800; contiguous SRAM1 only
         "stm32g071" => (58, 36), // EEPROM @ 0x0800F800

@@ -315,6 +315,9 @@ enum Chip {
     G071,
     L431,
     G431,
+    /// AM32 `HARDWARE_GROUP_G4_D` (`sequre_g431.yaml`): phase A on COMP2
+    /// (`PA5/PA3`), phases B and C on COMP1 (`PA4/PA1` and `PA0/PA1`).
+    G431GroupD,
 }
 impl Chip {
     fn codes(self) -> [u32; 3] {
@@ -323,6 +326,7 @@ impl Chip {
             Self::G071 => [3, 5, 7],
             Self::L431 => [0x103, 0x205, 0x307],
             Self::G431 => [(0x24 << 16), (0x38 << 16) | 1, (0x58 << 16) | 1],
+            Self::G431GroupD => [(0x64 << 16) | 1, (0x60 << 16), (0x70 << 16)],
         }
     }
     fn sensor(self) -> Box<dyn BemfSensor> {
@@ -331,7 +335,7 @@ impl Chip {
             Self::F051 => Box::new(f051::new_comparator(p)),
             Self::G071 => Box::new(g071::new_comparator(p)),
             Self::L431 => Box::new(l431::new_comparator(p)),
-            Self::G431 => Box::new(g431::new_comparator(p)),
+            Self::G431 | Self::G431GroupD => Box::new(g431::new_comparator(p)),
         }
     }
     fn line(self, phase: usize) -> u32 {
@@ -339,8 +343,8 @@ impl Chip {
             Self::F051 => 21,
             Self::G071 => 18,
             Self::L431 => 22,
-            Self::G431 => {
-                if phase == 0 {
+            Self::G431 | Self::G431GroupD => {
+                if (self.codes()[phase] & 1) == 0 {
                     21
                 } else {
                     22
@@ -349,7 +353,7 @@ impl Chip {
         }
     }
     fn lines(self) -> u32 {
-        if matches!(self, Self::G431) {
+        if matches!(self, Self::G431 | Self::G431GroupD) {
             (1 << 21) | (1 << 22)
         } else {
             self.line(0)
@@ -359,8 +363,8 @@ impl Chip {
         let comp = match self {
             Self::F051 => &BANK.csr,
             Self::G071 | Self::L431 => &BANK.comp2_csr,
-            Self::G431 => {
-                if phase == 0 {
+            Self::G431 | Self::G431GroupD => {
+                if (self.codes()[phase] & 1) == 0 {
                     &BANK.c1csr
                 } else {
                     &BANK.c2csr
@@ -379,7 +383,7 @@ impl Chip {
             Self::F051 => (SENTINEL & 0xffff_0000) | code,
             Self::G071 => (SENTINEL & !0x3f0) | (code << 4) | 0x200,
             Self::L431 => (SENTINEL & !0x0600_0070) | ((code & 7) << 4) | ((code >> 8) << 25),
-            Self::G431 => (SENTINEL & !0x7c) | (code >> 16) | 1,
+            Self::G431 | Self::G431GroupD => (SENTINEL & !0x7c) | (code >> 16) | 1,
         }
     }
     fn pending_regs(self) -> Vec<&'static Reg> {
@@ -409,12 +413,13 @@ fn check_routing(chip: Chip) {
                 }
                 sensor.select_phase(selection, rising);
                 // G431's adapter compensates for its own comparator polarity.
-                let r = if matches!(chip, Chip::G431) == rising {
+                let is_g431 = matches!(chip, Chip::G431 | Chip::G431GroupD);
+                let r = if is_g431 == rising {
                     initial | chip.line(phase)
                 } else {
                     OTHER_LINE
                 };
-                let f = if matches!(chip, Chip::G431) == rising {
+                let f = if is_g431 == rising {
                     OTHER_LINE
                 } else {
                     initial | chip.line(phase)
@@ -434,8 +439,12 @@ fn check_routing(chip: Chip) {
                 for level in [false, true] {
                     comp.seed(if level { 1 << 30 } else { 0 });
                     // Opposite level on the inactive G431 comparator catches wrong routing.
-                    if matches!(chip, Chip::G431) {
-                        let other = if phase == 0 { &BANK.c2csr } else { &BANK.c1csr };
+                    if is_g431 {
+                        let other = if (chip.codes()[phase] & 1) == 0 {
+                            &BANK.c2csr
+                        } else {
+                            &BANK.c1csr
+                        };
                         other.seed(if level { 0 } else { 1 << 30 });
                     }
                     assert_eq!(sensor.level(), level);
@@ -517,6 +526,7 @@ fn l431_phase_selection_and_polarity() {
 #[test]
 fn g431_phase_selection_and_polarity() {
     check_routing(Chip::G431);
+    check_routing(Chip::G431GroupD);
 }
 #[test]
 fn f051_irq_lifecycle() {
@@ -533,6 +543,7 @@ fn l431_irq_lifecycle() {
 #[test]
 fn g431_irq_lifecycle() {
     check_irq(Chip::G431);
+    check_irq(Chip::G431GroupD);
 }
 
 #[test]

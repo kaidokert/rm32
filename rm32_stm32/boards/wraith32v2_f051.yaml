@@ -4,6 +4,6 @@ dead_time: 45
 current_adc_channel: 6
 voltage_adc_channel: 3
 bemf_pins:
-  phase_a: PA4
-  phase_b: PA0
-  phase_c: PA5
+  phase_a: PA4   # COMP1 INSEL=5 (IO2)
+  phase_b: PA0   # COMP1 INSEL=4 (IO1)
+  phase_c: PA5   # COMP1 INSEL=6 (IO3)

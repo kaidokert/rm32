@@ -2,6 +2,6 @@ name: "Mamba F55 G071"
 mcu: stm32g071
 dead_time: 40
 bemf_pins:
-  phase_a: PB3
-  phase_b: PB7
-  phase_c: PA2
+  phase_a: PB3   # COMP2 INM IO1
+  phase_b: PB7   # COMP2 INM IO2
+  phase_c: PA2   # COMP2 INM IO3

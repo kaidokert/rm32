@@ -1,7 +1,7 @@
 name: "SISKIN PA2"
 mcu: stm32f051
 dead_time: 45
-voltage_divider_x100: 1100
+voltage_divider_x100: 1100  # AM32 VOLTAGE_DIVIDER 110 (ratio x10)
 millivolt_per_amp: 20
 current_offset: 0
 current_adc_channel: 6
@@ -9,6 +9,6 @@ voltage_adc_channel: 3
 stall_protect_interval: 6500
 min_bemf_counts: 3
 bemf_pins:
-  phase_a: PA4
-  phase_b: PA0
-  phase_c: PA5
+  phase_a: PA4   # COMP1 INSEL=5 (IO2)
+  phase_b: PA0   # COMP1 INSEL=4 (IO1)
+  phase_c: PA5   # COMP1 INSEL=6 (IO3)
