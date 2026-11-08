@@ -2,7 +2,7 @@
 //!
 //! Uses `embedded-hal` 1.0 traits where applicable. ESC-specific traits
 //! are defined here for things embedded-hal doesn't cover (comparator,
-//! phase output, commutation timer, etc).
+//! commutation timer, etc; the power stage is `crate::bridge::Bridge`).
 //!
 //! Implementations are provided by platform crates (rm32_stm32, rm32_std).
 
@@ -11,10 +11,33 @@ pub use embedded_hal::delay::DelayNs;
 pub use embedded_hal::digital::InputPin;
 pub use embedded_hal::pwm::SetDutyCycle;
 
-/// The combined power-stage interface.
+/// The power stage (gate legs + PWM timer): see [`crate::bridge`].
 pub use crate::bridge::Bridge;
 
-/// A motor phase, independent of the port's comparator mux encoding.
+/// The gate legs (the half of [`Bridge`] that commutates): AM32 `comStep` / `allOff` / `fullBrake` / `allpwm` /
+/// `proportionalBrake`. Semantic methods, not raw leg roles, so harness
+/// counters and reverse rotation stay meaningful. Code that only commutates
+/// (the commutation-timer path) asks for this much.
+pub trait PhaseOutput {
+    /// Drive commutation step `step` (1..=6, [`crate::bridge::step_legs`])
+    /// with the driven leg complementary or diode ([`PwmMode`]); any
+    /// other step leaves the outputs unchanged.
+    fn com_step(&mut self, step: u8, mode: PwmMode);
+    /// Every leg floating (AM32 `allOff`).
+    fn all_off(&mut self);
+    /// Every low side on (AM32 `fullBrake`).
+    fn full_brake(&mut self);
+    /// Every leg driven by PWM (AM32 `allpwm`).
+    fn all_pwm(&mut self, mode: PwmMode);
+    /// High sides off, low sides PWM (AM32 `proportionalBrake`).
+    fn proportional_brake(&mut self);
+    /// RPM pulse output on steps 1 and 4 (debug); boards without one ignore it.
+    #[inline(always)]
+    fn pulse_toggle(&mut self, _step: u8) {}
+}
+
+/// Comparator (BEMF sensing) interface
+/// A motor phase.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Phase {
@@ -74,47 +97,40 @@ pub const fn floating_phase(step: u8) -> Phase {
     }
 }
 
-/// Comparator routing and edge-interrupt control for BEMF sensing.
+/// BEMF sensing: the comparator's phase routing and its edge interrupt.
+///
+/// Routing and interrupt gating are separate calls: the polling path
+/// (`old_routine`) re-routes every step while the edge interrupt stays
+/// masked.
 pub trait BemfSensor {
-    /// Route the floating phase and edge without unmasking the interrupt.
-    /// The port handles mux encoding and comparator/EXTI polarity.
+    /// Route the comparator to `phase` and arm the edge for the motor's
+    /// `rising` BEMF. Does not unmask. Board/MCU polarity (AM32
+    /// `INVERTED_EXTI`, G431 pin routing) is the port's business.
     fn select_phase(&mut self, phase: Phase, rising: bool);
-    /// Unmask the selected comparator source without clearing pending edges.
     fn enable_irq(&mut self);
-    /// Mask the interrupt and clear its pending edge state.
     fn mask_irq(&mut self);
-    /// Current comparator output, with the port's established polarity.
+    /// Comparator output level.
     fn level(&self) -> bool;
-    /// Persistence-filter read; identical to an ordinary read unless a port
-    /// explicitly supplies a separately validated implementation.
+    /// One read of the zero-cross persistence filter (`bemf_zero_cross`).
+    /// Defaults to `level`; a port overrides it when its inlined read is
+    /// much faster than the reference's, so the filter's TIME window
+    /// (filter_level reads) matches the reference rather than only its
+    /// read count.
+    #[inline]
     fn filter_read(&self) -> bool {
         self.level()
     }
-    /// Whether any edge is pending on the comparator's owned EXTI line(s).
+    /// The comparator's edge interrupt is pending.
     fn pending(&self) -> bool;
-    /// Discard pending edges on owned lines without changing the IRQ mask.
+    /// Clear the pending edge.
     fn clear_pending(&mut self);
-    /// Software-pend the selected source without changing the IRQ mask.
+    /// Re-raise the edge interrupt in software (e.g. a software-trigger register).
     fn repend(&mut self);
 }
 
 /// Debug pulse output — toggles a GPIO on commutation for RPM measurement.
 pub trait PulseOutput {
     fn toggle(&mut self);
-}
-
-/// Motor phase output control. Callers supply the active [`PwmMode`]
-/// (`PwmMode::Complementary` vs `PwmMode::Diode`) explicitly; invalid
-/// commutation steps leave outputs unchanged.
-pub trait PhaseOutput {
-    fn com_step(&mut self, step: u8, mode: PwmMode);
-    fn all_off(&mut self);
-    fn full_brake(&mut self);
-    fn all_pwm(&mut self, mode: PwmMode);
-    fn proportional_brake(&mut self);
-    /// Toggle pulse output on commutation step 1/4 (debug RPM measurement).
-    /// Default no-op — override for boards with pulse output pin.
-    fn pulse_toggle(&mut self, _step: u8) {}
 }
 
 /// Interval timer (commutation timing measurement)
@@ -135,6 +151,8 @@ pub trait ComTimer {
 /// Reduces generic parameter count from 5 to 1 in ISR function signatures.
 /// Implementors provide the concrete MCU-specific types.
 pub trait MotorHal: crate::platform::Platform {
+    /// The bridge as a view borrowed from the HAL (a port may build it from
+    /// separate peripherals without moving them).
     type Bridge<'a>: Bridge
     where
         Self: 'a;
@@ -200,7 +218,6 @@ pub trait InputCapture {
 }
 
 /// ADC readings (voltage, current, temperature)
-/// Voltage/current samples are 12-bit counts (0..=4095) at a nominal 3.3 V reference.
 pub trait Adc {
     fn start_conversion(&mut self);
     fn raw_voltage(&self) -> u16;

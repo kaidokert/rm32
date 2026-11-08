@@ -1,6 +1,6 @@
 //! Execute the production GPIO and borrowed TIM1 adapters on observable registers.
 //! This verifies software write order, not electrical timing or transistor behavior.
-#![allow(dead_code)] // The included port modules also expose board-only helpers.
+#![allow(dead_code, unexpected_cfgs)] // The included port modules also expose board-only helpers.
 
 use rm32::bridge::Bridge;
 use rm32::hal::{PhaseOutput, PwmMode};

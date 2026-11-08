@@ -862,3 +862,87 @@ mod tests {
         }
     }
 }
+
+/// The conversions against a literal transcription of AM32's C
+/// (`Src/main.c:2558-2560`), every 12-bit count, on representative board
+/// configurations and AM32's default constants. Neither form is AM32's
+/// exactly: current here is the exact 3300 * 100 / 4095 per count, AM32's
+/// `raw * 3300 / 41` reads up to 0.12 % lower; voltage truncates once, AM32
+/// truncates the pin mV first. These bound the gap so a change in either
+/// shows up.
+#[cfg(test)]
+mod am32_parity_tests {
+    use super::*;
+    use crate::platform::Platform;
+
+    macro_rules! board {
+        ($name:ident, $div:expr, $mvpa:expr, $off:expr) => {
+            struct $name;
+            impl Platform for $name {
+                const TICK_HZ: u32 = 20_000;
+                const TIMER_HZ: u32 = 2_000_000;
+                const CAPTURE_HZ: u32 = 64_000_000;
+                const GCR_SHIFT: u8 = 7;
+                const VOLTAGE_DIVIDER_X100: u16 = $div;
+                const MILLIVOLT_PER_AMP: u16 = $mvpa;
+                const CURRENT_OFFSET: i16 = $off;
+                const USE_NTC: bool = false;
+                const ADC_FULL_SCALE: u16 = 4095;
+                const ADC_VREF_MV: u16 = 3300;
+                const PWM_BASE_PERIOD: u16 = 1999;
+            }
+        };
+    }
+    board!(Neutron, 933, 3, 0);
+    board!(Board1194, 1194, 80, 1600);
+    board!(Am32Default, 1100, 20, 0);
+
+    /// AM32: `((raw * 3300 / 41) - (CURRENT_OFFSET * 100)) / MILLIVOLT_PER_AMP`,
+    /// C truncation, negative clamped to 0.
+    fn am32_current(raw: u16, off: i16, mvpa: u16) -> i32 {
+        ((raw as i32 * 3300 / 41 - off as i32 * 100) / mvpa as i32).max(0)
+    }
+
+    /// AM32: `ADC_raw_volts * 3300 / 4095 * VOLTAGE_DIVIDER / 100` (VOLTAGE_DIVIDER x10).
+    fn am32_voltage(raw: u16, div_x10: u16) -> i32 {
+        (raw as i32 * 3300 / 4095) * div_x10 as i32 / 100
+    }
+
+    /// Verify `AdcCount::centiamps::<P>` tracks AM32's C current formula within
+    /// the bounded per-count `3300/4095` vs `3300/41` truncation difference.
+    fn current_within<P: Platform>() {
+        for raw in 0..=4095u16 {
+            let am = am32_current(raw, P::CURRENT_OFFSET, P::MILLIVOLT_PER_AMP);
+            let ours = AdcCount(raw).centiamps::<P>().0 as i32;
+            if ours < 0 || ours >= i16::MAX as i32 {
+                continue;
+            }
+            // The per-count gap (3300 * 100 / 4095 - 3300 / 41 = 0.098) over
+            // raw counts, plus one for the two truncations.
+            let slack = raw as i32 / (10 * P::MILLIVOLT_PER_AMP as i32) + 1;
+            assert!(
+                ours >= am && ours - am <= slack,
+                "raw {raw}: ours {ours} AM32 {am}"
+            );
+        }
+    }
+
+    #[test]
+    fn current_tracks_am32_per_count_gap() {
+        current_within::<Neutron>();
+        current_within::<Board1194>();
+        current_within::<Am32Default>();
+    }
+
+    #[test]
+    fn voltage_tracks_am32_within_one_centivolt() {
+        for raw in 0..=4095u16 {
+            let am = am32_voltage(raw, 110);
+            let ours = AdcCount(raw).centivolts::<Am32Default>().0 as i32;
+            assert!(
+                (0..=1).contains(&(ours - am)),
+                "raw {raw}: ours {ours} AM32 {am}"
+            );
+        }
+    }
+}
