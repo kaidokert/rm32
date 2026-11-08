@@ -244,7 +244,15 @@ impl Tim14Com {
         raw.write_psc(crate::mcu::Chip::TIMER_PSC as u32);
         raw.write_arr(0xFFFF);
         raw.write_egr(1); // UG — latch PSC into active registers
-        raw.modify_cr1(|v| v | (1 << 0)); // CEN=1, ARPE=0 (free-running)
+        // CR1 = CEN only, free-running. DELIBERATE divergence from
+        // AM32's CR1=0x81 (ARPE on): with ARPE, an arm's ARR write sits
+        // in preload until the PREVIOUS active ARR wraps — AM32 fires
+        // one commutation stale, and the boot value (0xFFFF = 32 ms)
+        // dead-starts rm32's polling path, which unlike AM32's inline
+        // zcfoundroutine commutates through this timer's ISR. ARPE off
+        // makes every arm's ARR immediately active: fires at exactly
+        // the requested wait for both polling and interrupt modes.
+        raw.modify_cr1(|v| v | (1 << 0));
         Self { raw }
     }
 }

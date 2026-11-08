@@ -56,22 +56,22 @@ fn EXTI4_15() {
     }
     let next_capture = isr_handlers::handle_exti_frame();
 
+    // Apply prescaler change if requested (protocol detection)
     let tim15 = unsafe { &*pac::TIM15::PTR };
     if let Some(psc) = next_capture.prescaler {
         unsafe {
             tim15.psc.write(|w| w.bits(psc as u32));
-            tim15.egr.write(|w| w.bits(1));
+            tim15.egr.write(|w| w.bits(1)); // UG
         }
     }
 
-    // Re-enable DMA CH5 for next frame
+    // Re-enable DMA for next frame
     let dma = unsafe { &*pac::DMA1::PTR };
     unsafe {
         dma.ch5.ndtr.write(|w| w.bits(next_capture.edges_per_burst));
         // Enable CH5
         dma.ch5.cr.modify(|r, w| w.bits(r.bits() | 1));
     }
-    // TIM15 CR1.CEN
     unsafe {
         tim15.cr1.modify(|r, w| w.bits(r.bits() | 1));
     }

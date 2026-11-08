@@ -1,9 +1,9 @@
 name: "iFlight 12S"
 mcu: stm32g071
 dead_time: 80
-voltage_divider_x100: 2100
+voltage_divider_x100: 2100  # AM32 VOLTAGE_DIVIDER 210 (ratio x10)
 millivolt_per_amp: 25
 bemf_pins:
-  phase_a: PB3
-  phase_b: PB7
-  phase_c: PA2
+  phase_a: PB3   # COMP2 INM IO1
+  phase_b: PB7   # COMP2 INM IO2
+  phase_c: PA2   # COMP2 INM IO3

@@ -25,6 +25,9 @@ pub struct PinRef {
 ///
 /// Values are computed by `rm32_stm32/build.rs` from symbolic pin names in
 /// the board YAML. Lives in `rm32_stm32` because `rm32` never reads it.
+///
+/// TODO: replace this packed representation with typed comparator routes:
+/// https://github.com/kaidokert/rm32/issues/42
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BemfPins {
     pub phase_a: u32,
@@ -36,11 +39,12 @@ pub struct BemfPins {
 /// to `None` on standard AM32 boards.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoardExt {
-    /// Gate-driver ENABLE output: held low until the ESC is armed.
+    /// Gate-driver ENABLE (active high). Driven low at boot; the main loop
+    /// raises it only while the ESC is armed (see `drive_gate`).
     pub gate_enable: Option<PinRef>,
     /// Gate-driver nFAULT (open-drain, active low); input with pull-up.
     pub nfault: Option<PinRef>,
-    /// BEMF comparator pin mapping (from board YAML).
+    /// BEMF comparator pin mapping (from the board YAML).
     pub bemf_pins: BemfPins,
 }
 

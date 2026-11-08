@@ -43,6 +43,11 @@ pub fn enable_com_timer_clock() {
 /// Adjust IRQ priorities based on motor speed.
 /// Low eRPM: DShot DMA > commutation (don't drop input frames)
 /// High eRPM: commutation > DShot (don't miss commutation steps)
+///
+/// NOTE: STM32L4 NVIC has 4 priority bits in the UPPER nibble of each IPR
+/// byte. cortex_m's `set_priority` writes the raw byte, so priority levels
+/// must be passed as `level << 4`. Prior versions of this function passed
+/// raw 0/1 which both collapsed to level 0 — the priority swap was a no-op.
 pub fn adjust_irq_priorities(interval: u32, dshot_telem: bool) {
     use pac::Interrupt;
     const DSHOT_PRIORITY_THRESHOLD: u32 = 60;

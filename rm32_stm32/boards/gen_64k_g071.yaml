@@ -1,7 +1,7 @@
 name: "G071 64kESC"
 mcu: stm32g071
 dead_time: 60
-voltage_divider_x100: 1100
+voltage_divider_x100: 1100  # AM32 VOLTAGE_DIVIDER 110 (ratio x10)
 millivolt_per_amp: 20
 current_offset: 0
 current_adc_channel: 4
@@ -11,6 +11,6 @@ min_bemf_counts: 3
 has_led: true
 led_pin: 8
 bemf_pins:
-  phase_a: PB3
-  phase_b: PB7
-  phase_c: PA2
+  phase_a: PB3   # COMP2 INM IO1
+  phase_b: PB7   # COMP2 INM IO2
+  phase_c: PA2   # COMP2 INM IO3
