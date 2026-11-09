@@ -78,6 +78,35 @@ pub mod interrupt {
         f(&CriticalSection)
     }
 }
+// Model the NVIC enable bits the input tier masks: an IRQ number is
+// enabled unless its bit is set here.
+pub mod peripheral {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static MASKED: AtomicU32 = AtomicU32::new(0);
+    pub struct NVIC;
+    impl NVIC {
+        pub fn is_enabled(irq: u16) -> bool {
+            MASKED.load(Ordering::SeqCst) & (1 << irq) == 0
+        }
+        pub fn mask(irq: u16) {
+            MASKED.fetch_or(1 << irq, Ordering::SeqCst);
+        }
+        /// # Safety
+        /// Host model; no hardware effect.
+        pub unsafe fn unmask(irq: u16) {
+            MASKED.fetch_and(!(1 << irq), Ordering::SeqCst);
+        }
+    }
+}
+pub mod asm {
+    pub fn dsb() {}
+    pub fn isb() {}
+}
+fn input_irqs_masked() -> bool {
+    mcu::INPUT_IRQS
+        .iter()
+        .all(|&irq| !peripheral::NVIC::is_enabled(irq))
+}
 mod platform {
     pub struct StmPlatform;
     impl rm32::platform::Platform for StmPlatform {
@@ -96,6 +125,9 @@ mod platform {
 }
 mod mcu {
     use std::sync::Mutex as HostMutex;
+
+    /// Host stand-ins for the DShot DMA and EXTI frame IRQ numbers.
+    pub const INPUT_IRQS: [u16; 2] = [5, 15];
 
     pub type TargetIsrHal = super::isr::IsrHal<
         super::Pwm,
@@ -242,14 +274,20 @@ static LAST_RECEIVE_DMA_SELF_ADDR: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 static LAST_DMA_BUFFER_SELF_ADDR: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+static LAST_EDGES_PRIMASK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LAST_EDGES_INPUT_IRQS_MASKED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static LAST_GCR_PRIMASK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static LAST_GCR_INPUT_IRQS_MASKED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 static LAST_PWM_DUTY_MASKED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 static LAST_PWM_PERIOD_MASKED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
 
 struct Dma(UnsafeCell<[u32; 64]>);
-// Only one test uses this DMA substitute, and every read/write is inside free().
-// No buffer reference escapes a completed input-handler call.
+// Tests are serialized (TEST_SERIAL_LOCK); the producer writes the buffer only
+// between complete input-handler calls, and no buffer reference escapes one.
 unsafe impl Sync for Dma {}
 static DMA: Dma = Dma(UnsafeCell::new([0; 64]));
 struct Input {
@@ -263,7 +301,13 @@ impl InputCapture for Input {
             std::sync::atomic::Ordering::SeqCst,
         );
     }
-    fn start_gcr_output(&mut self) {}
+    fn start_gcr_output(&mut self) {
+        let primask = interrupt::masked();
+        let input_masked = input_irqs_masked();
+        assert!(primask || input_masked);
+        LAST_GCR_PRIMASK.store(primask, std::sync::atomic::Ordering::SeqCst);
+        LAST_GCR_INPUT_IRQS_MASKED.store(input_masked, std::sync::atomic::Ordering::SeqCst);
+    }
     fn input_pin_state(&self) -> bool {
         false
     }
@@ -271,7 +315,13 @@ impl InputCapture for Input {
     fn set_pull_down(&mut self) {}
     fn set_pull_none(&mut self) {}
     fn edges(&self) -> &[u32; 64] {
-        assert!(interrupt::masked());
+        // The input tier must be excluded: PRIMASK (thread-mode callers) or
+        // the input IRQs masked in the NVIC (interrupt handlers).
+        let primask = interrupt::masked();
+        let input_masked = input_irqs_masked();
+        assert!(primask || input_masked);
+        LAST_EDGES_PRIMASK.store(primask, std::sync::atomic::Ordering::SeqCst);
+        LAST_EDGES_INPUT_IRQS_MASKED.store(input_masked, std::sync::atomic::Ordering::SeqCst);
         LAST_DMA_BUFFER_SELF_ADDR.store(
             self as *const Self as usize,
             std::sync::atomic::Ordering::SeqCst,
@@ -286,10 +336,10 @@ impl InputCapture for Input {
         false
     }
     fn set_output_prescaler(&mut self, _: DshotOutputPrescaler) {
-        assert!(interrupt::masked());
+        assert!(interrupt::masked() || input_irqs_masked());
     }
     fn set_capture_prescaler(&mut self, _: u16) {
-        assert!(interrupt::masked());
+        assert!(interrupt::masked() || input_irqs_masked());
     }
 }
 struct Pwm;
@@ -405,10 +455,12 @@ fn raw_frame(value: u16) {
                     25
                 };
         }
-        let next = isr_handlers::handle_exti_frame();
-        assert_eq!(next.edges_per_burst, 32);
-        assert_eq!(next.prescaler, None);
     });
+    // The handler runs as the EXTI ISR would: outside any producer critical
+    // section, so the test sees the exclusion the handler itself takes.
+    let next = isr_handlers::handle_exti_frame();
+    assert_eq!(next.edges_per_burst, 32);
+    assert_eq!(next.prescaler, None);
 }
 fn command(value: u16) {
     for _ in 0..6 {
@@ -468,6 +520,38 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
     LAST_RECEIVE_DMA_SELF_ADDR.store(0, std::sync::atomic::Ordering::SeqCst);
     LAST_DMA_BUFFER_SELF_ADDR.store(0, std::sync::atomic::Ordering::SeqCst);
     raw_frame(0); // First interrupt moves state out of the initialization cell.
+    // The frame decode must exclude only the input-tier IRQs in the NVIC and
+    // leave PRIMASK clear so priority-0 COMP and the commutation timer can
+    // preempt it.
+    assert!(
+        !LAST_EDGES_PRIMASK.load(std::sync::atomic::Ordering::SeqCst),
+        "DShot frame decode must leave PRIMASK clear so COMP/COM preempt it"
+    );
+    assert!(
+        LAST_EDGES_INPUT_IRQS_MASKED.load(std::sync::atomic::Ordering::SeqCst),
+        "DShot frame decode must mask the input-tier IRQs in the NVIC"
+    );
+    assert!(
+        !input_irqs_masked(),
+        "the input-tier IRQs must be re-enabled after the frame decode"
+    );
+    LAST_GCR_PRIMASK.store(true, std::sync::atomic::Ordering::SeqCst);
+    LAST_GCR_INPUT_IRQS_MASKED.store(false, std::sync::atomic::Ordering::SeqCst);
+    shared.set_dshot_telemetry(true);
+    isr_handlers::handle_dma_tc();
+    shared.set_dshot_telemetry(false);
+    assert!(
+        !LAST_GCR_PRIMASK.load(std::sync::atomic::Ordering::SeqCst),
+        "handle_dma_tc must leave PRIMASK clear so COMP/COM preempt it"
+    );
+    assert!(
+        LAST_GCR_INPUT_IRQS_MASKED.load(std::sync::atomic::Ordering::SeqCst),
+        "handle_dma_tc must mask the input-tier IRQs in the NVIC"
+    );
+    assert!(
+        !input_irqs_masked(),
+        "the input-tier IRQs must be re-enabled after handle_dma_tc"
+    );
     assert_eq!(
         RECEIVE_DMA_CALLS.load(std::sync::atomic::Ordering::SeqCst),
         1,
@@ -740,6 +824,26 @@ fn firmware_saves_and_recovers_configuration_from_live_state_after_first_irq() {
             .any(|e| matches!(e, BridgeEvent::ComStepMode(_, PwmMode::Complementary))),
         "handle_tim14 must pass updated PwmMode::Complementary after config mutation"
     );
+
+    // Mutating config while Armed sets CONFIG_DIRTY; if the motor enters
+    // steady-state Running before the next tick, handle_tim6 copies inp.config
+    // under with_input_irqs_masked (leaving PRIMASK clear until COM_LOCAL sync).
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Armed);
+    shared.set_adjusted_input(0);
+    command(36);
+    raw_frame(20);
+    raw_frame(0);
+    raw_frame(37);
+    shared.set_motor_mode(rm32::motor_mode::MotorMode::Running);
+    shared.set_adjusted_input(500);
+    let entries = interrupt::entries();
+    isr_handlers::handle_tim6();
+    assert_eq!(
+        interrupt::entries(),
+        entries + 1,
+        "steady-state Running tick with CONFIG_DIRTY must use with_input_irqs_masked, not an extra interrupt::free"
+    );
+    assert!(!input_irqs_masked());
 }
 
 #[test]

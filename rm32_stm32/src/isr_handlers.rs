@@ -31,7 +31,11 @@
 //!
 //! 3. [`INPUT_LOCAL`] (`InputIsrState`): `input`, `cmd`, `edt`, `crsf`,
 //!    `transfer`, authoritative `config`, and protocol state.
-//!    - Accessed via `INPUT_LOCAL.with_masked` (`interrupt::free`). When the
+//!    - Interrupt handlers (`handle_dma_tc`, `handle_exti_frame`, the tick's
+//!      config copy) use `INPUT_LOCAL.with_input_irqs_masked`, which masks
+//!      only `mcu::INPUT_IRQS` in the NVIC so priority-0 comparator and
+//!      commutation interrupts are not delayed by DShot frame decoding.
+//!      Thread-mode callers use `INPUT_LOCAL.with_masked` (`interrupt::free`). When the
 //!      input peripheral first moves out of the boot staging cell into
 //!      `INPUT_LOCAL`, `start_capture()` is re-armed so DMA `CMAR` points
 //!      at the permanent `INPUT_LOCAL` buffer address.
@@ -156,6 +160,43 @@ impl<T> IsrTierCell<T> {
             let state = unsafe { self.get_unchecked() };
             f(state)
         })
+    }
+}
+
+impl IsrTierCell<TargetInputIsrState> {
+    /// Borrow `INPUT_LOCAL` from an interrupt handler with only the input
+    /// tier's IRQs (`mcu::INPUT_IRQS`) masked in the NVIC; `PRIMASK` stays 0.
+    ///
+    /// `with_masked` (`PRIMASK`) here held the priority-0 comparator and
+    /// commutation timer off for the whole DShot frame decode (~19 us on
+    /// STM32L431), delaying high-speed commutations. AM32's frame handler runs
+    /// preemptible under COMP/COM. Thread-mode callers keep `with_masked`:
+    /// the tick can preempt `main` and also borrows this cell.
+    ///
+    /// Must be called from handler mode (an ISR), never from `main`.
+    #[inline]
+    fn with_input_irqs_masked<R>(&self, f: impl FnOnce(&mut TargetInputIsrState) -> R) -> R {
+        use cortex_m::peripheral::NVIC;
+        let irqs = crate::mcu::INPUT_IRQS;
+        let was = irqs.map(NVIC::is_enabled);
+        for irq in irqs {
+            NVIC::mask(irq);
+        }
+        cortex_m::asm::dsb();
+        cortex_m::asm::isb();
+        // SAFETY: Every interrupt that borrows `INPUT_LOCAL` is masked in the
+        // NVIC, the tick (the only other ISR user) cannot preempt an input
+        // ISR and is itself excluded here when it is the caller, and
+        // thread-mode users hold PRIMASK, so no ISR runs this while `main`
+        // holds the cell. No closure re-enters this cell.
+        let r = f(unsafe { self.get_unchecked() });
+        for (irq, on) in irqs.into_iter().zip(was) {
+            if on {
+                // SAFETY: Restores an IRQ that was enabled on entry.
+                unsafe { NVIC::unmask(irq) };
+            }
+        }
+        r
     }
 }
 
@@ -355,7 +396,7 @@ pub fn handle_tim6() {
     let tick = unsafe { TICK_LOCAL.get_unchecked() };
 
     if shared.running() && CONFIG_DIRTY.load(Ordering::Acquire) {
-        INPUT_LOCAL.with_masked(|inp| {
+        INPUT_LOCAL.with_input_irqs_masked(|inp| {
             if CONFIG_DIRTY.swap(false, Ordering::AcqRel) {
                 tick.config = inp.config;
                 latch_com_config_flags(&tick.config);
@@ -530,7 +571,7 @@ pub fn handle_comp_irq() {
 pub fn handle_dma_tc() {
     ensure_split_init();
     let shared = isr::shared();
-    INPUT_LOCAL.with_masked(|inp| {
+    INPUT_LOCAL.with_input_irqs_masked(|inp| {
         if shared.armed() && shared.dshot_telemetry() {
             if inp.input.is_output() {
                 inp.input.start_capture();
@@ -553,7 +594,7 @@ pub fn handle_dma_tc() {
 pub fn handle_exti_frame() -> CaptureConfig {
     ensure_split_init();
     let shared = isr::shared();
-    INPUT_LOCAL.with_masked(|inp| {
+    INPUT_LOCAL.with_input_irqs_masked(|inp| {
         let buf = inp.input.edges();
 
         let pin_high = inp.input.input_pin_state();
