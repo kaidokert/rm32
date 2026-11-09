@@ -39,6 +39,12 @@ pub fn enable_com_timer_clock() {
 /// Adjust IRQ priorities based on motor speed. No-op on G431.
 pub fn adjust_irq_priorities(_interval: u32, _dshot_telem: bool) {}
 
+/// The input tier's IRQs (DShot capture DMA transfer-complete and the
+/// software-triggered EXTI frame handler): the only interrupts that
+/// borrow `INPUT_LOCAL`. Masked in the NVIC while an ISR holds that cell,
+/// so the priority-0 comparator and commutation timer stay live.
+pub const INPUT_IRQS: [pac::Interrupt; 2] = [pac::Interrupt::DMA1_CH1, pac::Interrupt::EXTI15_10];
+
 pub type TargetIsrHal = crate::isr::IsrHal<
     super::pwm::Pwm,
     super::input_capture::G431DshotCapture,

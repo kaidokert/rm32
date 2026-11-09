@@ -29,17 +29,25 @@
 //!      writes on `TICK_LOCAL` with interrupts unmasked (`PRIMASK = 0`),
 //!      confining `interrupt::free` to the brief 4-line `COM_LOCAL` sync.
 //!
-//! 3. [`INPUT_LOCAL`] (`InputIsrState`): `input`, `cmd`, `edt`, `crsf`,
+//! 3. [`INPUT_LOCAL`] (`InputIsrState`): `input`, `cmd`, `edt`,
 //!    `transfer`, authoritative `config`, and protocol state.
-//!    - Accessed via `INPUT_LOCAL.with_masked` (`interrupt::free`). When the
+//!    - Interrupt handlers (`handle_dma_tc`, `handle_exti_frame`, the tick's
+//!      config copy) use `INPUT_LOCAL.with_input_irqs_masked`, which masks
+//!      only `mcu::INPUT_IRQS` in the NVIC so priority-0 comparator and
+//!      commutation interrupts are not delayed by DShot frame decoding.
+//!      Thread-mode callers use `INPUT_LOCAL.with_masked` (`interrupt::free`). When the
 //!      input peripheral first moves out of the boot staging cell into
 //!      `INPUT_LOCAL`, `start_capture()` is re-armed so DMA `CMAR` points
 //!      at the permanent `INPUT_LOCAL` buffer address.
+//!
+//! 4. [`CRSF_LOCAL`] (`CrsfParser`): UART CRSF state machine, accessed
+//!    exclusively by `handle_crsf_byte` under `CRSF_LOCAL.with_masked` so a
+//!    UART RX interrupt cannot alias `INPUT_LOCAL` if it preempts a DShot ISR.
 
 use crate::bridge::TimerPwm as _;
 use crate::isr::{self, IsrHalParts, SplitMotorHal, TargetIsrHal};
 use core::cell::UnsafeCell;
-use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, AtomicU8, Ordering};
 use rm32::commutation::Commutation;
 use rm32::config::EepromConfig;
 use rm32::control::state::{BemfState, DutyState};
@@ -72,7 +80,6 @@ struct InputIsrState<I> {
     input: I,
     cmd: CommandProcessor,
     edt: EdtScheduler,
-    crsf: CrsfParser,
     transfer: TransferState,
     config: EepromConfig,
     forward: bool,
@@ -159,20 +166,60 @@ impl<T> IsrTierCell<T> {
     }
 }
 
+impl IsrTierCell<TargetInputIsrState> {
+    /// Borrow `INPUT_LOCAL` from an interrupt handler with only the input
+    /// tier's IRQs (`mcu::INPUT_IRQS`) masked in the NVIC; `PRIMASK` stays 0.
+    ///
+    /// `with_masked` (`PRIMASK`) here held the priority-0 comparator and
+    /// commutation timer off for the whole DShot frame decode (~19 us on
+    /// STM32L431), delaying high-speed commutations. AM32's frame handler runs
+    /// preemptible under COMP/COM. Thread-mode callers keep `with_masked`:
+    /// the tick can preempt `main` and also borrows this cell.
+    ///
+    /// Must be called from handler mode (an ISR), never from `main`.
+    #[inline]
+    fn with_input_irqs_masked<R>(&self, f: impl FnOnce(&mut TargetInputIsrState) -> R) -> R {
+        use cortex_m::peripheral::NVIC;
+        let irqs = crate::mcu::INPUT_IRQS;
+        let was = irqs.map(NVIC::is_enabled);
+        for irq in irqs {
+            NVIC::mask(irq);
+        }
+        cortex_m::asm::dsb();
+        cortex_m::asm::isb();
+        // SAFETY: Every interrupt that borrows `INPUT_LOCAL` is masked in the
+        // NVIC, the tick (the only other ISR user) cannot preempt an input
+        // ISR and is itself excluded here when it is the caller, and
+        // thread-mode users hold PRIMASK, so no ISR runs this while `main`
+        // holds the cell. No closure re-enters this cell.
+        let r = f(unsafe { self.get_unchecked() });
+        for (irq, on) in irqs.into_iter().zip(was) {
+            if on {
+                // SAFETY: Restores an IRQ that was enabled on entry.
+                unsafe { NVIC::unmask(irq) };
+            }
+        }
+        r
+    }
+}
+
 static COM_LOCAL: IsrTierCell<TargetComIsrState> = IsrTierCell::new();
 static TICK_LOCAL: IsrTierCell<TargetTickIsrState> = IsrTierCell::new();
 static INPUT_LOCAL: IsrTierCell<TargetInputIsrState> = IsrTierCell::new();
+static CRSF_LOCAL: IsrTierCell<CrsfParser> = IsrTierCell::new();
 
-static CFG_COMP_PWM: AtomicBool = AtomicBool::new(false);
-static CFG_BIDIR: AtomicBool = AtomicBool::new(false);
-static CFG_STRICT_CHANGEOVER: AtomicBool = AtomicBool::new(false);
+const CFG_FLAG_COMP_PWM: u8 = 1 << 0;
+const CFG_FLAG_BIDIR: u8 = 1 << 1;
+const CFG_FLAG_STRICT_CHANGEOVER: u8 = 1 << 2;
+static COM_CONFIG_FLAGS: AtomicU8 = AtomicU8::new(0);
 static CONFIG_DIRTY: AtomicBool = AtomicBool::new(false);
 
 #[inline]
 fn latch_com_config_flags(config: &EepromConfig) {
-    CFG_COMP_PWM.store(config.use_comp_pwm(), Ordering::Relaxed);
-    CFG_BIDIR.store(config.is_bidirectional(), Ordering::Relaxed);
-    CFG_STRICT_CHANGEOVER.store(config.use_strict_changeover(), Ordering::Relaxed);
+    let flags = (u8::from(config.use_comp_pwm()) * CFG_FLAG_COMP_PWM)
+        | (u8::from(config.is_bidirectional()) * CFG_FLAG_BIDIR)
+        | (u8::from(config.use_strict_changeover()) * CFG_FLAG_STRICT_CHANGEOVER);
+    COM_CONFIG_FLAGS.store(flags, Ordering::Relaxed);
 }
 
 #[inline(always)]
@@ -213,7 +260,6 @@ fn install_staged_isr_state() {
                     input,
                     cmd: state.cmd,
                     edt: state.edt,
-                    crsf: state.crsf,
                     transfer: state.transfer,
                     config: state.config,
                     forward: state.forward,
@@ -222,6 +268,7 @@ fn install_staged_isr_state() {
                     frametime_low: state.frametime_low,
                     frametime_high: state.frametime_high,
                 });
+                CRSF_LOCAL.set(state.crsf);
                 // Re-arm input capture DMA so the peripheral's memory address
                 // register points at `INPUT_LOCAL` rather than the consumed
                 // `ISR_STATE` staging cell.
@@ -355,7 +402,7 @@ pub fn handle_tim6() {
     let tick = unsafe { TICK_LOCAL.get_unchecked() };
 
     if shared.running() && CONFIG_DIRTY.load(Ordering::Acquire) {
-        INPUT_LOCAL.with_masked(|inp| {
+        INPUT_LOCAL.with_input_irqs_masked(|inp| {
             if CONFIG_DIRTY.swap(false, Ordering::AcqRel) {
                 tick.config = inp.config;
                 latch_com_config_flags(&tick.config);
@@ -466,7 +513,8 @@ pub fn handle_tim14() {
     // priority on every MCU and cannot preempt each other; lower-priority
     // callers (`handle_tim6`, `service_sine`) mask interrupts via `with_masked`.
     let com = unsafe { COM_LOCAL.get_unchecked() };
-    let pwm_mode = match CFG_COMP_PWM.load(Ordering::Relaxed) {
+    let cfg_flags = COM_CONFIG_FLAGS.load(Ordering::Relaxed);
+    let pwm_mode = match cfg_flags & CFG_FLAG_COMP_PWM != 0 {
         false => rm32::hal::PwmMode::Diode,
         true => rm32::hal::PwmMode::Complementary,
     };
@@ -486,8 +534,8 @@ pub fn handle_tim14() {
         &mut com.comp,
         &mut com.phase,
         pwm_mode,
-        CFG_BIDIR.load(Ordering::Relaxed),
-        CFG_STRICT_CHANGEOVER.load(Ordering::Relaxed),
+        cfg_flags & CFG_FLAG_BIDIR != 0,
+        cfg_flags & CFG_FLAG_STRICT_CHANGEOVER != 0,
     );
 }
 
@@ -530,7 +578,7 @@ pub fn handle_comp_irq() {
 pub fn handle_dma_tc() {
     ensure_split_init();
     let shared = isr::shared();
-    INPUT_LOCAL.with_masked(|inp| {
+    INPUT_LOCAL.with_input_irqs_masked(|inp| {
         if shared.armed() && shared.dshot_telemetry() {
             if inp.input.is_output() {
                 inp.input.start_capture();
@@ -553,7 +601,7 @@ pub fn handle_dma_tc() {
 pub fn handle_exti_frame() -> CaptureConfig {
     ensure_split_init();
     let shared = isr::shared();
-    INPUT_LOCAL.with_masked(|inp| {
+    INPUT_LOCAL.with_input_irqs_masked(|inp| {
         let buf = inp.input.edges();
 
         let pin_high = inp.input.input_pin_state();
@@ -615,7 +663,7 @@ pub fn handle_exti_frame() -> CaptureConfig {
 pub fn handle_crsf_byte(byte: u8) {
     ensure_split_init();
     let shared = isr::shared();
-    INPUT_LOCAL.with_masked(|inp| {
-        inp.crsf.dispatch_byte(byte, shared);
+    CRSF_LOCAL.with_masked(|crsf| {
+        crsf.dispatch_byte(byte, shared);
     });
 }
