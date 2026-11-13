@@ -626,13 +626,13 @@ impl SharedState {
         self.duty_kick_down.store(true, REL);
     }
     pub fn take_duty_kick_down(&self) -> bool {
-        self.duty_kick_down.swap(false, Ordering::AcqRel)
+        self.duty_kick_down.load(ACQ) && self.duty_kick_down.swap(false, Ordering::AcqRel)
     }
     pub fn request_duty_kick_half(&self) {
         self.duty_kick_half.store(true, REL);
     }
     pub fn take_duty_kick_half(&self) -> bool {
-        self.duty_kick_half.swap(false, Ordering::AcqRel)
+        self.duty_kick_half.load(ACQ) && self.duty_kick_half.swap(false, Ordering::AcqRel)
     }
     pub fn changeover_step(&self) -> u8 {
         self.changeover_step.load(ACQ)

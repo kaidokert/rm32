@@ -3,63 +3,64 @@
 //! [`MainState`](crate::main_state::MainState) is parameterized by a
 //! [`TuningPolicy`] type (defaulting to [`Am32Tuning`]) that configures three
 //! optional closed-loop recovery behaviours beyond stock AM32: a
-//! wrong-phase-orbit current trip, a post-lock reclimb duty clamp, and a
-//! fast-rotor desync response that stays in interrupt mode with a half
+//! duty-proportional overcurrent orbit trip, a post-lock reclimb duty clamp,
+//! and a fast-rotor desync response that stays in interrupt mode with a half
 //! duty kick. Every policy knob is an associated `const`, so
 //! `if let Some(c) = T::ORBIT_TRIP` and `match T::DESYNC` resolve at compile
 //! time: under [`Am32Tuning`] the extra branches compile out completely, and
-//! under [`QualifiedRigTuning`] they fold to immediate constants.
+//! under a custom policy they fold to immediate constants.
 
-/// Wrong-phase-orbit trip (divergence from AM32): the acceptance chain can
-/// self-clock on switching artifacts in a wrong phase -- plausible
-/// zero-crossings, current far above the duty-proportional norm, no
-/// desync-detector jump. The trip is relative (fires when current exceeds
-/// `duty * slope + offset_ma`, sustained `trip_ms` ticks while locked)
-/// because a static ampere threshold cannot separate a wrong-phase orbit at
-/// 70 % from legitimate 100 % draw. Response = full desync path: the demote
-/// IS the phase reset.
+/// Wrong-phase-orbit trip configuration: if the BEMF acceptance chain locks
+/// onto switching artifacts in the wrong commutation phase, zero-crossings can
+/// remain regular enough to avoid the interval-jump desync detector while phase
+/// current runs well above the normal steady-state draw for the applied duty.
+///
+/// The threshold is affine in duty (`duty * slope + offset_ma`, in milliamps,
+/// scaled by measured battery voltage relative to `cal_vbat_cv`) and must be
+/// exceeded for `trip_ms` consecutive 1 kHz ticks while locked before forcing
+/// a full desync demotion.
 pub struct OrbitTripConfig {
+    /// Current threshold slope in milliamps per unit of duty (0..=2000).
     pub slope: i32,
+    /// Base current threshold offset in milliamps at zero duty.
     pub offset_ma: i32,
-    /// Consecutive 1 kHz ticks over the line before tripping (ms).
+    /// Consecutive 1 kHz ticks above the threshold line before tripping (ms).
     pub trip_ms: u16,
-    /// Rail voltage (cV) the line was calibrated on; the line scales by
-    /// measured vbat relative to it (battery sessions run ~12 V where the
-    /// same duty legitimately draws ~1.5x the current).
+    /// Reference rail voltage in centivolts at which `slope` and `offset_ma`
+    /// are specified; the threshold scales linearly with measured `vbat`
+    /// relative to `cal_vbat_cv` so the policy tracks supply sag or different
+    /// cell counts.
     pub cal_vbat_cv: i32,
-    /// Commanded-transient suppression: while the applied duty moved more
-    /// than this within the snapshot window, high current is expected (slam
-    /// accel, ~10 A on battery) and the trip holds off.
+    /// Commanded-transient suppression threshold: when applied duty changes by
+    /// more than `transient_duty` within the 100 ms snapshot window, the trip
+    /// is held off to allow acceleration current surges.
     pub transient_duty: u16,
-    /// The hold-off continues this long (ms) after the last tick that saw
-    /// such a move. The snapshot window alone ends 0-100 ms after the duty
-    /// settles (whatever the refresh phase happens to be), while the rotor is
-    /// still accelerating and drawing high current past the steady-state
-    /// orbit line.
+    /// Additional hold-off duration (ms) after the last tick that detected a
+    /// duty step above `transient_duty`, covering rotor acceleration after the
+    /// commanded duty ramp finishes.
     pub transient_hold_ms: u16,
 }
 
-/// Reclimb clamp (divergence from AM32): until `confirm_zc` zero crossings
-/// confirm the lock, the duty ceiling is capped at `duty_cap`. Covers fresh
-/// engage and post-fall recovery identically; the cap clears the startup
-/// duty band while bounding the recovery acceleration surge.
+/// Post-lock duty ceiling clamp: until `confirm_zc` zero crossings confirm
+/// closed-loop lock, the duty ceiling is capped at `duty_cap`. Applies both on
+/// initial startup engage and after desync recovery to bound acceleration
+/// before lock is established.
 pub struct ReclimbConfig {
     pub confirm_zc: u32,
     pub duty_cap: u16,
 }
 
-/// What a desync from interrupt mode does.
+/// Closed-loop desync recovery policy when a desync is detected in interrupt mode.
 pub enum DesyncPolicy {
-    /// AM32: demote to polling and drop the duty to min_startup/2.
+    /// Stock AM32 behaviour: demote to polling (`OldRoutine`) and drop duty to
+    /// `min_startup / 2`.
     Am32,
-    /// Fast-rotor desyncs (commutation interval below `max_ci_us`, current
-    /// sane) stay in interrupt mode with a half duty kick. AM32 re-locks
-    /// within ~1 ms at main-loop rate; rm32 polls on the 20 kHz tick grid,
-    /// which cannot re-lock above ~800 Hz e, so a demoted fast rotor coasts
-    /// for seconds. The detector then holds off for `rearm_holdoff_zc` zero
-    /// crossings: the kick's own deceleration would refire it against a
-    /// stale average (a self-loop); a real desync still trips on the first
-    /// check past the holdoff.
+    /// Keep high-speed desyncs (commutation interval below `max_ci_us` with
+    /// phase current below the orbit threshold) in interrupt mode and halve the
+    /// applied duty instead of demoting to 20 kHz BEMF polling. After a
+    /// stay-in-interrupt recovery, the desync detector holds off for
+    /// `rearm_holdoff_zc` zero crossings so deceleration from the duty step
+    /// does not immediately re-trigger against a pre-kick interval average.
     HalfKickStayInterrupt {
         max_ci_us: u32,
         rearm_holdoff_zc: u32,
@@ -72,37 +73,13 @@ pub trait TuningPolicy {
     const DESYNC: DesyncPolicy;
 }
 
-/// AM32's behaviour: no rig divergence.
+/// Stock AM32 closed-loop recovery policy (the default [`TuningPolicy`]).
 pub struct Am32Tuning;
 
 impl TuningPolicy for Am32Tuning {
     const ORBIT_TRIP: Option<OrbitTripConfig> = None;
     const RECLIMB: Option<ReclimbConfig> = None;
     const DESYNC: DesyncPolicy = DesyncPolicy::Am32;
-}
-
-/// Bench-qualified tuning preset enabling wrong-phase-orbit detection,
-/// post-lock reclimb duty clamping, and fast-rotor stay-in-interrupt desync
-/// recovery.
-pub struct QualifiedRigTuning;
-
-impl TuningPolicy for QualifiedRigTuning {
-    const ORBIT_TRIP: Option<OrbitTripConfig> = Some(OrbitTripConfig {
-        slope: 3,
-        offset_ma: 2500,
-        trip_ms: 30,
-        cal_vbat_cv: 816,
-        transient_duty: 150,
-        transient_hold_ms: 300,
-    });
-    const RECLIMB: Option<ReclimbConfig> = Some(ReclimbConfig {
-        confirm_zc: 1500,
-        duty_cap: 800,
-    });
-    const DESYNC: DesyncPolicy = DesyncPolicy::HalfKickStayInterrupt {
-        max_ci_us: 300,
-        rearm_holdoff_zc: 100,
-    };
 }
 
 /// Commutation interval (port timer ticks) below which a desync stays in
@@ -118,10 +95,9 @@ pub(crate) const fn stay_interrupt_ci<P: crate::platform::Platform, T: TuningPol
     }
 }
 
-/// Wrong-phase-orbit discriminator: current far above the
-/// duty-proportional norm. The line scales with measured vbat since
-/// current at a given duty scales with source voltage. Always false
-/// without an orbit trip.
+/// Wrong-phase-orbit discriminator: returns `true` when `current_ma` exceeds
+/// the policy's duty- and voltage-scaled threshold line. Always `false` when
+/// `T::ORBIT_TRIP` is `None`.
 #[inline]
 pub(crate) fn orbit_current<T: TuningPolicy>(current_ma: i32, duty: u16, vbat_cv: u16) -> bool {
     match orbit_line::<T>(duty, vbat_cv) {
@@ -130,21 +106,21 @@ pub(crate) fn orbit_current<T: TuningPolicy>(current_ma: i32, duty: u16, vbat_cv
     }
 }
 
-/// The orbit trip's current line (mA) at this duty and rail, `None` without
-/// an orbit trip.
+/// The orbit trip's current threshold line (mA) at `duty` and `vbat_cv`, or
+/// `None` when `T::ORBIT_TRIP` is `None`.
 #[inline]
 pub(crate) fn orbit_line<T: TuningPolicy>(duty: u16, vbat_cv: u16) -> Option<i32> {
     let c = T::ORBIT_TRIP.as_ref()?;
     let line = (duty as i32) * c.slope + c.offset_ma;
-    Some(if vbat_cv > 600 {
-        line * (vbat_cv as i32) / c.cal_vbat_cv
+    Some(if vbat_cv > 600 && c.cal_vbat_cv > 0 {
+        ((line as i64) * (vbat_cv as i64) / (c.cal_vbat_cv as i64)) as i32
     } else {
         line
     })
 }
 
-/// The wrong-phase-orbit trip's state machine (`OrbitTripConfig`), one
-/// `tick` per 1 kHz main-loop tick.
+/// Wrong-phase-orbit trip state machine (`OrbitTripConfig`), stepped once per
+/// 1 kHz main-loop tick.
 #[derive(Default)]
 pub(crate) struct OrbitGuard {
     trip_count: u16,
@@ -153,7 +129,7 @@ pub(crate) struct OrbitGuard {
     since_move_ms: u16,
 }
 
-/// One orbit-guard tick: `trip` = force the desync path now.
+/// Result of one [`OrbitGuard::tick`] step.
 #[allow(dead_code)]
 pub(crate) struct OrbitStep {
     pub trip: bool,
@@ -167,8 +143,10 @@ pub(crate) struct OrbitStep {
 }
 
 impl OrbitGuard {
-    /// `locked`: running with the BEMF loop past 1000 zero crossings;
-    /// `over_line`: current above `orbit_line`.
+    /// Step the guard for one 1 kHz tick.
+    ///
+    /// `locked`: running in closed-loop interrupt mode past 1000 zero crossings;
+    /// `over_line`: phase current above [`orbit_line`].
     #[inline]
     pub(crate) fn tick(
         &mut self,
@@ -177,12 +155,12 @@ impl OrbitGuard {
         duty: u16,
         over_line: bool,
     ) -> OrbitStep {
+        let moved = (duty as i32 - self.duty_snap as i32).unsigned_abs() > c.transient_duty as u32;
         self.snap_age += 1;
         if self.snap_age >= 100 {
             self.duty_snap = duty;
             self.snap_age = 0;
         }
-        let moved = (duty as i32 - self.duty_snap as i32).unsigned_abs() > c.transient_duty as u32;
         self.since_move_ms = if moved {
             0
         } else {
@@ -192,7 +170,7 @@ impl OrbitGuard {
         let mut trip = false;
         let mut over_ms = 0;
         if locked && !held && over_line {
-            self.trip_count += 1;
+            self.trip_count = self.trip_count.saturating_add(1);
             over_ms = self.trip_count;
             if self.trip_count > c.trip_ms {
                 self.trip_count = 0;
@@ -211,27 +189,42 @@ impl OrbitGuard {
 }
 
 #[cfg(test)]
+pub(crate) struct TestTuning;
+
+#[cfg(test)]
+impl TuningPolicy for TestTuning {
+    const ORBIT_TRIP: Option<OrbitTripConfig> = Some(OrbitTripConfig {
+        slope: 10,
+        offset_ma: 10_000,
+        trip_ms: 25,
+        cal_vbat_cv: 1600,
+        transient_duty: 150,
+        transient_hold_ms: 200,
+    });
+    const RECLIMB: Option<ReclimbConfig> = Some(ReclimbConfig {
+        confirm_zc: 1000,
+        duty_cap: 800,
+    });
+    const DESYNC: DesyncPolicy = DesyncPolicy::HalfKickStayInterrupt {
+        max_ci_us: 300,
+        rearm_holdoff_zc: 100,
+    };
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    const RIG: OrbitTripConfig = match QualifiedRigTuning::ORBIT_TRIP {
+    const CFG: OrbitTripConfig = match TestTuning::ORBIT_TRIP {
         Some(c) => c,
         None => panic!(),
     };
 
-    /// Representative sagged 3S rail under a full-throttle slam (cV).
-    const SLAM_VBAT_CV: u16 = 1132;
-
-    /// Slam 10 % -> 100 %: duty ramps up over 50 ms, then the rotor keeps
-    /// accelerating at ~12.8 A for 140 ms before the current falls to the
-    /// 100 % running draw. `phase` offsets the slam against the guard's
-    /// 100 ms snapshot cycle. Returns the trip tick.
-    fn slam(guard: &mut OrbitGuard, c: &OrbitTripConfig, phase: u16) -> Option<u32> {
-        slam_on(guard, c, phase, SLAM_VBAT_CV, 12_800, 140)
-    }
-
-    /// `slam` on a given rail with a given accel current and plateau (ms).
-    fn slam_on(
+    /// Simulate a throttle ramp (duty 200 -> 2000 over 50 ms) followed by an
+    /// acceleration current plateau (`accel_ma` for `plateau_ms`, then settling
+    /// below the steady-state threshold line). `phase` offsets the ramp start
+    /// against the guard's 100 ms snapshot window.
+    fn ramp_and_plateau(
         guard: &mut OrbitGuard,
         c: &OrbitTripConfig,
         phase: u16,
@@ -242,14 +235,14 @@ mod tests {
         let mut t = 0u32;
         let mut step = |duty: u16, current_ma: i32| {
             t += 1;
-            let line = orbit_line::<QualifiedRigTuning>(duty, vbat_cv).unwrap();
+            let line = orbit_line::<TestTuning>(duty, vbat_cv).unwrap();
             guard
                 .tick(c, true, duty, current_ma > line)
                 .trip
                 .then_some(t)
         };
         for _ in 0..(1000 + phase) {
-            if let Some(t) = step(200, 1500) {
+            if let Some(t) = step(200, 5_000) {
                 return Some(t);
             }
         }
@@ -258,11 +251,11 @@ mod tests {
                 return Some(t);
             }
         }
-        for i in 0..1000i32 {
+        for i in 0..500i32 {
             let current_ma = if i < plateau_ms {
                 accel_ma
             } else {
-                (accel_ma - (i - plateau_ms) * 50).max(7_000)
+                (accel_ma - (i - plateau_ms) * 200).max(20_000)
             };
             if let Some(t) = step(1998, current_ma) {
                 return Some(t);
@@ -271,104 +264,130 @@ mod tests {
         None
     }
 
-    /// The snapshot window alone ends at an arbitrary point 0-100 ms after
-    /// the duty settles, so legitimate slam acceleration must not trip the
-    /// orbit guard on any snapshot phase while `transient_hold_ms` is active.
     #[test]
-    fn slam_acceleration_never_trips_at_any_snapshot_phase() {
+    fn step_response_holdoff_suppresses_trip_across_all_snapshot_phases() {
         for phase in 0..100 {
             let mut g = OrbitGuard::default();
-            assert_eq!(slam(&mut g, &RIG, phase), None, "phase {phase}");
+            assert_eq!(
+                ramp_and_plateau(&mut g, &CFG, phase, 1600, 36_000, 100),
+                None,
+                "phase {phase}"
+            );
         }
     }
 
-    /// The same profile trips without the hold, so the test above covers the
-    /// failure rather than a profile that never reaches the line.
     #[test]
-    fn slam_profile_trips_without_the_hold() {
+    fn step_response_trips_when_transient_hold_is_zero() {
         let no_hold = OrbitTripConfig {
             transient_hold_ms: 0,
-            ..RIG
+            ..CFG
         };
         let trips = (0..100)
-            .filter(|&p| slam(&mut OrbitGuard::default(), &no_hold, p).is_some())
+            .filter(|&p| {
+                ramp_and_plateau(&mut OrbitGuard::default(), &no_hold, p, 1600, 36_000, 100)
+                    .is_some()
+            })
             .count();
-        assert!(trips > 0, "no snapshot phase tripped without the hold");
+        assert!(trips > 0, "no snapshot phase tripped without hold-off");
     }
 
-    /// On a sagged 10.6 V rail (15 % -> 100 % slam drawing ~12.7 A against a
-    /// ~11.0 A line for a 20 ms plateau), ~1/3 of snapshot phases trip
-    /// without `transient_hold_ms`, and zero phases trip with `RIG`'s hold.
     #[test]
-    fn battery_slam_replay_trips_a_third_without_hold_never_with() {
-        let phases = |c: &OrbitTripConfig| {
-            (0..100)
-                .filter(|&p| slam_on(&mut OrbitGuard::default(), c, p, 1060, 12_700, 20).is_some())
-                .count()
-        };
-        let no_hold = OrbitTripConfig {
-            transient_hold_ms: 0,
-            ..RIG
-        };
-        let old = phases(&no_hold);
-        assert!((20..=40).contains(&old), "no-hold trips on {old} phases");
-        assert_eq!(phases(&RIG), 0);
+    fn abrupt_step_on_snapshot_refresh_boundary_still_holds_off() {
+        for phase in 0..=100 {
+            let mut g = OrbitGuard::default();
+            for _ in 0..phase {
+                let s = g.tick(&CFG, true, 200, false);
+                assert!(!s.trip);
+            }
+            // Single-tick step from 200 to 1000 (> transient_duty = 150),
+            // including at phase == 99 where snap_age reaches 100 on this tick.
+            let first = g.tick(&CFG, true, 1000, true);
+            assert!(first.held, "phase {phase} must enter hold-off on step tick");
+            assert!(!first.trip);
+            for _ in 0..(CFG.trip_ms + 10) {
+                assert!(
+                    !g.tick(&CFG, true, 1000, true).trip,
+                    "phase {phase} tripped during transient hold-off"
+                );
+            }
+        }
     }
 
-    /// The trip timer's watermark: `over_ms` counts the consecutive stretch,
-    /// reaches `trip_ms` on a near miss and `trip_ms + 1` on the trip.
     #[test]
     fn over_ms_reports_the_trip_timer() {
         let mut g = OrbitGuard::default();
         for _ in 0..1000 {
-            assert_eq!(g.tick(&RIG, true, 1000, false).over_ms, 0);
+            assert_eq!(g.tick(&CFG, true, 1000, false).over_ms, 0);
         }
-        for n in 1..=RIG.trip_ms {
-            assert_eq!(g.tick(&RIG, true, 1000, true).over_ms, n);
+        for n in 1..=CFG.trip_ms {
+            assert_eq!(g.tick(&CFG, true, 1000, true).over_ms, n);
         }
-        assert_eq!(g.tick(&RIG, true, 1000, false).over_ms, 0);
-        for _ in 0..RIG.trip_ms {
-            g.tick(&RIG, true, 1000, true);
+        assert_eq!(g.tick(&CFG, true, 1000, false).over_ms, 0);
+        for _ in 0..CFG.trip_ms {
+            g.tick(&CFG, true, 1000, true);
         }
-        let s = g.tick(&RIG, true, 1000, true);
+        let s = g.tick(&CFG, true, 1000, true);
         assert!(s.trip);
-        assert_eq!(s.over_ms, RIG.trip_ms + 1);
+        assert_eq!(s.over_ms, CFG.trip_ms + 1);
     }
 
-    /// A real orbit at steady duty still trips after `trip_ms` + 1 ticks.
     #[test]
     fn sustained_over_line_at_steady_duty_trips() {
         let mut g = OrbitGuard::default();
         for _ in 0..1000 {
-            assert!(!g.tick(&RIG, true, 1000, false).trip);
+            assert!(!g.tick(&CFG, true, 1000, false).trip);
         }
         let n = (1..=200)
-            .find(|_| g.tick(&RIG, true, 1000, true).trip)
+            .find(|_| g.tick(&CFG, true, 1000, true).trip)
             .expect("no trip");
-        assert_eq!(n, RIG.trip_ms as usize + 1);
+        assert_eq!(n, CFG.trip_ms as usize + 1);
     }
 
-    /// Over the line but not locked, or for no more than `trip_ms`: no trip.
     #[test]
     fn unlocked_or_short_excursions_do_not_trip() {
         let mut g = OrbitGuard::default();
         for _ in 0..1000 {
-            g.tick(&RIG, true, 1000, false);
+            g.tick(&CFG, true, 1000, false);
         }
         for _ in 0..500 {
-            assert!(!g.tick(&RIG, false, 1000, true).trip);
+            assert!(!g.tick(&CFG, false, 1000, true).trip);
         }
         for _ in 0..20 {
-            for _ in 0..RIG.trip_ms {
-                assert!(!g.tick(&RIG, true, 1000, true).trip);
+            for _ in 0..CFG.trip_ms {
+                assert!(!g.tick(&CFG, true, 1000, true).trip);
             }
-            assert!(!g.tick(&RIG, true, 1000, false).trip);
+            assert!(!g.tick(&CFG, true, 1000, false).trip);
         }
     }
 
     #[test]
+    fn orbit_line_scales_with_duty_and_rail_voltage() {
+        // At reference rail (16.00 V), line = 1000 * 10 + 10_000 = 20_000 mA.
+        assert_eq!(orbit_line::<TestTuning>(1000, 1600), Some(20_000));
+        // At 24.00 V (1.5x reference), line scales to 30_000 mA.
+        assert_eq!(orbit_line::<TestTuning>(1000, 2400), Some(30_000));
+        // Uninitialized/low rail reading falls back to unscaled line.
+        assert_eq!(orbit_line::<TestTuning>(1000, 0), Some(20_000));
+
+        struct ZeroCalVbatTuning;
+        impl TuningPolicy for ZeroCalVbatTuning {
+            const ORBIT_TRIP: Option<OrbitTripConfig> = Some(OrbitTripConfig {
+                cal_vbat_cv: 0,
+                ..CFG
+            });
+            const RECLIMB: Option<ReclimbConfig> = None;
+            const DESYNC: DesyncPolicy = DesyncPolicy::Am32;
+        }
+        assert_eq!(orbit_line::<ZeroCalVbatTuning>(1000, 1600), Some(20_000));
+    }
+
+    #[test]
     fn am32_tuning_has_no_orbit_line() {
-        assert_eq!(orbit_line::<Am32Tuning>(1998, 1200), None);
-        assert!(!orbit_current::<Am32Tuning>(i32::MAX, 0, 1200));
+        assert_eq!(orbit_line::<Am32Tuning>(1998, 1600), None);
+        assert!(!orbit_current::<Am32Tuning>(i32::MAX, 0, 1600));
+        assert_eq!(
+            stay_interrupt_ci::<crate::platform::TestPlatform, Am32Tuning>(),
+            0
+        );
     }
 }

@@ -235,9 +235,11 @@ pub trait Commands {
     /// halve the applied duty, floored at the kick-down level, instead of
     /// dropping to `min_startup / 2`. Only requested on the stay-interrupt
     /// branch, where the rotor is known to still be locked.
-    fn request_duty_kick_half(&self);
+    fn request_duty_kick_half(&self) {}
     /// Consume a pending fast-rotor duty halving.
-    fn take_duty_kick_half(&self) -> bool;
+    fn take_duty_kick_half(&self) -> bool {
+        false
+    }
 
     fn save_settings_flag(&self) -> bool;
     fn set_save_settings_flag(&self, v: bool);

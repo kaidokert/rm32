@@ -1877,6 +1877,19 @@ mod tests {
             assert_eq!(split_period, 1777);
             assert_eq!(duty_split.cycle(), duty_full.cycle());
             assert_eq!(duty_split.last(), duty_full.last());
+            if half_kick {
+                assert!(
+                    duty_full.last() >= 210 && duty_full.last() < 250,
+                    "half_kick must start from 420 / 2 = 210, got {}",
+                    duty_full.last()
+                );
+            } else {
+                assert!(
+                    duty_full.last() >= 90 && duty_full.last() < 130,
+                    "kick_down must start from min_startup / 2 = 90, got {}",
+                    duty_full.last()
+                );
+            }
             assert_eq!(shared_split.duty_cycle.get(), shared_full.duty_cycle.get());
             assert_eq!(
                 shared_split.duty_cycle_setpoint.get(),

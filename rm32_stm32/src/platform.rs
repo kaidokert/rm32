@@ -29,8 +29,8 @@ impl rm32::platform::Platform for StmPlatform {
     const PWM_BASE_PERIOD: u16 = Chip::TIM1_AUTORELOAD;
 }
 
-/// The board's tuning policy, from the board yaml's `tuning` key.
-pub type Tuning = board::Tuning;
+/// The active compile-time tuning policy for this port.
+pub type Tuning = rm32::tuning::Am32Tuning;
 
-/// The core's main-loop state on this port, under the board's tuning.
+/// The core's main-loop state on this port, under the active tuning policy.
 pub type MainState = rm32::main_state::MainState<StmPlatform, rm32::main_state::NoLed, Tuning>;

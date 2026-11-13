@@ -42,22 +42,10 @@ enum BemfPinsYaml {
     Dual(BemfPinsDual),
 }
 
-/// `rm32::tuning` policy the board builds with: `am32` (AM32's behaviour,
-/// the default when the key is absent) or `rig` (`QualifiedRigTuning`).
-#[derive(Deserialize, Clone, Copy, Default)]
-#[serde(rename_all = "lowercase")]
-enum Tuning {
-    Rig,
-    #[default]
-    Am32,
-}
-
 #[derive(Deserialize)]
 struct BoardYaml {
     name: String,
     mcu: String,
-    #[serde(default)]
-    tuning: Tuning,
     dead_time: u8,
     /// Bus divider as its true ratio x100 (11:1 = 1100). Battery voltage is
     /// centivolts everywhere; AM32's VOLTAGE_DIVIDER 110 is written 1100.
@@ -456,16 +444,8 @@ pub const BOARD_EXT: rm32_stm32::board_ext::BoardExt = rm32_stm32::board_ext::Bo
          pub const MILLIVOLT_PER_AMP: u16 = {};
          pub const CURRENT_OFFSET: i16 = {};
          pub const USE_NTC: bool = {};
-         pub type Tuning = rm32::tuning::{};
 ",
-        board.voltage_divider_x100,
-        board.millivolt_per_amp,
-        board.current_offset,
-        board.use_ntc,
-        match board.tuning {
-            Tuning::Rig => "QualifiedRigTuning",
-            Tuning::Am32 => "Am32Tuning",
-        },
+        board.voltage_divider_x100, board.millivolt_per_amp, board.current_offset, board.use_ntc,
     );
     fs::write(Path::new(&out_dir).join("board_platform.rs"), platform).unwrap();
 
