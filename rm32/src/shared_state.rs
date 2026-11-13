@@ -84,6 +84,7 @@ pub struct SharedState {
     prop_brake_active: AtomicBool,    // proportional brake engaged (main sets, ISR reads)
     isr_action: AtomicU8,             // main requests one-shot ISR-context work
     duty_kick_down: AtomicBool,       // main requests duty reduction after desync
+    duty_kick_half: AtomicBool,       // fast-rotor desync: halve duty (rig tuning)
     changeover_step: AtomicU8,        // sine changeover step (0=none, 1-6=pending)
     desync_check_pending: AtomicBool, // ISR requests main-loop desync handling
     one_khz_counter: AtomicU8,        // incremented by TIM6 ISR, consumed by main
@@ -142,6 +143,7 @@ impl SharedState {
             prop_brake_active: AtomicBool::new(false),
             isr_action: AtomicU8::new(IsrAction::None as u8),
             duty_kick_down: AtomicBool::new(false),
+            duty_kick_half: AtomicBool::new(false),
             changeover_step: AtomicU8::new(0),
             desync_check_pending: AtomicBool::new(false),
             one_khz_counter: AtomicU8::new(0),
@@ -626,6 +628,12 @@ impl SharedState {
     pub fn take_duty_kick_down(&self) -> bool {
         self.duty_kick_down.swap(false, Ordering::AcqRel)
     }
+    pub fn request_duty_kick_half(&self) {
+        self.duty_kick_half.store(true, REL);
+    }
+    pub fn take_duty_kick_half(&self) -> bool {
+        self.duty_kick_half.swap(false, Ordering::AcqRel)
+    }
     pub fn changeover_step(&self) -> u8 {
         self.changeover_step.load(ACQ)
     }
@@ -896,6 +904,12 @@ impl crate::shared_comm::Commands for SharedState {
     }
     fn take_duty_kick_down(&self) -> bool {
         SharedState::take_duty_kick_down(self)
+    }
+    fn request_duty_kick_half(&self) {
+        SharedState::request_duty_kick_half(self);
+    }
+    fn take_duty_kick_half(&self) -> bool {
+        SharedState::take_duty_kick_half(self)
     }
     fn save_settings_flag(&self) -> bool {
         SharedState::save_settings_flag(self)
@@ -1202,6 +1216,9 @@ mod tests {
         assert!(Telemetry::telem_counter_check_and_inc(&shared, 2));
 
         // Commands
+        Commands::request_duty_kick_half(&shared);
+        assert!(Commands::take_duty_kick_half(&shared));
+        assert!(!Commands::take_duty_kick_half(&shared));
         Commands::set_save_settings_flag(&shared, true);
         assert!(Commands::save_settings_flag(&shared));
         Commands::increment_control_ticks(&shared);

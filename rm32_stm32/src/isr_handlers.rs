@@ -283,7 +283,7 @@ fn install_staged_isr_state() {
 /// returned delay outside interrupt exclusion.
 pub fn service_sine(
     system: &mut rm32::system::SystemTick<crate::platform::StmPlatform>,
-    main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>,
+    main: &mut crate::platform::MainState,
     dead_time: i16,
 ) -> Option<u16> {
     ensure_split_init();
@@ -330,7 +330,7 @@ pub fn service_sine(
 
 /// Recover input configuration after the bounded publication queue fills.
 /// Access the live ISR cell, not the initialization cell consumed by the first IRQ.
-pub fn resync_input_config(main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>) {
+pub fn resync_input_config(main: &mut crate::platform::MainState) {
     let shared = isr::shared();
     if shared.config_write_overflowed() {
         ensure_split_init();
@@ -346,9 +346,7 @@ pub fn resync_input_config(main: &mut rm32::main_state::MainState<crate::platfor
 
 /// Claim a save and copy authoritative bytes with the input producer excluded.
 /// Flash I/O must happen after this function returns, outside the exclusion.
-pub fn prepare_input_save(
-    main: &mut rm32::main_state::MainState<crate::platform::StmPlatform>,
-) -> bool {
+pub fn prepare_input_save(main: &mut crate::platform::MainState) -> bool {
     if !isr::shared().save_settings_flag() {
         return false;
     }
@@ -432,6 +430,7 @@ pub fn handle_tim6() {
             }
             if shared.isr_action() == rm32::shared_comm::IsrAction::AllOff {
                 shared.take_duty_kick_down();
+                shared.take_duty_kick_half();
                 shared.set_changeover_step(0);
                 com.com_timer.disable_interrupt();
                 com.phase.all_off();

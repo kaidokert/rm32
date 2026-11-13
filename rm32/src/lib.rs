@@ -40,5 +40,6 @@ pub mod system;
 pub mod telemetry;
 pub mod tone;
 pub mod transfer;
+pub mod tuning;
 pub mod units;
 pub mod ws2812;

@@ -83,8 +83,13 @@ pub fn steady_running_tick_unmasked<P, S, F>(
     );
     shared.set_duty_cycle_setpoint(setpoint);
 
-    if shared.take_duty_kick_down() {
+    // Running is guaranteed here, as `ten_khz_tick`'s kick block requires.
+    let kick_down = shared.take_duty_kick_down();
+    let kick_half = shared.take_duty_kick_half();
+    if kick_down {
         duty.kick_down();
+    } else if kick_half {
+        duty.kick_half();
     }
 
     duty.set_cycle(setpoint);
@@ -170,6 +175,7 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     match action {
         IsrAction::AllOff => {
             ctx.shared.take_duty_kick_down();
+            ctx.shared.take_duty_kick_half();
             ctx.duty.sine_outputs_on = false;
             ctx.duty.active_brake_on = false;
             ctx.shared.set_changeover_step(0);
@@ -300,8 +306,13 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
     // and `start_motor` must not overwrite the recovery ramp origin.
     // Keep it separate from the prioritized timer action so both can run.
     let kick_down = ctx.shared.take_duty_kick_down();
-    if kick_down && ctx.shared.running() {
-        ctx.duty.kick_down();
+    let kick_half = ctx.shared.take_duty_kick_half();
+    if ctx.shared.running() {
+        if kick_down {
+            ctx.duty.kick_down();
+        } else if kick_half {
+            ctx.duty.kick_half();
+        }
     }
 
     // Core tick
