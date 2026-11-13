@@ -28,3 +28,9 @@ impl rm32::platform::Platform for StmPlatform {
     /// TIM1 auto-reload for 24 kHz at the chip clock (AM32 `TIMER1_MAX_ARR`).
     const PWM_BASE_PERIOD: u16 = Chip::TIM1_AUTORELOAD;
 }
+
+/// The active compile-time tuning policy for this port.
+pub type Tuning = rm32::tuning::Am32Tuning;
+
+/// The core's main-loop state on this port, under the active tuning policy.
+pub type MainState = rm32::main_state::MainState<StmPlatform, rm32::main_state::NoLed, Tuning>;

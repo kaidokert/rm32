@@ -169,6 +169,12 @@ impl DutyState {
         self.last = self.last.min(self.min_startup / 2);
     }
 
+    /// Fast-rotor desync recovery (`DesyncPolicy::HalfKickStayInterrupt`):
+    /// halve the applied duty, floored at the AM32 kick level (`min_startup / 2`).
+    pub(crate) fn kick_half(&mut self) {
+        self.last = self.last.min((self.last / 2).max(self.min_startup / 2));
+    }
+
     /// Increment ramp counter (called each ISR tick).
     pub(crate) fn increment_ramp_count(&mut self) {
         self.ramp_count += 1;

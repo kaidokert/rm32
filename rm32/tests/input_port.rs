@@ -121,6 +121,7 @@ fn non_input_irq_enabled() -> bool {
     peripheral::NVIC::is_enabled(NON_INPUT_IRQ)
 }
 mod platform {
+    pub type MainState = rm32::main_state::MainState<StmPlatform>;
     pub struct StmPlatform;
     impl rm32::platform::Platform for StmPlatform {
         const TICK_HZ: u32 = 20_000;

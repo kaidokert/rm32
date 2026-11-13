@@ -10,6 +10,7 @@ use crate::functions::get_abs_dif;
 use crate::hal::{Adc, TelemetryUart};
 use crate::shared_comm::IsrAction;
 use crate::telemetry;
+use crate::tuning::{DesyncPolicy, TuningPolicy, orbit_current};
 use crate::units::AdcCount;
 use embedded_hal::digital::OutputPin;
 
@@ -112,9 +113,9 @@ impl embedded_hal::digital::ErrorType for NoLed {
     type Error = core::convert::Infallible;
 }
 
-/// Main-loop exclusive state, generic over optional LED pin.
-pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
-    _platform: core::marker::PhantomData<P>,
+/// Main-loop exclusive state, generic over optional LED pin and tuning policy.
+pub struct MainState<P: Timing, LED: OutputPin = NoLed, T: TuningPolicy = crate::tuning::Am32Tuning>
+{
     pub protection: ProtectionState,
     pub(crate) measurements: Measurements<P>,
     pub config: EepromConfig,
@@ -134,8 +135,32 @@ pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
     pub(crate) target_min_bemf_counts: u8,
     pub(crate) low_cell_volt_cutoff: u16,
     pub(crate) desync_check: bool,
+    /// Lifetime desync-event count (AM32 `desync_happened`).
+    pub desync_events: u32,
+    /// Per-branch desync-response counters: which branch each desync
+    /// fire took (fast-rotor stay-interrupt / current-veto demote /
+    /// slow demote / already-polling).
+    pub dsy_fast: u32,
+    pub dsy_demote_cur: u32,
+    /// Demote fired from interrupt mode with sane current.
+    pub dsy_demote_slow: u32,
+    /// Desync fired while already in polling mode.
+    pub dsy_demote_old: u32,
+    /// Interrupt-mode desync checks since polling ended (see the settling
+    /// gate in `tick`).
     desync_checks_after_polling: u8,
+    /// Polling ran since the last stop; the next interrupt-mode checks only
+    /// re-seed the detector until settled.
     polling_mode_seen: bool,
+    /// Wrong-phase-orbit trips (`OrbitTripConfig`) — lifetime count.
+    pub orbit_trips: u32,
+    /// Desync-detector re-arm threshold (zero_crosses). Normally the
+    /// AM32 10; raised to the policy's `rearm_holdoff_zc` for one cycle after a
+    /// fast-rotor fire so the stay-interrupt response cannot self-loop
+    /// against a stale average during commanded transients.
+    pub(crate) desync_rearm_zc: u32,
+    /// Wrong-phase-orbit trip state (`OrbitTripConfig`).
+    orbit_guard: crate::tuning::OrbitGuard,
     pub(crate) last_armed: bool,
     /// Set on the tick when arming transition happens
     pub just_armed: bool,
@@ -145,6 +170,9 @@ pub struct MainState<P: Timing, LED: OutputPin = NoLed> {
     pub(crate) led: LED,
     /// Position within the 200 ms LED period, in control ticks.
     pub(crate) led_phase: u32,
+    /// The platform whose clocks the tick-unit constants are taken in, and
+    /// the tuning policy (defaulting to `Am32Tuning`).
+    _platform: core::marker::PhantomData<(P, T)>,
     /// TIM1 max auto-reload (from PWM frequency config, overwritten by apply_motor_config)
     pub(crate) timer1_max_arr: u16,
     /// Last observed control clock; None anchors the first main service.
@@ -160,7 +188,7 @@ pub struct ChipParams {
     pub cpu_mhz: u8,
 }
 
-impl<P: Timing> MainState<P, NoLed> {
+impl<P: Timing, T: TuningPolicy> MainState<P, NoLed, T> {
     /// Construct MainState from board config and chip constants.
     ///
     /// Used by both firmware and harness to ensure identical initialization.
@@ -171,16 +199,26 @@ impl<P: Timing> MainState<P, NoLed> {
     }
 }
 
-impl<P: Timing, LED: OutputPin> MainState<P, LED> {
+impl<P: Timing, LED: OutputPin, T: TuningPolicy> MainState<P, LED, T> {
     /// Construct main-loop state with an optional custom status LED output.
     pub fn new_with_led(board: &crate::board::BoardConfig, chip: ChipParams, led: LED) -> Self {
+        let () = P::VALID;
+        const {
+            if let DesyncPolicy::HalfKickStayInterrupt {
+                rearm_holdoff_zc, ..
+            } = T::DESYNC
+            {
+                assert!(
+                    rearm_holdoff_zc < 10_000,
+                    "rearm_holdoff_zc must be below the 10_000 zero_crosses saturation cap"
+                );
+            }
+        }
         assert!(
             board.min_bemf_counts <= u8::MAX / 2,
             "min_bemf_counts must fit derived startup thresholds"
         );
-        let () = P::VALID;
         Self {
-            _platform: core::marker::PhantomData,
             protection: ProtectionState::default(),
             measurements: Measurements::default(),
             config: EepromConfig::default(),
@@ -195,19 +233,28 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             target_min_bemf_counts: board.min_bemf_counts,
             low_cell_volt_cutoff: 330,
             desync_check: false,
+            desync_events: 0,
+            dsy_fast: 0,
+            dsy_demote_cur: 0,
+            dsy_demote_slow: 0,
+            dsy_demote_old: 0,
             desync_checks_after_polling: 0,
             polling_mode_seen: false,
+            orbit_trips: 0,
+            desync_rearm_zc: 10,
+            orbit_guard: crate::tuning::OrbitGuard::default(),
             last_armed: false,
             just_armed: false,
             needs_reset: false,
             led,
             led_phase: 0,
+            _platform: core::marker::PhantomData,
             last_control_tick: None,
         }
     }
 }
 
-impl<P: Timing, LED: OutputPin> MainState<P, LED> {
+impl<P: Timing, LED: OutputPin, T: TuningPolicy> MainState<P, LED, T> {
     /// Read-only access to measurements.
     pub fn measurements(&self) -> &Measurements<P> {
         &self.measurements
@@ -408,43 +455,97 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             self.desync_checks_after_polling = 0;
             self.polling_mode_seen = true;
         }
+        // Desync detection (re-arm gate is dynamic — see desync_rearm_zc)
         if self.desync_check && zc > 10 {
-            let settled = if shared.old_routine() || !self.polling_mode_seen {
-                true
-            } else {
-                self.desync_checks_after_polling =
-                    self.desync_checks_after_polling.saturating_add(1);
-                if self.desync_checks_after_polling >= DESYNC_SETTLED_CHECKS {
-                    self.polling_mode_seen = false;
+            if zc > self.desync_rearm_zc {
+                self.desync_rearm_zc = 10;
+                let diff = get_abs_dif(
+                    self.timing.last_average_interval as i32,
+                    self.timing.average_interval as i32,
+                );
+                let settled = if shared.old_routine() || !self.polling_mode_seen {
                     true
                 } else {
-                    false
-                }
-            };
-            let diff = get_abs_dif(
-                self.timing.last_average_interval as i32,
-                self.timing.average_interval as i32,
-            );
-            if settled
-                && diff > (self.timing.average_interval >> 1)
-                && self.timing.average_interval < P::DESYNC_MAX_INTERVAL
-            {
-                // AM32's `if (zero_crosses > 100) { average_interval = 5000; }`
-                // sits after `zero_crosses = 0` and is unreachable dead code.
-                // Match that runtime behavior: resetting `average_interval`
-                // before `last_average_interval = average_interval` seeds 5000
-                // into the detector and triggers a false second desync echo on
-                // the following revolution.
-                shared.set_zero_crosses(0);
-                shared.request_duty_kick_down();
-                // DesyncFallback first (Running -> OldRoutine), then StopMotor
-                // conditionally (OldRoutine -> Armed); StopMotor first would
-                // transition directly to Armed where DesyncFallback is ignored.
-                shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
-                if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
-                    || shared.commutation_interval() > P::DESYNC_STOP_INTERVAL
+                    self.desync_checks_after_polling =
+                        self.desync_checks_after_polling.saturating_add(1);
+                    if self.desync_checks_after_polling >= DESYNC_SETTLED_CHECKS {
+                        self.polling_mode_seen = false;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if settled
+                    && diff > (self.timing.average_interval >> 1)
+                    && self.timing.average_interval < P::DESYNC_MAX_INTERVAL
                 {
-                    shared.transition(crate::motor_mode::MotorEvent::StopMotor);
+                    // AM32's `if (zero_crosses > 100) { average_interval = 5000; }`
+                    // sits after `zero_crosses = 0` and is unreachable dead code.
+                    // Match that runtime behavior: resetting `average_interval`
+                    // before `last_average_interval = average_interval` seeds 5000
+                    // into the detector and triggers a false second desync echo on
+                    // the following revolution.
+                    shared.set_zero_crosses(0);
+                    self.desync_events = self.desync_events.wrapping_add(1);
+                    let desync_from_interrupt_mode = !shared.old_routine();
+                    // Under `DesyncPolicy::HalfKickStayInterrupt`, high-speed
+                    // desyncs with normal phase current stay in interrupt mode
+                    // instead of demoting to 20 kHz BEMF polling. Elevated
+                    // current above the policy's orbit threshold (or a board
+                    // without current sensing when an orbit trip is configured)
+                    // forces a full demotion so the commutation phase is
+                    // re-acquired.
+                    let current_ma = i32::from(self.measurements.actual_current.0) * 10;
+                    let current_sane = <T as TuningPolicy>::ORBIT_TRIP.is_none()
+                        || (P::MILLIVOLT_PER_AMP > 0
+                            && !orbit_current::<T>(
+                                current_ma,
+                                shared.duty_cycle(),
+                                self.measurements.battery_voltage.0,
+                            ));
+                    let (fast_rotor, rearm_holdoff_zc) = match <T as TuningPolicy>::DESYNC {
+                        DesyncPolicy::Am32 => (false, 0),
+                        DesyncPolicy::HalfKickStayInterrupt {
+                            rearm_holdoff_zc, ..
+                        } => (
+                            current_sane
+                                && shared.commutation_interval()
+                                    < const { crate::tuning::stay_interrupt_ci::<P, T>() },
+                            rearm_holdoff_zc,
+                        ),
+                    };
+                    // Duty reduction on desync: stock AM32 drops `last_duty_cycle`
+                    // to `min_startup / 2`, whereas the fast-rotor stay-in-interrupt
+                    // branch halves the current duty.
+                    if desync_from_interrupt_mode && fast_rotor {
+                        self.dsy_fast = self.dsy_fast.wrapping_add(1);
+                    } else if desync_from_interrupt_mode && !current_sane {
+                        self.dsy_demote_cur = self.dsy_demote_cur.wrapping_add(1);
+                    } else if desync_from_interrupt_mode {
+                        self.dsy_demote_slow = self.dsy_demote_slow.wrapping_add(1);
+                    } else {
+                        self.dsy_demote_old = self.dsy_demote_old.wrapping_add(1);
+                    }
+                    if desync_from_interrupt_mode && fast_rotor {
+                        shared.request_duty_kick_half();
+                    } else {
+                        shared.request_duty_kick_down();
+                    }
+                    // Detector holdoff (see desync_rearm_zc).
+                    if desync_from_interrupt_mode && fast_rotor {
+                        self.desync_rearm_zc = rearm_holdoff_zc;
+                    }
+                    if !(desync_from_interrupt_mode && fast_rotor) {
+                        // DesyncFallback first (Running -> OldRoutine), then StopMotor
+                        // conditionally (OldRoutine -> Armed); StopMotor first would
+                        // transition directly to Armed where DesyncFallback is ignored.
+                        shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
+                        if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
+                            || shared.commutation_interval() > P::DESYNC_STOP_INTERVAL
+                        {
+                            shared.transition(crate::motor_mode::MotorEvent::StopMotor);
+                        }
+                    }
                 }
             }
             self.desync_check = false;
@@ -498,6 +599,36 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
             shared.set_actual_current(self.measurements.actual_current);
             shared.set_battery_voltage(self.measurements.battery_voltage);
             shared.set_degrees_celsius(self.measurements.degrees_celsius.0);
+
+            // Optional duty-proportional overcurrent orbit trip (`OrbitTripConfig`):
+            // if current stays above the policy's duty/voltage-scaled threshold
+            // line for `trip_ms` consecutive locked 1 kHz ticks, force a full
+            // desync fallback.
+            if let Some(orbit) = <T as TuningPolicy>::ORBIT_TRIP.as_ref() {
+                let locked =
+                    shared.running() && !shared.old_routine() && shared.zero_crosses() > 1000;
+                let current_ma = i32::from(self.measurements.actual_current.0) * 10;
+                let line = crate::tuning::orbit_line::<T>(
+                    shared.duty_cycle(),
+                    self.measurements.battery_voltage.0,
+                )
+                .unwrap_or(i32::MAX);
+                let step =
+                    self.orbit_guard
+                        .tick(orbit, locked, shared.duty_cycle(), current_ma > line);
+                if step.trip {
+                    self.orbit_trips = self.orbit_trips.wrapping_add(1);
+                    self.desync_events = self.desync_events.wrapping_add(1);
+                    shared.set_zero_crosses(0);
+                    shared.request_duty_kick_down();
+                    shared.transition(crate::motor_mode::MotorEvent::DesyncFallback);
+                    if (self.config.bi_direction == 0 && shared.adjusted_input() > 47)
+                        || shared.commutation_interval() > P::DESYNC_STOP_INTERVAL
+                    {
+                        shared.transition(crate::motor_mode::MotorEvent::StopMotor);
+                    }
+                }
+            }
 
             // Low voltage cutoff
             if self.config.low_voltage_cut_off != 0 {
@@ -596,13 +727,21 @@ impl<P: Timing, LED: OutputPin> MainState<P, LED> {
         }
 
         // eRPM + temperature duty ceiling
-        shared.set_duty_maximum(duty_ceiling(
+        let mut dmax = duty_ceiling(
             e_com_time,
             self.motor_kv,
             self.config.motor_poles,
             self.measurements.degrees_celsius.0,
             self.config.temperature_limit,
-        ));
+        );
+        // Optional post-lock duty clamp (`ReclimbConfig`): cap the duty
+        // ceiling until `confirm_zc` zero crossings have been observed.
+        if let Some(reclimb) = <T as TuningPolicy>::RECLIMB
+            && shared.zero_crosses() < reclimb.confirm_zc
+        {
+            dmax = dmax.min(reclimb.duty_cap);
+        }
+        shared.set_duty_maximum(dmax);
 
         // Require stronger BEMF confirmation during startup.
         if zc < 5 {
@@ -1389,7 +1528,9 @@ mod tests {
         shared.set_motor_mode(crate::motor_mode::MotorMode::Running);
         shared.set_adjusted_input(0);
         shared.set_zero_crosses(zc);
-        shared.set_commutation_interval(100);
+        // Above stay_interrupt_ci: a custom policy's fast-rotor half-kick
+        // branch must not apply; below DESYNC_STOP_INTERVAL.
+        shared.set_commutation_interval(700);
         shared.set_e_com_time((average * 3) as i32);
         let mut main = make_test_main_state();
         main.config.bi_direction = 1;
@@ -1399,6 +1540,205 @@ mod tests {
         main.timing.average_interval = average;
         main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
         (shared.motor_mode(), shared.take_duty_kick_down())
+    }
+
+    /// One settled fast-rotor desync (commutation interval 250 us, current
+    /// 0) under tuning `T`: the mode afterwards, and which duty kick it asked
+    /// for (down, half).
+    fn fast_rotor_desync<T: TuningPolicy>() -> (crate::motor_mode::MotorMode, bool, bool) {
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        shared.set_motor_mode(crate::motor_mode::MotorMode::Running);
+        shared.set_adjusted_input(0);
+        shared.set_zero_crosses(200);
+        shared.set_commutation_interval(500); // 2 MHz ticks: 250 us
+        shared.set_e_com_time(1500);
+        let mut main = super::MainState::<crate::platform::TestPlatform, NoLed, T>::new(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+        main.config.bi_direction = 1;
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+        main.timing.last_average_interval = 800;
+        main.timing.average_interval = 500;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        (
+            shared.motor_mode(),
+            shared.take_duty_kick_down(),
+            shared.take_duty_kick_half(),
+        )
+    }
+
+    /// The tuning is a type parameter defaulting to AM32: the same fast-rotor
+    /// desync demotes to polling with AM32's kick under the default, and stays
+    /// in interrupt mode with the half kick under a custom `HalfKickStayInterrupt`
+    /// policy.
+    #[test]
+    fn fast_rotor_desync_policy_follows_the_tuning_parameter() {
+        use crate::motor_mode::MotorMode;
+        assert_eq!(
+            fast_rotor_desync::<crate::tuning::Am32Tuning>(),
+            (MotorMode::OldRoutine, true, false)
+        );
+        assert_eq!(
+            fast_rotor_desync::<crate::tuning::TestTuning>(),
+            (MotorMode::Running, false, true)
+        );
+    }
+
+    #[test]
+    fn custom_tuning_applies_reclimb_clamp_orbit_trip_and_desync_rearm_holdoff() {
+        use crate::motor_mode::MotorMode;
+        use crate::tuning::TestTuning;
+
+        let shared = SharedState::new::<crate::platform::TestPlatform>();
+        shared.set_motor_mode(MotorMode::Running);
+        shared.set_adjusted_input(100);
+        shared.set_zero_crosses(200);
+        shared.set_commutation_interval(500);
+        shared.set_e_com_time(1500);
+
+        let mut main = super::MainState::<crate::platform::TestPlatform, NoLed, TestTuning>::new(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+        main.config.bi_direction = 1;
+        main.config.temperature_limit = 141;
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+        main.timing.last_average_interval = 800;
+        main.timing.average_interval = 500;
+
+        // 1. Fast-rotor desync stays in Running, requests half kick, and raises desync_rearm_zc to 100.
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(shared.motor_mode(), MotorMode::Running);
+        assert!(shared.take_duty_kick_half());
+        assert_eq!(main.dsy_fast, 1);
+        assert_eq!(main.desync_rearm_zc, 100);
+        // Unconfirmed lock (zero_crosses < 1000) clamps duty_maximum to 800.
+        assert_eq!(shared.duty_maximum(), 800);
+
+        // 2. While 10 < zero_crosses <= 100, a revolution desync_check during post-kick
+        // deceleration is held off, consumes `desync_check`, and refreshes
+        // `last_average_interval` so the first check past the holdoff does not
+        // self-loop against the pre-kick average.
+        shared.set_zero_crosses(50);
+        shared.set_e_com_time(2700); // average_interval = 900 (decelerated from 500)
+        main.desync_check = true;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(main.dsy_fast, 1);
+        assert_eq!(main.desync_events, 1);
+        assert_eq!(main.desync_rearm_zc, 100);
+        assert!(!main.desync_check);
+        assert_eq!(main.timing.last_average_interval, 900);
+
+        // First check past the holdoff (zero_crosses = 101) at the settled 900-tick
+        // average resets desync_rearm_zc to 10 without firing a false echo.
+        shared.set_zero_crosses(101);
+        main.desync_check = true;
+        main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(main.desync_events, 1);
+        assert_eq!(main.desync_rearm_zc, 10);
+
+        // 3. Once zero_crosses > 1000, the reclimb clamp releases (2000).
+        // While in OldRoutine (polling mode), OrbitGuard does not consider the motor locked.
+        shared.set_zero_crosses(1200);
+        for _ in 0..200 {
+            trip_one_khz(&shared);
+            main.tick(&shared, &mut MockAdc::new(), &mut MockTelem);
+        }
+        assert_eq!(shared.duty_maximum(), 2000);
+        assert_eq!(main.orbit_trips, 0);
+
+        // ~20.13 A = 2013 cA = 20,130 mA (above TestTuning's 10,000 mA line at duty 0,
+        // but below 10,000 cA if centiamps were passed unscaled).
+        const ORBIT_RAW_CURRENT_20A: u16 = 500;
+        for _ in 0..50 {
+            main.measurements
+                .current_filter
+                .update(ORBIT_RAW_CURRENT_20A);
+        }
+        let mut high_current_adc = MockAdc::with_raw_current(ORBIT_RAW_CURRENT_20A);
+        shared.set_motor_mode(MotorMode::OldRoutine);
+        for _ in 0..30 {
+            trip_one_khz(&shared);
+            main.tick(&shared, &mut high_current_adc, &mut MockTelem);
+        }
+        assert_eq!(main.orbit_trips, 0);
+
+        // In closed-loop Running mode, trip_ms + 1 (26) 1 kHz ticks above the line
+        // forces the full desync fallback.
+        shared.set_motor_mode(MotorMode::Running);
+        for _ in 0..25 {
+            trip_one_khz(&shared);
+            main.tick(&shared, &mut high_current_adc, &mut MockTelem);
+            assert_eq!(main.orbit_trips, 0);
+        }
+        trip_one_khz(&shared);
+        main.tick(&shared, &mut high_current_adc, &mut MockTelem);
+        assert_eq!(main.orbit_trips, 1);
+        assert_eq!(shared.motor_mode(), MotorMode::OldRoutine);
+        assert!(shared.take_duty_kick_down());
+
+        // 4. With actual_current still above the orbit line, a fast-rotor desync
+        // is vetoed by `orbit_current` and demotes to OldRoutine (`dsy_demote_cur`)
+        // instead of staying in interrupt mode.
+        shared.set_motor_mode(MotorMode::Running);
+        shared.set_zero_crosses(200);
+        shared.set_commutation_interval(500);
+        shared.set_e_com_time(1500);
+        main.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main.desync_check = true;
+        main.timing.last_average_interval = 800;
+        main.timing.average_interval = 500;
+        main.tick(&shared, &mut high_current_adc, &mut MockTelem);
+        assert_eq!(main.dsy_demote_cur, 1);
+        assert_eq!(shared.motor_mode(), MotorMode::OldRoutine);
+        assert!(shared.take_duty_kick_down());
+
+        // 5. On a platform without current sensing (`MILLIVOLT_PER_AMP == 0`),
+        // a policy with `ORBIT_TRIP = Some(...)` does not treat `0 cA` as sane
+        // current and demotes (`dsy_demote_cur`) instead of staying in interrupt mode.
+        struct SensorlessPlatform;
+        impl crate::platform::Platform for SensorlessPlatform {
+            const TICK_HZ: u32 = crate::platform::TestPlatform::TICK_HZ;
+            const TIMER_HZ: u32 = crate::platform::TestPlatform::TIMER_HZ;
+            const CAPTURE_HZ: u32 = crate::platform::TestPlatform::CAPTURE_HZ;
+            const GCR_SHIFT: u8 = crate::platform::TestPlatform::GCR_SHIFT;
+            const VOLTAGE_DIVIDER_X100: u16 = crate::platform::TestPlatform::VOLTAGE_DIVIDER_X100;
+            const MILLIVOLT_PER_AMP: u16 = 0;
+            const CURRENT_OFFSET: i16 = 0;
+            const USE_NTC: bool = false;
+            const ADC_FULL_SCALE: u16 = crate::platform::TestPlatform::ADC_FULL_SCALE;
+            const ADC_VREF_MV: u16 = crate::platform::TestPlatform::ADC_VREF_MV;
+            const PWM_BASE_PERIOD: u16 = crate::platform::TestPlatform::PWM_BASE_PERIOD;
+        }
+        let shared_sl = SharedState::new::<SensorlessPlatform>();
+        shared_sl.set_motor_mode(MotorMode::Running);
+        shared_sl.set_zero_crosses(200);
+        shared_sl.set_commutation_interval(500);
+        shared_sl.set_e_com_time(1500);
+        let mut main_sl = super::MainState::<SensorlessPlatform, NoLed, TestTuning>::new(
+            &crate::board::BoardConfig::DEFAULT,
+            ChipParams {
+                timer1_max_arr: 1999,
+                cpu_mhz: 64,
+            },
+        );
+        main_sl.config.bi_direction = 1;
+        main_sl.desync_checks_after_polling = DESYNC_SETTLED_CHECKS;
+        main_sl.desync_check = true;
+        main_sl.timing.last_average_interval = 800;
+        main_sl.timing.average_interval = 500;
+        main_sl.tick(&shared_sl, &mut MockAdc::new(), &mut MockTelem);
+        assert_eq!(main_sl.dsy_demote_cur, 1);
+        assert_eq!(shared_sl.motor_mode(), MotorMode::OldRoutine);
     }
 
     #[test]
@@ -1443,7 +1783,8 @@ mod tests {
         shared.set_motor_mode(MotorMode::Running);
         shared.set_adjusted_input(0);
         shared.set_zero_crosses(200);
-        shared.set_commutation_interval(100);
+        // Above stay_interrupt_ci: a custom policy stays in interrupt mode below it.
+        shared.set_commutation_interval(700);
         shared.set_e_com_time(1500);
 
         let mut main = make_test_main_state();
@@ -1487,7 +1828,8 @@ mod tests {
         shared.set_motor_mode(MotorMode::Running);
         shared.set_adjusted_input(100);
         shared.set_zero_crosses(25);
-        shared.set_commutation_interval(100);
+        // Above stay_interrupt_ci: a custom policy stays in interrupt mode below it.
+        shared.set_commutation_interval(700);
         shared.set_e_com_time(1500);
 
         let mut main = make_test_main_state();

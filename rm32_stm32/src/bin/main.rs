@@ -14,11 +14,11 @@ use rm32::control::state::{BemfState, DutyState};
 use rm32::hal::{Bridge, MotorHal, System, TelemetryUart as _};
 use rm32::ws2812::LedStatus;
 
-type MainState = rm32::main_state::MainState<rm32_stm32::platform::StmPlatform>;
 use rm32_stm32::init::InitResult;
 use rm32_stm32::isr::{self, IsrState};
 use rm32_stm32::mcu::FlashStorage;
 use rm32_stm32::mcu::{Chip, ChipConfig};
+use rm32_stm32::platform::MainState;
 
 // Board configuration generated from YAML by build.rs.
 // Override with: BOARD=boards/my_board.yaml cargo build

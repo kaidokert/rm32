@@ -5,28 +5,30 @@
 //! in both contexts, eliminating the "harness vs firmware" divergence
 //! that caused bugs across multiple review rounds.
 
+use crate::constants::Timing;
 use crate::control::input::{self, InputState};
 use crate::hal::{Adc, BemfSensor, Bridge, ComTimer, MotorHal, PhaseOutput, TelemetryUart};
 use crate::main_state::MainState;
 use crate::shared_state::SharedState;
 use crate::sine::PhasePositions;
+use crate::tuning::TuningPolicy;
 use embedded_hal::digital::OutputPin;
 
 /// Main-loop system tick state.
 ///
 /// Owns main-loop state shared by firmware and the host harness.
-pub struct SystemTick<P: crate::constants::Timing> {
-    _platform: core::marker::PhantomData<P>,
+pub struct SystemTick<P: Timing> {
     pub input_state: InputState,
     sine_positions: PhasePositions,
+    _platform: core::marker::PhantomData<P>,
 }
 
-impl<P: crate::constants::Timing> SystemTick<P> {
+impl<P: Timing> SystemTick<P> {
     pub fn new() -> Self {
         Self {
-            _platform: core::marker::PhantomData,
             input_state: InputState::new::<P>(),
             sine_positions: PhasePositions::new(),
+            _platform: core::marker::PhantomData,
         }
     }
 
@@ -34,10 +36,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     ///
     /// Call this BEFORE the ISR tick (harness) or independently (firmware,
     /// where the ISR tick runs in the actual interrupt).
-    pub fn tick_input<LED: OutputPin>(
+    pub fn tick_input<LED: OutputPin, T: TuningPolicy>(
         &mut self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
     ) {
         // Recompute input mode from config + detected protocol each tick.
         // Cheap (a few comparisons) and ensures mode stays in sync with config.
@@ -55,10 +57,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     /// Run main-loop pipeline.
     ///
     /// Call this AFTER the ISR tick.
-    pub fn tick_main<LED: OutputPin>(
+    pub fn tick_main<LED: OutputPin, T: TuningPolicy>(
         &self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         adc: &mut dyn Adc,
         telem: &mut dyn TelemetryUart,
     ) {
@@ -70,10 +72,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     /// The host harness runs the ISR inline through `isr_tick`; firmware can
     /// pass a no-op because the ISR runs asynchronously on hardware. The
     /// ISR-to-main handoff is synchronized before `tick_main()`.
-    pub fn run_tick<LED: OutputPin>(
+    pub fn run_tick<LED: OutputPin, T: TuningPolicy>(
         &mut self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         adc: &mut dyn Adc,
         telem: &mut dyn TelemetryUart,
         isr_tick: impl FnOnce(),
@@ -87,17 +89,20 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     }
 
     /// Consume ISR-published flags that affect main-loop state.
-    pub fn sync_isr_to_main<LED: OutputPin>(
+    pub fn sync_isr_to_main<LED: OutputPin, T: TuningPolicy>(
         &self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
     ) {
         if shared.take_desync_check_pending() {
             main.set_desync_check(true);
         }
     }
 
-    pub fn sync_config_writes<LED: OutputPin>(shared: &SharedState, main: &mut MainState<P, LED>) {
+    pub fn sync_config_writes<LED: OutputPin, T: TuningPolicy>(
+        shared: &SharedState,
+        main: &mut MainState<P, LED, T>,
+    ) {
         while let Some((offset, value)) = shared.pop_config_write() {
             if let Some(byte) = main.config.as_bytes_mut().get_mut(offset as usize) {
                 *byte = value;
@@ -108,9 +113,9 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     /// Recover from a bounded-queue overflow or prepare a persistent snapshot.
     /// The caller must exclude the input producer for this entire operation.
     /// Discard old queued bytes before copying, so they cannot undo the snapshot.
-    pub fn sync_config_snapshot<LED: OutputPin>(
+    pub fn sync_config_snapshot<LED: OutputPin, T: TuningPolicy>(
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         authoritative: &crate::config::EepromConfig,
     ) {
         while shared.pop_config_write().is_some() {}
@@ -121,9 +126,9 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     /// Claim one save and prepare the exact config to persist. Call with the
     /// input producer excluded; perform flash I/O after releasing that exclusion.
     /// A subsequent producer request must remain pending for the next save.
-    pub fn prepare_config_save<LED: OutputPin>(
+    pub fn prepare_config_save<LED: OutputPin, T: TuningPolicy>(
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         authoritative: &crate::config::EepromConfig,
     ) -> bool {
         if !shared.save_settings_flag() {
@@ -164,10 +169,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     /// Firmware must exclude motor interrupts for this entire call. The returned
     /// delay is performed AFTER leaving that critical section.
     #[allow(clippy::too_many_arguments)]
-    pub fn service_sine<LED: OutputPin, H: MotorHal>(
+    pub fn service_sine<LED: OutputPin, T: TuningPolicy, H: MotorHal>(
         &mut self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         hal: &mut H,
         duty: &mut crate::control::state::DutyState,
         commutation_step: u8,
@@ -220,10 +225,10 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     }
 
     /// Apply sine changeover state transitions after `tick_sine` returns Changeover.
-    fn apply_sine_changeover<LED: OutputPin>(
+    fn apply_sine_changeover<LED: OutputPin, T: TuningPolicy>(
         &mut self,
         shared: &SharedState,
-        main: &mut MainState<P, LED>,
+        main: &mut MainState<P, LED, T>,
         commutation_interval: u32,
         step: u8,
     ) {
@@ -251,7 +256,7 @@ impl<P: crate::constants::Timing> SystemTick<P> {
     }
 }
 
-impl<P: crate::constants::Timing> Default for SystemTick<P> {
+impl<P: Timing> Default for SystemTick<P> {
     fn default() -> Self {
         Self::new()
     }

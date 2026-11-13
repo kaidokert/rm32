@@ -1794,133 +1794,154 @@ mod tests {
 
     #[test]
     fn steady_running_split_tick_matches_full_ten_khz_tick() {
-        let config = crate::config::EepromConfig {
-            telemetry_on_interval: 2,
-            stall_protection: 1,
-            ..Default::default()
-        };
+        for half_kick in [false, true] {
+            let config = crate::config::EepromConfig {
+                telemetry_on_interval: 2,
+                stall_protection: 1,
+                ..Default::default()
+            };
 
-        let mut comm_full = crate::commutation::Commutation::new();
-        let mut bemf_full = crate::control::state::BemfState::default();
-        let mut duty_full = crate::control::state::DutyState::default();
-        duty_full.set_duty_limits(5, 180, 260);
-        duty_full.set_last(420);
-        let mut armed_timeout_full = make_armed_timeout();
-        let shared_full = TestShared::new();
-        let mut hal_full = MockMotorHal::new();
+            let mut comm_full = crate::commutation::Commutation::new();
+            let mut bemf_full = crate::control::state::BemfState::default();
+            let mut duty_full = crate::control::state::DutyState::default();
+            duty_full.set_duty_limits(5, 180, 260);
+            duty_full.set_last(420);
+            let mut armed_timeout_full = make_armed_timeout();
+            let shared_full = TestShared::new();
+            let mut hal_full = MockMotorHal::new();
 
-        let mut comm_split = crate::commutation::Commutation::new();
-        let mut bemf_split = crate::control::state::BemfState::default();
-        let mut duty_split = crate::control::state::DutyState::default();
-        duty_split.set_duty_limits(5, 180, 260);
-        duty_split.set_last(420);
-        let shared_split = TestShared::new();
-        let mut hal_split = MockMotorHal::new();
+            let mut comm_split = crate::commutation::Commutation::new();
+            let mut bemf_split = crate::control::state::BemfState::default();
+            let mut duty_split = crate::control::state::DutyState::default();
+            duty_split.set_duty_limits(5, 180, 260);
+            duty_split.set_last(420);
+            let shared_split = TestShared::new();
+            let mut hal_split = MockMotorHal::new();
 
-        for (shared, hal) in [
-            (&shared_full, &mut hal_full),
-            (&shared_split, &mut hal_split),
-        ] {
-            shared.mode.set(crate::motor_mode::MotorMode::Running);
-            shared.adjusted_input.set(950);
-            shared.zero_crosses.set(120);
-            shared.commutation_interval.set(450);
-            shared.e_com_time.set(1_350);
-            shared.tim1_arr.set(1777);
-            shared.duty_maximum.set(1850);
-            shared.filter_level.set(3);
-            shared.auto_advance.set(2);
-            shared.min_bemf_counts.set(4);
-            shared.forward.set(false);
-            shared.request_duty_kick_down();
-            hal.interval.count = 321;
+            for (shared, hal) in [
+                (&shared_full, &mut hal_full),
+                (&shared_split, &mut hal_split),
+            ] {
+                shared.mode.set(crate::motor_mode::MotorMode::Running);
+                shared.adjusted_input.set(950);
+                shared.zero_crosses.set(120);
+                shared.commutation_interval.set(450);
+                shared.e_com_time.set(1_350);
+                shared.tim1_arr.set(1777);
+                shared.duty_maximum.set(1850);
+                shared.filter_level.set(3);
+                shared.auto_advance.set(2);
+                shared.min_bemf_counts.set(4);
+                shared.forward.set(false);
+                if half_kick {
+                    shared.request_duty_kick_half();
+                } else {
+                    shared.request_duty_kick_down();
+                }
+                hal.interval.count = 321;
+            }
+
+            assert!(isr_logic::is_steady_running_tick(&shared_split, &config));
+
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm_full,
+                bemf: &mut bemf_full,
+                duty: &mut duty_full,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout_full,
+                voltage_based_ramp: true,
+                shared: &shared_full,
+                hal: &mut hal_full,
+            });
+
+            let mut split_duty = 0;
+            let mut split_period = 0;
+            isr_logic::steady_running_tick_unmasked::<crate::platform::TestPlatform, _, _>(
+                &shared_split,
+                &mut duty_split,
+                &config,
+                true,
+                |d, p| {
+                    split_duty = d;
+                    split_period = p;
+                },
+            );
+            isr_logic::steady_running_tick_sync_com(
+                &shared_split,
+                &mut comm_split,
+                &mut bemf_split,
+                &hal_split.interval,
+            );
+
+            assert_eq!(split_duty, hal_full.pwm.last_duty);
+            assert_eq!(split_period, 1777);
+            assert_eq!(duty_split.cycle(), duty_full.cycle());
+            assert_eq!(duty_split.last(), duty_full.last());
+            if half_kick {
+                assert!(
+                    duty_full.last() >= 210 && duty_full.last() < 250,
+                    "half_kick must start from 420 / 2 = 210, got {}",
+                    duty_full.last()
+                );
+            } else {
+                assert!(
+                    duty_full.last() >= 90 && duty_full.last() < 130,
+                    "kick_down must start from min_startup / 2 = 90, got {}",
+                    duty_full.last()
+                );
+            }
+            assert_eq!(shared_split.duty_cycle.get(), shared_full.duty_cycle.get());
+            assert_eq!(
+                shared_split.duty_cycle_setpoint.get(),
+                shared_full.duty_cycle_setpoint.get()
+            );
+            assert_eq!(shared_split.gate_avg.get(), shared_full.gate_avg.get());
+            assert_eq!(
+                shared_split.control_ticks.get(),
+                shared_full.control_ticks.get()
+            );
+            assert_eq!(
+                shared_split.one_khz_counter.get(),
+                shared_full.one_khz_counter.get()
+            );
+            assert_eq!(
+                shared_split.signal_timeout.get(),
+                shared_full.signal_timeout.get()
+            );
+            assert_eq!(shared_split.forward.get(), shared_full.forward.get());
+            assert_eq!(comm_split.forward, comm_full.forward);
+            assert_eq!(bemf_split.filter_level(), bemf_full.filter_level());
+            assert_eq!(
+                shared_split.interval_timer_count.get(),
+                shared_full.interval_timer_count.get()
+            );
+            assert!(!shared_split.take_duty_kick_half());
+            assert!(!shared_split.take_duty_kick_down());
+
+            // Exercise telemetry threshold wrap and mid-tick AllOff/tone suppression on the split path.
+            let limit = crate::constants::telemetry_interval_ticks::<crate::platform::TestPlatform>(
+                config.telemetry_on_interval,
+            );
+            shared_split.telem_counter.set(limit - 1);
+            shared_split.send_telemetry.set(false);
+            shared_split.request_isr_action(IsrAction::AllOff);
+            let mut pwm_called = false;
+            isr_logic::steady_running_tick_unmasked::<crate::platform::TestPlatform, _, _>(
+                &shared_split,
+                &mut duty_split,
+                &config,
+                false,
+                |_, _| {
+                    pwm_called = true;
+                },
+            );
+            assert!(shared_split.send_telemetry.get());
+            assert!(
+                !pwm_called,
+                "mid-tick AllOff must suppress apply_pwm on the unmasked fast path"
+            );
+            shared_split.clear_isr_action(IsrAction::AllOff);
         }
-
-        assert!(isr_logic::is_steady_running_tick(&shared_split, &config));
-
-        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-            commutation: &mut comm_full,
-            bemf: &mut bemf_full,
-            duty: &mut duty_full,
-            config: &config,
-            armed_timeout_count: &mut armed_timeout_full,
-            voltage_based_ramp: true,
-            shared: &shared_full,
-            hal: &mut hal_full,
-        });
-
-        let mut split_duty = 0;
-        let mut split_period = 0;
-        isr_logic::steady_running_tick_unmasked::<crate::platform::TestPlatform, _, _>(
-            &shared_split,
-            &mut duty_split,
-            &config,
-            true,
-            |d, p| {
-                split_duty = d;
-                split_period = p;
-            },
-        );
-        isr_logic::steady_running_tick_sync_com(
-            &shared_split,
-            &mut comm_split,
-            &mut bemf_split,
-            &hal_split.interval,
-        );
-
-        assert_eq!(split_duty, hal_full.pwm.last_duty);
-        assert_eq!(split_period, 1777);
-        assert_eq!(duty_split.cycle(), duty_full.cycle());
-        assert_eq!(duty_split.last(), duty_full.last());
-        assert_eq!(shared_split.duty_cycle.get(), shared_full.duty_cycle.get());
-        assert_eq!(
-            shared_split.duty_cycle_setpoint.get(),
-            shared_full.duty_cycle_setpoint.get()
-        );
-        assert_eq!(shared_split.gate_avg.get(), shared_full.gate_avg.get());
-        assert_eq!(
-            shared_split.control_ticks.get(),
-            shared_full.control_ticks.get()
-        );
-        assert_eq!(
-            shared_split.one_khz_counter.get(),
-            shared_full.one_khz_counter.get()
-        );
-        assert_eq!(
-            shared_split.signal_timeout.get(),
-            shared_full.signal_timeout.get()
-        );
-        assert_eq!(shared_split.forward.get(), shared_full.forward.get());
-        assert_eq!(comm_split.forward, comm_full.forward);
-        assert_eq!(bemf_split.filter_level(), bemf_full.filter_level());
-        assert_eq!(
-            shared_split.interval_timer_count.get(),
-            shared_full.interval_timer_count.get()
-        );
-
-        // Exercise telemetry threshold wrap and mid-tick AllOff/tone suppression on the split path.
-        let limit = crate::constants::telemetry_interval_ticks::<crate::platform::TestPlatform>(
-            config.telemetry_on_interval,
-        );
-        shared_split.telem_counter.set(limit - 1);
-        shared_split.send_telemetry.set(false);
-        shared_split.request_isr_action(IsrAction::AllOff);
-        let mut pwm_called = false;
-        isr_logic::steady_running_tick_unmasked::<crate::platform::TestPlatform, _, _>(
-            &shared_split,
-            &mut duty_split,
-            &config,
-            false,
-            |_, _| {
-                pwm_called = true;
-            },
-        );
-        assert!(shared_split.send_telemetry.get());
-        assert!(
-            !pwm_called,
-            "mid-tick AllOff must suppress apply_pwm on the unmasked fast path"
-        );
-        shared_split.clear_isr_action(IsrAction::AllOff);
 
         // Unlatched gate_avg == 0 must clear pending without re-pending (avoiding
         // priority-0 livelock while keeping the half-average gate closed).
