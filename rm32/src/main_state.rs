@@ -203,6 +203,17 @@ impl<P: Timing, LED: OutputPin, T: TuningPolicy> MainState<P, LED, T> {
     /// Construct main-loop state with an optional custom status LED output.
     pub fn new_with_led(board: &crate::board::BoardConfig, chip: ChipParams, led: LED) -> Self {
         let () = P::VALID;
+        const {
+            if let DesyncPolicy::HalfKickStayInterrupt {
+                rearm_holdoff_zc, ..
+            } = T::DESYNC
+            {
+                assert!(
+                    rearm_holdoff_zc < 10_000,
+                    "rearm_holdoff_zc must be below the 10_000 zero_crosses saturation cap"
+                );
+            }
+        }
         assert!(
             board.min_bemf_counts <= u8::MAX / 2,
             "min_bemf_counts must fit derived startup thresholds"

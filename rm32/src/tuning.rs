@@ -61,6 +61,8 @@ pub enum DesyncPolicy {
     /// stay-in-interrupt recovery, the desync detector holds off for
     /// `rearm_holdoff_zc` zero crossings so deceleration from the duty step
     /// does not immediately re-trigger against a pre-kick interval average.
+    /// `rearm_holdoff_zc` must be less than `10_000` (the saturating
+    /// `zero_crosses` ceiling), enforced at compile time by [`MainState::new`](crate::main_state::MainState::new).
     HalfKickStayInterrupt {
         max_ci_us: u32,
         rearm_holdoff_zc: u32,
@@ -170,11 +172,13 @@ impl OrbitGuard {
         let mut trip = false;
         let mut over_ms = 0;
         if locked && !held && over_line {
-            self.trip_count = self.trip_count.saturating_add(1);
-            over_ms = self.trip_count;
-            if self.trip_count > c.trip_ms {
+            if self.trip_count >= c.trip_ms {
+                over_ms = self.trip_count.saturating_add(1);
                 self.trip_count = 0;
                 trip = true;
+            } else {
+                self.trip_count += 1;
+                over_ms = self.trip_count;
             }
         } else {
             self.trip_count = 0;
@@ -389,5 +393,26 @@ mod tests {
             stay_interrupt_ci::<crate::platform::TestPlatform, Am32Tuning>(),
             0
         );
+    }
+
+    #[test]
+    fn max_u16_trip_ms_trips_without_overflow() {
+        let max_cfg = OrbitTripConfig {
+            trip_ms: u16::MAX,
+            transient_hold_ms: 0,
+            ..CFG
+        };
+        let mut g = OrbitGuard {
+            trip_count: u16::MAX - 1,
+            duty_snap: 1000,
+            snap_age: 0,
+            since_move_ms: 1000,
+        };
+        let penultimate = g.tick(&max_cfg, true, 1000, true);
+        assert!(!penultimate.trip);
+        assert_eq!(penultimate.over_ms, u16::MAX);
+        let tripping = g.tick(&max_cfg, true, 1000, true);
+        assert!(tripping.trip);
+        assert_eq!(tripping.over_ms, u16::MAX);
     }
 }
