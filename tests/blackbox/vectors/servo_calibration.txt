@@ -3,6 +3,8 @@
 #         high calibration (averaging + set), low calibration (averaging + commit),
 #         calibration entry via transfercomplete, and getAbsDif
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

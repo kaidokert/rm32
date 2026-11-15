@@ -1,6 +1,8 @@
 # Basic arming sequence test
 # Verify: zero throttle for 1 second arms the ESC
 
+@tuning am32
+
 @config
 inputSet=1
 dshot=1
@@ -9,7 +11,7 @@ zero_input_count=31
 @sequence
 # Pre-arm: should not be armed yet
 tick 1       | throttle=0 | armed=0
-ticks 19999  | throttle=0 | armed=0
+ticks 999.95ms | throttle=0 | armed=0
 
 # At 20001 ticks of zero input, should arm
 ticks 2      | throttle=0 | armed=1

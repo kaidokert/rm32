@@ -1,6 +1,8 @@
 # EEPROM load with invalid limits triggers guard clauses
 # Exercises the sine_mode_changeover, drag_brake_strength, temperature guards.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

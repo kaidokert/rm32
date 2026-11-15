@@ -11,7 +11,7 @@ Or from repo root:
 
 import pytest
 from pathlib import Path
-from harness import AM32Harness, run_test_vectors
+from harness import AM32Harness, read_tuning, run_test_vectors, ticks_for, timer_value
 
 VECTORS_DIR = Path(__file__).parent / "vectors"
 
@@ -37,9 +37,7 @@ def get_vector_files():
 
 
 # Vectors with known Rust vs C behavioral differences (pending investigation)
-XFAIL_VECTORS = {
-    "desync_recovery",  # Rust doesn't reset zero_crosses on desync (different main_loop ordering)
-}
+XFAIL_VECTORS: set[str] = set()  # No known xfails — all vectors pass
 
 
 @pytest.mark.parametrize(
@@ -51,6 +49,9 @@ def test_vector(harness, vector_file):
     """Run a single test vector file."""
     if vector_file.stem in XFAIL_VECTORS:
         pytest.xfail(f"Known Rust vs C difference: {vector_file.stem}")
+    # Only AM32-tuning vectors have a C counterpart.
+    if harness.is_c and read_tuning(vector_file) != "am32":
+        pytest.skip("rig tuning: rm32 divergence, no AM32 counterpart")
     run_test_vectors(harness, vector_file)
 
 
@@ -89,6 +90,39 @@ class TestHarnessAPI:
         state = harness.arm()
         assert state["armed"] == 1
 
+    def test_duration_operands(self, harness):
+        """Time-based `ticks` operands convert exactly at the harness rate
+        and refuse anything that is not a whole tick count."""
+        assert harness.tick_hz() == 20000
+        assert ticks_for("19999", 20000) == 19999
+        assert ticks_for("999.95ms", 20000) == 19999
+        assert ticks_for("999.95ms", 40000) == 39998
+        assert ticks_for("2100ms", 20000) == ticks_for("2.1s", 20000) == 42000
+        assert ticks_for("50us", 20000) == 1
+        for bad in ("25us", "0ms", "1.5", "5 ms", "-1ms"):
+            with pytest.raises(ValueError):
+                ticks_for(bad, 20000)
+        # Timer-domain values: durations only on timer keys, exact counts.
+        assert timer_value("commutation_interval", "5ms", 2_000_000) == "10000"
+        assert timer_value("commutation_interval", "5ms", 1_000_000) == "5000"
+        assert timer_value("commutation_interval", "96", 1_000_000) == "96"
+        assert timer_value("throttle", "500", 1_000_000) == "500"
+        with pytest.raises(ValueError):
+            timer_value("throttle", "5ms", 2_000_000)  # not a timer key
+        with pytest.raises(ValueError):
+            timer_value("average_interval", "0.3us", 2_000_000)  # 0.6 counts
+
+    def test_tuning_selects_policy(self, harness):
+        """`tuning` must really swap the policy: the rig vector's
+        stay-interrupt assertion fails under AM32 tuning."""
+        if harness.is_c:
+            pytest.skip("C harness has no tuning command")
+        rig_vector = VECTORS_DIR / "desync_detection.txt"
+        assert read_tuning(rig_vector) == "rig"
+        run_test_vectors(harness, rig_vector)
+        with pytest.raises(AssertionError):
+            run_test_vectors(harness, rig_vector, tuning="am32")
+
     def test_servo_override_survives_repeated_raw_captures(self, harness):
         harness.config(inputSet=1, servoPwm=1, dshot=0,
                        input_pin_state=0, dma_0=1000, dma_1=2500)
@@ -99,6 +133,8 @@ class TestHarnessAPI:
             assert state["signaltimeout"] == 1
 
     def test_dshot_tone_request_owns_bridge_across_control_ticks(self, harness):
+        if not harness.is_c:
+            harness.tuning("am32")
         harness.config(armed=1, inputSet=1, dshot=1, throttle=0)
         for _ in range(6):
             state = harness.tick(transfer=1, dshot_frame=1)

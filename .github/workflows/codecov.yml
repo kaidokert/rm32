@@ -80,7 +80,7 @@ jobs:
         run: |
           source <(cargo llvm-cov show-env --export-prefix)
           cargo llvm-cov clean --workspace
-          cargo build -p rm32 --bin rm32_harness
+          cargo build -p rm32-harness --bin rm32_harness
           AM32_HARNESS=target/debug/rm32_harness python -m pytest tests/blackbox/test_vectors.py -v --junit-xml=blackbox-junit.xml || true
           cargo llvm-cov report --lcov --output-path blackbox-lcov.info
 

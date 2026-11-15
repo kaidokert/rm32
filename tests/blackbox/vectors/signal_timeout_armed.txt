@@ -1,6 +1,8 @@
 # Signal timeout — running ESC disarms and requests reset
 # REQ-SAFE-SIGNAL_TIMEOUT
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -12,4 +14,4 @@ old_routine=1
 @sequence
 tick 1  | throttle=500 | armed=1 running=1 needs_reset=0
 config throttle=-1
-ticks 12000 | | armed=0 inputSet=0 needs_reset=1
+ticks 600ms | | armed=0 inputSet=0 needs_reset=1

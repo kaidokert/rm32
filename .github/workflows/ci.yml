@@ -25,7 +25,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: pre-commit/action@v3.0.1
 
-  # ── Unit tests (rm32 core crate, host) ──────────────────────────
+  # ── Unit tests (workspace host crates) ──────────────────────────
   test:
     name: Unit tests
     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
-        run: cargo test -p rm32 --verbose
+        run: cargo test --workspace --verbose
 
   # ── Cross-build all 4 MCU firmware targets ──────────────────────
   firmware:
@@ -83,8 +83,14 @@ jobs:
       - name: Install pytest
         run: pip install pytest
       - name: Build Rust harness
-        run: cargo build --release -p rm32 --bin rm32_harness
-      - name: Run blackbox tests
+        run: cargo build --release -p rm32-harness --bin rm32_harness
+      - name: Run blackbox tests (stm32 port)
         env:
           AM32_HARNESS: target/release/rm32_harness
+          RM32_PORT: stm32
+        run: python -m pytest tests/blackbox/test_vectors.py -v
+      - name: Run blackbox tests (sim port)
+        env:
+          AM32_HARNESS: target/release/rm32_harness
+          RM32_PORT: sim
         run: python -m pytest tests/blackbox/test_vectors.py -v

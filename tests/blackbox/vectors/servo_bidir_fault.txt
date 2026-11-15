@@ -1,6 +1,8 @@
 # Servo bidirectional stuck rotor fault
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

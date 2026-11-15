@@ -2,6 +2,8 @@
 # Contrast with speed-gated bidir which resets zero_crosses on direction flip.
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

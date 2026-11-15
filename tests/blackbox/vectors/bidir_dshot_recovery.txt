@@ -2,6 +2,8 @@
 # Covers: fault clear by centering stick (DShot input=0)
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -2,6 +2,8 @@
 # In bidir+rc_car mode, applying throttle in wrong direction should
 # set adjusted_input=0, engage prop brake, check return_to_center.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

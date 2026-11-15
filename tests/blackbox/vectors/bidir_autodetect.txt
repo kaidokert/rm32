@@ -1,5 +1,7 @@
 # Bidirectional DShot auto-detection
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

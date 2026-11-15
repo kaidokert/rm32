@@ -2,6 +2,8 @@
 # When brake_on_stop=2, armed, and throttle=0: comStep(2) + active brake power duty
 # This exercises the mode-2 branch that calls comStep with a fixed step.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

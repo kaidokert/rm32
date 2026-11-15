@@ -1,4 +1,8 @@
-# Sine mode brake on stop.
+# Sine mode brake on stop
+# When stepper_sine=1 and throttle=0 (or !armed), brake modes engage.
+# brake_on_stop=1 → proportional brake, =2 → comStep(2), =0 → allOff.
+
+@tuning am32
 
 @config
 armed=0
@@ -11,4 +15,5 @@ eeprom.brake_on_stop=1
 eeprom.drag_brake_strength=5
 
 @sequence
+# Unarmed in sine mode — brake_on_stop=1 → proportional brake
 ticks 3 | throttle=0 | prop_brake_active=1 pwm_duty>0

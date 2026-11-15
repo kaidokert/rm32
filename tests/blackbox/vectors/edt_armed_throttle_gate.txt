@@ -2,6 +2,8 @@
 # EDT telemetry/arm mode is an extension; normal DShot throttle must still
 # update newinput when EDT_ARMED=0.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

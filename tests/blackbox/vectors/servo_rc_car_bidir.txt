@@ -2,6 +2,8 @@
 # Covers: REQ-PROT-RC_CAR_REVERSE (servo path)
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

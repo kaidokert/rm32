@@ -2,6 +2,8 @@
 # Verify: commands 1-14, 20-21 processed correctly
 # Commands require 6 repetitions (beacons get fast-tracked)
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

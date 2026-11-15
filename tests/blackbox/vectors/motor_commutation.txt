@@ -5,6 +5,8 @@
 #                         when rising=0 comp must be 1 (!=rising passes filter)
 # After each commutate, rising flips, so we alternate comp.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

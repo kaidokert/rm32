@@ -11,11 +11,6 @@ dronecan = { version = "0.1", default-features = false, optional = true }
 fixed = "1.31.0"
 portable-atomic = { version = "1", default-features = false }
 
-[[bin]]
-name = "rm32_harness"
-path = "src/bin/harness.rs"
-
-
 [features]
 default = []
 dronecan = ["dep:dronecan"]

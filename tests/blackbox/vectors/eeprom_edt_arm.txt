@@ -1,6 +1,8 @@
 # EEPROM load with EDT arm input type
 # Triggers input_type==EDTARM_IN (4) block.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

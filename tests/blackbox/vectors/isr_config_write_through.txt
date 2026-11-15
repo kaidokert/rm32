@@ -1,5 +1,7 @@
 # ISR-originated config writes must reach the main-loop config copy.
 
+@tuning am32
+
 @config
 inputSet=1
 dshot=1

@@ -1,6 +1,8 @@
 # Sine mode no brake (brake_on_stop=0)
 # Zero throttle → allOff, e_rpm=0
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

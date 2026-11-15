@@ -2,6 +2,8 @@
 # Exercises EDT scheduler voltage/temperature encoding path.
 # Needs armed + running + EDT active for scheduler to tick.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -15,7 +17,7 @@ commutation_interval=1000
 @sequence
 # Run enough ticks to hit the EDT scheduler's voltage and temp counters
 # EDT voltage frame at count%200==100, temp at count%200==150
-ticks 250 | throttle=1000 | running=1
+ticks 12.5ms | throttle=1000 | running=1
 
 # Direct EDT scheduler coverage: current in centiamps, voltage in centivolts.
 edt_next | init=1 | edt_frame=3584

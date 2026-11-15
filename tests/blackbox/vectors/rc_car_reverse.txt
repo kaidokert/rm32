@@ -2,6 +2,8 @@
 # Verify: wrong-direction input triggers prop brake,
 # return to center clears brake and allows direction change
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

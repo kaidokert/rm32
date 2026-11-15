@@ -1,0 +1,52 @@
+# Desync check skips the polling -> interrupt changeover.
+# When BEMF is polled on the 20 kHz tick grid, polled commutations run late
+# and the first interrupt-mode revolutions are much faster; comparing
+# |last - avg| > avg/2 immediately would read that speedup as a desync.
+# The detector compares only after two full interrupt-mode passes following
+# the last polling tick.
+#
+# Same drive as desync_detection.txt, plus ONE polling tick first so the
+# main loop sees old_routine=1. Without it the desync fires at ZC 11 (that
+# vector); with it the passes at ZC 6 and 12 only re-seed, and the desync
+# fires at the ZC 18 pass.
+
+# Rig tuning: asserts the fast-rotor stay-interrupt desync response
+# (rm32::tuning::DesyncPolicy::HalfKickStayInterrupt), not in AM32.
+@tuning rig
+
+@config
+armed=1
+inputSet=1
+dshot=1
+EDT_ARMED=1
+running=1
+old_routine=1
+zero_crosses=0
+commutation_interval=600
+
+@sequence
+# Polling tick: no ZC, the main loop sees old_routine=1.
+tick 1  | throttle=500 | old_routine=1
+
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+# ZC 12: AM32's detector would fire here; the guard holds it.
+tick 1  | throttle=500 zc=1 comp=1 | zero_crosses=12 old_routine=0 running=1
+
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+tick 1  | throttle=500 zc=1 comp=1 |
+tick 1  | throttle=500 zc=1 comp=0 |
+# ZC 18: third interrupt-mode pass, the detector compares and fires
+# (fast-rotor path: interrupt mode kept, still running).
+tick 1  | throttle=500 zc=1 comp=1 | zero_crosses<=2 old_routine=0 running=1

@@ -1,6 +1,8 @@
 # DShot input via transfercomplete
 # Verify: DShot frames injected through the full decode path
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

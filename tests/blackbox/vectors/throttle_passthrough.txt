@@ -1,6 +1,8 @@
 # Unidirectional throttle passthrough
 # Verify: in non-bidirectional mode, newinput maps directly to adjusted_input
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

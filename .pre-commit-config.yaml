@@ -20,14 +20,14 @@ repos:
 -   repo: local
     hooks:
     -   id: cargo-test
-        name: Cargo Test (rm32)
-        entry: cargo test -p rm32
+        name: Cargo Test (workspace)
+        entry: cargo test --workspace
         language: system
         pass_filenames: false
 
     -   id: cargo-clippy
-        name: Clippy (rm32)
-        entry: cargo clippy -p rm32 -- -D warnings
+        name: Clippy (workspace)
+        entry: cargo clippy --workspace -- -D warnings
         language: system
         pass_filenames: false
 

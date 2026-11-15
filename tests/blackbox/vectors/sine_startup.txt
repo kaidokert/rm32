@@ -4,6 +4,8 @@
 # which involves advanceincrement() calls with delays.
 # We test the input mapping, not the sinusoidal drive itself.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

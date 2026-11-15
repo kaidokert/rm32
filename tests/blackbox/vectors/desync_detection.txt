@@ -1,5 +1,12 @@
-# Desync detection and recovery
-# Covers: main_loop desync check, zero_crosses reset, running=0, old_routine=1
+# Desync detection and recovery — FAST-ROTOR PATH
+# Covers: main_loop desync check, zero_crosses reset, and the fast-rotor
+# response: commutation_interval < stay_interrupt_ci keeps interrupt mode
+# (old_routine=0, running=1) instead of AM32's demotion.
+# When BEMF is polled on a 20 kHz tick grid, polling cannot track windows
+# shorter than ~3 samples, so a demotion at speed forces a coast-down/restart
+# cycle; AM32's main-loop-rate polling re-locks in ~1 ms so its demotion is
+# harmless. Slow-rotor desyncs (ci >= 600) still demote — covered by
+# desync_recovery.txt.
 #
 # Desync triggers when:
 #   desync_check=1 AND zero_crosses>10 AND
@@ -10,6 +17,10 @@
 # PeriodElapsedCallback (since TIM2 only advances 1/tick). After step wrap at
 # ZC 12, desync_check=1 fires with zero_crosses>10 and the interval has
 # changed enough from the initial value to trigger desync.
+
+# Rig tuning: asserts the fast-rotor stay-interrupt desync response
+# (rm32::tuning::DesyncPolicy::HalfKickStayInterrupt), not in AM32.
+@tuning rig
 
 @config
 armed=1
@@ -40,6 +51,8 @@ tick 1  | throttle=500 zc=1 comp=1 |
 tick 1  | throttle=500 zc=1 comp=0 |
 tick 1  | throttle=500 zc=1 comp=1 |
 
-# Desync should have fired: zero_crosses reset, old_routine=1
-# running=0 (because input>47 and !bi_direction, OR commutation_interval>1000)
-tick 1  | throttle=500 | zero_crosses<=2 old_routine=1
+# Desync should have fired: zero_crosses reset. The averaged-down
+# interval is far below DESYNC_STAY_INTERRUPT_CI, so the fast-rotor
+# response applies: interrupt mode retained (old_routine=0), still
+# running — only the counters/duty took the hit.
+tick 1  | throttle=500 | zero_crosses<=2 old_routine=0 running=1

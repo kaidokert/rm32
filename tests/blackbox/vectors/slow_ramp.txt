@@ -2,6 +2,8 @@
 # When eeprom.max_ramp < 10, ramp_divider=9 and all ramp profiles use raw value.
 # This produces much slower ramp rates for specialized low-speed applications.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -21,7 +23,7 @@ load_eeprom
 tick 1  | throttle=2047 | duty_cycle_setpoint>0
 
 # After a few ticks, duty should be non-zero but still low (slow ramp)
-ticks 10 | throttle=2047 | last_duty_cycle>0
+ticks 0.5ms | throttle=2047 | last_duty_cycle>0
 
 # Duty should still be well below setpoint after only 10 ticks
-ticks 10 | throttle=2047 | duty_cycle<1000
+ticks 0.5ms | throttle=2047 | duty_cycle<1000

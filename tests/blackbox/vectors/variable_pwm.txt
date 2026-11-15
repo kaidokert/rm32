@@ -1,6 +1,8 @@
 # Variable PWM mode 1
 # Verify: tim1_arr varies with commutation_interval
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

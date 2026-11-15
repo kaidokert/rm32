@@ -2,6 +2,8 @@
 # Covers: prop_brake_active + pwm_duty output (Physical Effect, not just flag)
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -1,0 +1,26 @@
+# AM32 !running housekeeping (main.c:1256-1259): while at zero throttle
+# and not running, the firmware continuously scrubs run counters —
+# old_routine=1, zero_crosses=0, bad_count=0. Without this scrub,
+# zero_crosses carries across runs and pollutes the stuck-rotor latch's
+# zc>1000 fault-clear and the zc-gated startup boost.
+
+@tuning am32
+
+@config
+armed=1
+inputSet=1
+dshot=1
+
+@sequence
+# Spin up and accumulate zero-crosses (simulated via injection — the
+# harness has no BEMF source; what matters is the scrub at stop).
+tick 5  | throttle=500 | running=1
+config zero_crosses=1809
+tick 1  | throttle=500 | zero_crosses=1809
+
+# Throttle to zero: the motor eventually stops (stall path); once
+# not-running at zero throttle, the housekeeping must scrub zc.
+# (AM32 also asserts old_routine=1 here; rm32's mode model makes the
+# stopped state Armed, with OldRoutine guaranteed at the next start.)
+config running=0
+tick 3  | throttle=0 | zero_crosses=0

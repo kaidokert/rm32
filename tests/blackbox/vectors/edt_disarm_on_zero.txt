@@ -1,6 +1,8 @@
 # EDT-arm zero-throttle disarm
 # When EDT_ARM_ENABLE=1, a zero-throttle DShot frame clears EDT_ARMED.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

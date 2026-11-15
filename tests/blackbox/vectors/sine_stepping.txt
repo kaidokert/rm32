@@ -3,6 +3,8 @@
 # one phase position and computes step_delay.
 # delayMicros is stubbed to no-op in harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

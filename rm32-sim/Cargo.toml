@@ -1,0 +1,9 @@
+[package]
+name = "rm32-sim"
+version = "0.1.0"
+edition = "2024"
+description = "Host port of the rm32 core with alternate clock, timer, ADC, and packet-DShot parameters"
+publish = false
+
+[dependencies]
+rm32 = { path = "../rm32" }

@@ -2,6 +2,8 @@
 # Verify: current limit, stall protection, speed control PIDs fire,
 # and integral anti-windup saturates
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -47,21 +49,21 @@ config zero_crosses=200
 # Run many 1kHz cycles (each 20 ticks) to accumulate integral
 # After 1 cycle: integral = 8000*100 = 800000 -> clamped to 20000
 # After 2+ cycles: stays at 20000 (anti-windup)
-ticks 100 | throttle=1000 |
+ticks 5ms | throttle=1000 |
 
 # --- Negative integral windup ---
 # Flip error direction: actual_current=0 vs target=2000
 # error = -2000, integral should go negative and clamp to -20000
 config actual_current=0
-ticks 100 | throttle=1000 |
+ticks 5ms | throttle=1000 |
 
 # --- Stall protection PID ---
 config eeprom.stall_protection=1
 config commutation_interval=8000
-ticks 25 | throttle=1000 |
+ticks 1.25ms | throttle=1000 |
 
 # --- Speed control loop ---
 config use_speed_control_loop=1
 config eeprom.stall_protection=0
 config use_current_limit=0
-ticks 25 | throttle=1000 |
+ticks 1.25ms | throttle=1000 |

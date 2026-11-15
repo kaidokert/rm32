@@ -3,6 +3,8 @@
 # Note: loadEEpromSettings is called indirectly via init(),
 # but we can test by setting eeprom fields and checking derived state
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

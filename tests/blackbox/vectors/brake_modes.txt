@@ -1,6 +1,8 @@
 # Brake modes
 # Verify: different brake_on_stop settings produce correct behavior
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -1,6 +1,8 @@
 # BEMF timeout / stuck rotor protection
 # Verify: stuck rotor protection cuts throttle when bemf_timeout_happened exceeds threshold
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

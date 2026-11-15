@@ -6,6 +6,8 @@
 #
 # The separate stuck_rotor_rate vector covers interval timer reset behavior.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
