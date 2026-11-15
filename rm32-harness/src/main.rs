@@ -293,9 +293,11 @@ impl hal::Adc for MockAdc {
 #[derive(Default)]
 struct MockTelem {
     kiss_packet: [u8; 10],
+    telem_count: u32,
 }
 impl hal::TelemetryUart for MockTelem {
     fn send(&mut self, data: &[u8]) {
+        self.telem_count += 1;
         if data.len() == 10 {
             self.kiss_packet.copy_from_slice(data);
         }
@@ -626,7 +628,9 @@ impl<P: Port> Harness<P> {
             60,
         );
 
-        // Advance interval timer
+        // Advance interval timer by 1 count per control tick (matching the C
+        // `am32_harness` `INTERVAL_TIMER_COUNT++` contract that synthetic ZC
+        // vectors such as `desync_detection.txt` rely on).
         self.hal.interval.count += 1;
 
         // Handle transfer complete
@@ -709,7 +713,7 @@ impl<P: Port> Harness<P> {
              edt_armed={} edt_arm_enable={} \
              alloff_count={} fullbrake_count={} mask_interrupts_count={} \
              bemf_timeout_happened={} bemf_timeout={} \
-             dshot_output_prescaler={} needs_reset={} control_ticks={} consumed_mah={} kiss_consumed_mah={}",
+             dshot_output_prescaler={} needs_reset={} control_ticks={} consumed_mah={} kiss_consumed_mah={} telem_count={}",
             self.tick_count,
             self.shared.armed() as i32,
             self.shared.running() as i32,
@@ -768,6 +772,7 @@ impl<P: Port> Harness<P> {
             self.shared.control_ticks(),
             self.main.measurements().consumed_milliamp_hours(),
             u16::from_be_bytes([self.telem.kiss_packet[5], self.telem.kiss_packet[6]]),
+            self.telem.telem_count,
         );
         io::stdout().flush().unwrap();
     }
@@ -818,7 +823,10 @@ impl<P: Port> Harness<P> {
                     );
                 }
             }
-            "interval_timer" => self.hal.interval.count = v as u32,
+            "interval_timer" | "interval_timer_count" => {
+                self.hal.interval.count = v as u32;
+                self.shared.set_interval_timer_count(v as u32);
+            }
             k if k.starts_with("dma_") => {
                 if let Ok(idx) = k[4..].parse::<usize>()
                     && idx < 64

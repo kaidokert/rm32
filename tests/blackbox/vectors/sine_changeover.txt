@@ -20,5 +20,5 @@ eeprom.stall_protection=1
 # reads adjusted_input (AM32 `input`, post sine-start mapping), which the
 # input stage publishes AFTER the stepper runs in each pass (firmware main
 # loop and harness alike), so the changeover lands one pass later.
-tick 1 | throttle=500 |
+tick 1 | throttle=500 | stepper_sine=1 running=0
 tick 1 | throttle=500 | stepper_sine=0 running=1 old_routine=1 step=5 commutation_interval=4.5ms

@@ -1392,13 +1392,14 @@ mod tests {
                 &mut com_timer,
                 &mut comp,
                 &mut phase,
-                crate::hal::PwmMode::Diode,
+                crate::hal::PwmMode::Complementary,
                 bidirectional,
                 true,
             );
 
             assert!(shared.old_routine());
             assert_eq!(comp.enable_calls, 0);
+            assert_eq!(phase.last_com_step_mode, Some(crate::hal::PwmMode::Diode));
         }
     }
 

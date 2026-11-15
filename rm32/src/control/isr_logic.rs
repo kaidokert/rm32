@@ -589,22 +589,24 @@ pub fn commutation_timer_expired<P, S, C, B, T, W>(
     let ci0 = shared.commutation_interval();
     let e_com = commutation.record_interval::<P>(ci0 as u16);
     shared.set_e_com_time(e_com);
-    bridge.com_step(step, crate::bridge::drive_mode(pwm_mode, shared));
-    bridge.pulse_toggle(step);
-    route_bemf(comp, commutation);
-
     let exit_interval = if bidirectional {
         P::OLD_ROUTINE_EXIT_INTERVAL / 2
     } else {
         P::OLD_ROUTINE_EXIT_INTERVAL
     };
-    if !shared.old_routine() {
-        // Interrupt mode.
-        let to_old = crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
+    let was_old = shared.old_routine();
+    let to_old = !was_old
+        && crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
             > exit_interval + P::OLD_ROUTINE_REENTRY_MARGIN;
-        if to_old {
-            writer.set_old_routine(shared, true);
-        }
+    if to_old {
+        writer.set_old_routine(shared, true);
+    }
+    bridge.com_step(step, crate::bridge::drive_mode(pwm_mode, shared));
+    bridge.pulse_toggle(step);
+    route_bemf(comp, commutation);
+
+    if !was_old {
+        // Interrupt mode.
         let new_ci = bemf.update_timing_from_timer(ci0);
         shared.set_commutation_interval(new_ci);
         if !to_old {

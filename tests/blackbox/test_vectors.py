@@ -105,8 +105,12 @@ class TestHarnessAPI:
         # Timer-domain values: durations only on timer keys, exact counts.
         assert timer_value("commutation_interval", "5ms", 2_000_000) == "10000"
         assert timer_value("commutation_interval", "5ms", 1_000_000) == "5000"
+        assert timer_value("interval_timer_count", "2.5ms", 2_000_000) == "5000"
+        assert timer_value("interval_timer", "2.5ms", 1_000_000) == "2500"
         assert timer_value("commutation_interval", "96", 1_000_000) == "96"
         assert timer_value("throttle", "500", 1_000_000) == "500"
+        harness.config(interval_timer_count=5000)
+        assert harness.state()["interval_timer_count"] == 5000
         with pytest.raises(ValueError):
             timer_value("throttle", "5ms", 2_000_000)  # not a timer key
         with pytest.raises(ValueError):

@@ -66,21 +66,41 @@ class AM32Harness:
         # never answers (unknown command -> stderr only) fails the vector
         # after REPLY_TIMEOUT_S instead of blocking the suite forever.
         self._q = queue.Queue()
-        threading.Thread(target=self._pump, args=(self.proc.stdout, self._q),
-                         daemon=True).start()
-        # Wait for ready marker
-        line = self._recv()
-        if line != "ready":
-            raise RuntimeError(f"Expected 'ready', got '{line}'")
+        self._reader = threading.Thread(
+            target=self._pump, args=(self.proc.stdout, self._q), daemon=True
+        )
+        self._reader.start()
+        try:
+            # Wait for ready marker
+            line = self._recv()
+            if line != "ready":
+                raise RuntimeError(f"Expected 'ready', got '{line}'")
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self):
         if self.proc:
-            try:
-                self._send("quit")
-                self.proc.wait(timeout=5)
-            except (OSError, subprocess.TimeoutExpired):
-                self.proc.kill()
+            proc = self.proc
             self.proc = None
+            try:
+                if proc.stdin and not proc.stdin.closed:
+                    proc.stdin.write("quit\n")
+                    proc.stdin.flush()
+                proc.wait(timeout=5)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                proc.kill()
+                proc.wait()
+            finally:
+                for stream in (proc.stdin, proc.stdout, proc.stderr):
+                    if stream:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+            if getattr(self, "_reader", None) is not None:
+                self._reader.join(timeout=1)
+                self._reader = None
 
     def _send(self, cmd):
         self.proc.stdin.write(cmd + "\n")
@@ -115,8 +135,10 @@ class AM32Harness:
                     state[k] = v
         return state
 
+    _KEY_ALIASES = {"interval_timer_count": "interval_timer"}
+
     def _kvargs(self, **kwargs):
-        return " ".join(f"{k}={v}" for k, v in kwargs.items())
+        return " ".join(f"{self._KEY_ALIASES.get(k, k)}={v}" for k, v in kwargs.items())
 
     # The C harness has no `rates` command: AM32's LOOP_FREQUENCY_HZ
     # default (Inc/targets.h) and the 2 MHz interval timer its vectors'
@@ -252,6 +274,7 @@ TIMER_KEYS = {
     "commutation_interval",
     "average_interval",
     "last_average_interval",
+    "interval_timer",
     "interval_timer_count",
 }
 

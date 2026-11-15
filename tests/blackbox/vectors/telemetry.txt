@@ -17,16 +17,16 @@ eeprom.telemetry_on_interval=1
 # When telem_ms_count > 600, send_telemetry is set
 # main_loop then calls makeTelemPackage + send_telem_DMA and clears it
 
-# Run to just before telemetry trigger
-ticks 29.95ms | throttle=500 | send_telemetry=0
+# Run to just before 30ms telemetry trigger
+ticks 29.9ms | throttle=500 | send_telemetry=0 telem_count=0
 
-# Next tick should trigger telemetry and immediately clear it
-tick 1    | throttle=500 | send_telemetry=0
+# Crossing 30ms triggers telemetry and clears send_telemetry in the same pass
+ticks 0.1ms  | throttle=500 | send_telemetry=0 telem_count=1
 
 # The flag was set in tenKhzRoutine but cleared in main_loop same tick
 # Run another interval to confirm it repeats
-ticks 30ms | throttle=500 | send_telemetry=0
+ticks 30ms | throttle=500 | send_telemetry=0 telem_count=2
 
 # ESC info path: send_esc_info_flag triggers makeInfoPacket
 config send_esc_info_flag=1
-tick 1    | throttle=500 | send_esc_info_flag=0
+tick 1    | throttle=500 | send_esc_info_flag=0 telem_count=2

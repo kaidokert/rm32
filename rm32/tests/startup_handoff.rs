@@ -883,7 +883,10 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
         );
         assert_eq!(r.hal.phase.pwm_mode, polling);
 
-        // Commutation timer expiration in interrupt mode uses configured comp_pwm.
+        // Commutation timer expiration in interrupt mode uses configured comp_pwm
+        // when the commutation interval stays within the interrupt-mode band.
+        r.shared.set_commutation_interval(500);
+        r.comm = rm32::commutation::Commutation::new();
         r.shared.transition(MotorEvent::BemfLocked);
         assert!(r.shared.running() && !r.shared.old_routine());
         r.hal.phase.pwm_mode = opposite;
@@ -899,6 +902,7 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
             false,
             false,
         );
+        assert!(!r.shared.old_routine());
         assert_eq!(r.hal.phase.pwm_mode, want);
     }
 }
