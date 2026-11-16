@@ -1,6 +1,8 @@
 # EEPROM load with RC car mode
 # Triggers RC-car init overrides in loadEEpromSettings.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

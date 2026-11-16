@@ -2,6 +2,8 @@
 # DShot commands 1-5 trigger play_tone_flag for beacon/lost-drone locator.
 # Must be armed and stopped + dshot_frame builds actual DShot packet through decode.
 
+@tuning am32
+
 @config
 armed=1
 running=0

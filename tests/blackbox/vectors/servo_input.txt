@@ -1,6 +1,8 @@
 # Servo PWM input path
 # Lights up: computeServoInput, checkServo, detectInput, transfercomplete servo branch
 
+@tuning am32
+
 @config
 armed=1
 inputSet=0

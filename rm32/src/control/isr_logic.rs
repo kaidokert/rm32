@@ -220,7 +220,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
         ctx.hal.bridge().set_duty_all(0);
         ctx.hal.bridge().latch();
         ctx.commutation.set_step(changeover);
-        ctx.hal.bridge().com_step(changeover, ctx.config.pwm_mode());
+        // The sine-to-six-step handoff lands in polling (`ExitSine -> OldRoutine`),
+        // where `bridge::drive_mode` drives diode; apply `PwmMode::Diode` directly
+        // before `ExitSine` transitions the mode.
+        ctx.hal.bridge().com_step(changeover, hal::PwmMode::Diode);
         let ci = ctx.shared.commutation_interval();
         ctx.hal.interval().set_count(ci);
         ctx.bemf.reset_for_step();
@@ -283,7 +286,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                     .commutation
                     .record_interval::<H>(ctx.shared.commutation_interval() as u16);
                 ctx.shared.set_e_com_time(e_com);
-                ctx.hal.bridge().com_step(step, ctx.config.pwm_mode());
+                ctx.hal.bridge().com_step(
+                    step,
+                    crate::bridge::drive_mode(ctx.config.pwm_mode(), ctx.shared),
+                );
                 route_bemf(ctx.hal.bemf(), ctx.commutation);
                 ctx.shared
                     .set_commutation_interval(H::STARTUP_COMMUTATION_INTERVAL);
@@ -397,7 +403,10 @@ pub fn ten_khz_tick<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
             ctx.hal.bemf().mask_irq();
             ctx.hal.bridge().set_duty_all(0);
             ctx.hal.bridge().latch();
-            ctx.hal.bridge().com_step(2, ctx.config.pwm_mode());
+            ctx.hal.bridge().com_step(
+                2,
+                crate::bridge::drive_mode(ctx.config.pwm_mode(), ctx.shared),
+            );
             ctx.duty.active_brake_on = true;
         }
         // AM32 main.c:1936.
@@ -529,7 +538,10 @@ fn bemf_polling<S: SharedComm, H: MotorHal>(ctx: &mut MotorContext<S, H>) {
                 .commutation
                 .record_interval::<H>(ctx.shared.commutation_interval() as u16);
             ctx.shared.set_e_com_time(e_com);
-            ctx.hal.bridge().com_step(step, ctx.config.pwm_mode());
+            ctx.hal.bridge().com_step(
+                step,
+                crate::bridge::drive_mode(ctx.config.pwm_mode(), ctx.shared),
+            );
             ctx.hal.bridge().pulse_toggle(step);
             route_bemf(ctx.hal.bemf(), ctx.commutation);
             ctx.bemf.reset_for_step();
@@ -577,22 +589,24 @@ pub fn commutation_timer_expired<P, S, C, B, T, W>(
     let ci0 = shared.commutation_interval();
     let e_com = commutation.record_interval::<P>(ci0 as u16);
     shared.set_e_com_time(e_com);
-    bridge.com_step(step, pwm_mode);
-    bridge.pulse_toggle(step);
-    route_bemf(comp, commutation);
-
     let exit_interval = if bidirectional {
         P::OLD_ROUTINE_EXIT_INTERVAL / 2
     } else {
         P::OLD_ROUTINE_EXIT_INTERVAL
     };
-    if !shared.old_routine() {
-        // Interrupt mode.
-        let to_old = crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
+    let was_old = shared.old_routine();
+    let to_old = !was_old
+        && crate::platform::e_com_us_to_avg_ticks::<P>(e_com) as u32
             > exit_interval + P::OLD_ROUTINE_REENTRY_MARGIN;
-        if to_old {
-            writer.set_old_routine(shared, true);
-        }
+    if to_old {
+        writer.set_old_routine(shared, true);
+    }
+    bridge.com_step(step, crate::bridge::drive_mode(pwm_mode, shared));
+    bridge.pulse_toggle(step);
+    route_bemf(comp, commutation);
+
+    if !was_old {
+        // Interrupt mode.
         let new_ci = bemf.update_timing_from_timer(ci0);
         shared.set_commutation_interval(new_ci);
         if !to_old {

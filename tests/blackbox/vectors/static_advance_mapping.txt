@@ -1,5 +1,7 @@
 # Static commutation advance loaded from EEPROM advance_level.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

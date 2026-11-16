@@ -1,4 +1,7 @@
 # Absolute cutoff: EEPROM 20 means 10 V; measured 5 V must trip after debounce.
+
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -11,5 +14,10 @@ old_routine=1
 
 @sequence
 config battery_voltage=500
-config low_voltage_count=10000
-ticks 30 | throttle=500 | armed=0 running=0
+config low_voltage_count=9999
+
+# First 1 kHz pass reaches low_voltage_count=10000 (not yet > 10000).
+ticks 1.5ms | throttle=500 | armed=1 running=1
+
+# Next 1 kHz pass pushes low_voltage_count=10001 (> 10000) and disarms.
+ticks 1ms | throttle=500 | armed=0 running=0

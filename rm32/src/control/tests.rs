@@ -22,90 +22,6 @@ mod tests {
         0
     }
 
-    #[test]
-    fn sine_start_enters_without_manual_mode_injection() {
-        let shared = TestShared::new();
-        shared.mode.set(crate::motor_mode::MotorMode::Armed);
-        shared.adjusted_input.set(80);
-        let config = crate::config::EepromConfig {
-            use_sine_start: 1,
-            ..Default::default()
-        };
-        let mut comm = crate::commutation::Commutation::new();
-        let mut bemf = crate::control::state::BemfState::default();
-        let mut duty = crate::control::state::DutyState::default();
-        let mut armed_timeout = 0;
-        let mut hal = MockMotorHal::new();
-        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-            commutation: &mut comm,
-            bemf: &mut bemf,
-            duty: &mut duty,
-            config: &config,
-            armed_timeout_count: &mut armed_timeout,
-            voltage_based_ramp: false,
-            shared: &shared,
-            hal: &mut hal,
-        });
-        assert!(shared.stepper_sine());
-        assert_eq!(hal.phase.com_step_calls, 0);
-    }
-
-    #[test]
-    fn sine_pwm_survives_control_ticks() {
-        let shared = TestShared::new();
-        shared.mode.set(crate::motor_mode::MotorMode::StepperSine);
-        shared.adjusted_input.set(80);
-        let config = crate::config::EepromConfig::default();
-        let mut comm = crate::commutation::Commutation::new();
-        let mut bemf = crate::control::state::BemfState::default();
-        let mut duty = crate::control::state::DutyState::default();
-        let mut armed_timeout = 0;
-        let mut hal = MockMotorHal::new();
-        hal.pwm.last_duty = 123;
-        hal.pwm.compares = [111, 222, 333];
-        for _ in 0..3 {
-            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-                commutation: &mut comm,
-                bemf: &mut bemf,
-                duty: &mut duty,
-                config: &config,
-                armed_timeout_count: &mut armed_timeout,
-                voltage_based_ramp: false,
-                shared: &shared,
-                hal: &mut hal,
-            });
-        }
-        assert_eq!(hal.pwm.last_duty, 123);
-        assert_eq!(hal.pwm.compares, [111, 222, 333]);
-        assert!(!hal.phase.all_off_called);
-    }
-
-    #[test]
-    fn active_tone_owns_idle_bridge_writes_until_scheduler_releases_it() {
-        let shared = TestShared::new();
-        shared.mode.set(crate::motor_mode::MotorMode::Armed);
-        shared.tone_active.set(true);
-        let config = crate::config::EepromConfig::default();
-        let mut comm = crate::commutation::Commutation::new();
-        let mut bemf = crate::control::state::BemfState::default();
-        let mut duty = crate::control::state::DutyState::default();
-        let mut armed_timeout = 0;
-        let mut hal = MockMotorHal::new();
-        hal.pwm.last_duty = 45;
-        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-            commutation: &mut comm,
-            bemf: &mut bemf,
-            duty: &mut duty,
-            config: &config,
-            armed_timeout_count: &mut armed_timeout,
-            voltage_based_ramp: false,
-            shared: &shared,
-            hal: &mut hal,
-        });
-        assert_eq!(hal.pwm.last_duty, 45);
-        assert!(!hal.phase.all_off_called);
-    }
-
     #[derive(Default)]
     struct MockOrder {
         next: Cell<u8>,
@@ -132,63 +48,45 @@ mod tests {
         }
     }
 
-    struct MockPwm {
-        compares: [u16; 3],
-        last_duty: u16,
-        order: *const MockOrder,
-    }
-    impl MockPwm {
-        fn set_duty_all(&mut self, d: u16) {
-            self.last_duty = d;
-            self.compares = [d; 3];
-            record_order(self.order, |order| &order.set_duty);
-        }
-        fn set_auto_reload(&mut self, _: u16) {}
-        fn set_prescaler(&mut self, _: u16) {}
-        fn set_compare1(&mut self, v: u16) {
-            self.compares[0] = v;
-        }
-        fn set_compare2(&mut self, v: u16) {
-            self.compares[1] = v;
-        }
-        fn set_compare3(&mut self, v: u16) {
-            self.compares[2] = v;
-        }
-        fn generate_update_event(&mut self) {}
-        fn set_dead_time_override(&mut self, _dtg: u16) {}
-    }
     struct MockComp {
         level: bool,
         mask_called: bool,
         enable_calls: u32,
+        last_phase: Option<(hal::Phase, bool)>,
     }
     impl hal::BemfSensor for MockComp {
         fn level(&self) -> bool {
             self.level
         }
-        fn select_phase(&mut self, _: crate::hal::Phase, _: bool) {}
-        fn pending(&self) -> bool {
-            false
+        fn select_phase(&mut self, p: hal::Phase, r: bool) {
+            self.last_phase = Some((p, r));
         }
-        fn clear_pending(&mut self) {}
-        fn repend(&mut self) {}
         fn enable_irq(&mut self) {
             self.enable_calls += 1;
         }
         fn mask_irq(&mut self) {
             self.mask_called = true;
         }
+        fn pending(&self) -> bool {
+            true
+        }
+        fn clear_pending(&mut self) {}
+        fn repend(&mut self) {}
     }
-    struct MockPhase {
+    struct MockBridge {
+        compares: [u16; 3],
+        last_duty: u16,
         all_off_called: bool,
         com_step_calls: u32,
         last_com_step_mode: Option<crate::hal::PwmMode>,
         prop_brake_calls: u32,
         order: *const MockOrder,
     }
-    impl Default for MockPhase {
+    impl Default for MockBridge {
         fn default() -> Self {
             Self {
+                compares: [0; 3],
+                last_duty: 0,
                 all_off_called: false,
                 com_step_calls: 0,
                 last_com_step_mode: None,
@@ -197,7 +95,7 @@ mod tests {
             }
         }
     }
-    impl hal::PhaseOutput for MockPhase {
+    impl hal::PhaseOutput for MockBridge {
         fn com_step(&mut self, _: u8, mode: crate::hal::PwmMode) {
             self.com_step_calls += 1;
             self.last_com_step_mode = Some(mode);
@@ -212,6 +110,21 @@ mod tests {
             self.prop_brake_calls += 1;
             record_order(self.order, |order| &order.prop_brake);
         }
+    }
+
+    impl hal::Bridge for MockBridge {
+        fn set_duty_all(&mut self, d: u16) {
+            self.last_duty = d;
+            self.compares = [d; 3];
+            record_order(self.order, |order| &order.set_duty);
+        }
+        fn set_phase_duties(&mut self, a: u16, b: u16, c: u16) {
+            self.compares = [a, b, c];
+        }
+        fn set_period(&mut self, _: u16) {}
+        fn latch(&mut self) {}
+        fn set_dead_time_override(&mut self, _: u16) {}
+        fn set_tone_divider(&mut self, _: u16) {}
     }
     struct MockInterval {
         count: u32,
@@ -246,9 +159,8 @@ mod tests {
     }
 
     struct MockMotorHal {
-        pwm: MockPwm,
+        bridge: MockBridge,
         comp: MockComp,
-        phase: MockPhase,
         interval: MockInterval,
         com_timer: MockComTimer,
     }
@@ -265,59 +177,14 @@ mod tests {
         const ADC_VREF_MV: u16 = 3300;
         const PWM_BASE_PERIOD: u16 = 1999;
     }
-    impl crate::hal::PhaseOutput for MockMotorHal {
-        fn com_step(&mut self, step: u8, mode: crate::hal::PwmMode) {
-            crate::hal::PhaseOutput::com_step(&mut self.phase, step, mode);
-        }
-        fn all_off(&mut self) {
-            crate::hal::PhaseOutput::all_off(&mut self.phase);
-        }
-        fn full_brake(&mut self) {
-            crate::hal::PhaseOutput::full_brake(&mut self.phase);
-        }
-        fn all_pwm(&mut self, mode: crate::hal::PwmMode) {
-            crate::hal::PhaseOutput::all_pwm(&mut self.phase, mode);
-        }
-        fn proportional_brake(&mut self) {
-            crate::hal::PhaseOutput::proportional_brake(&mut self.phase);
-        }
-        fn pulse_toggle(&mut self, step: u8) {
-            crate::hal::PhaseOutput::pulse_toggle(&mut self.phase, step);
-        }
-    }
-    impl crate::bridge::Bridge for MockMotorHal {
-        fn set_duty_all(&mut self, v: u16) {
-            self.pwm.set_duty_all(v);
-        }
-        fn set_phase_duties(&mut self, a: u16, b: u16, c: u16) {
-            self.pwm.set_compare1(a);
-            self.pwm.set_compare2(b);
-            self.pwm.set_compare3(c);
-        }
-        fn set_period(&mut self, v: u16) {
-            self.pwm.set_auto_reload(v);
-        }
-        fn latch(&mut self) {
-            self.pwm.generate_update_event();
-        }
-        fn set_tone_divider(&mut self, v: u16) {
-            self.pwm.set_prescaler(v);
-        }
-        fn set_dead_time_override(&mut self, v: u16) {
-            self.pwm.set_dead_time_override(v);
-        }
-    }
     impl hal::MotorHal for MockMotorHal {
-        type Bridge<'a>
-            = &'a mut Self
-        where
-            Self: 'a;
+        type Bridge<'a> = &'a mut MockBridge;
         type Bemf = MockComp;
         type Interval = MockInterval;
         type Com = MockComTimer;
 
-        fn bridge(&mut self) -> Self::Bridge<'_> {
-            self
+        fn bridge(&mut self) -> &mut MockBridge {
+            &mut self.bridge
         }
         fn bemf(&mut self) -> &mut MockComp {
             &mut self.comp
@@ -332,17 +199,13 @@ mod tests {
     impl MockMotorHal {
         fn new() -> Self {
             Self {
-                pwm: MockPwm {
-                    last_duty: 0,
-                    compares: [0; 3],
-                    order: ptr::null(),
-                },
+                bridge: MockBridge::default(),
                 comp: MockComp {
                     level: false,
                     mask_called: false,
                     enable_calls: 0,
+                    last_phase: None,
                 },
-                phase: MockPhase::default(),
                 interval: MockInterval { count: 0 },
                 com_timer: MockComTimer::new(),
             }
@@ -351,9 +214,137 @@ mod tests {
         fn new_with_order(order: &MockOrder) -> Self {
             let mut hal = Self::new();
             let order = order as *const MockOrder;
-            hal.pwm.order = order;
-            hal.phase.order = order;
+            hal.bridge.order = order;
             hal
+        }
+    }
+
+    /// Gate sensor: pending flag, a scripted level sequence (one value per
+    /// `level` read), and a log of clear (`c`) / repend (`r`).
+    struct GateSensor {
+        pending: bool,
+        levels: [bool; 2],
+        n_levels: usize,
+        reads: core::cell::Cell<usize>,
+        log: [u8; 2],
+        n_log: usize,
+    }
+    impl GateSensor {
+        fn new(pending: bool, levels: &[bool]) -> Self {
+            let mut l = [false; 2];
+            l[..levels.len()].copy_from_slice(levels);
+            Self {
+                pending,
+                levels: l,
+                n_levels: levels.len(),
+                reads: core::cell::Cell::new(0),
+                log: [0; 2],
+                n_log: 0,
+            }
+        }
+        fn push(&mut self, c: u8) {
+            self.log[self.n_log] = c;
+            self.n_log += 1;
+        }
+    }
+    impl hal::BemfSensor for GateSensor {
+        fn select_phase(&mut self, _: hal::Phase, _: bool) {}
+        fn enable_irq(&mut self) {}
+        fn mask_irq(&mut self) {}
+        fn level(&self) -> bool {
+            let i = self.reads.get();
+            assert!(i < self.n_levels, "unscripted level read");
+            self.reads.set(i + 1);
+            self.levels[i]
+        }
+        fn pending(&self) -> bool {
+            self.pending
+        }
+        fn clear_pending(&mut self) {
+            self.push(b'c');
+        }
+        fn repend(&mut self) {
+            self.push(b'r');
+        }
+    }
+    struct GateTimer(u32);
+    impl hal::IntervalTimer for GateTimer {
+        fn count(&self) -> u32 {
+            self.0
+        }
+        fn set_count(&mut self, v: u32) {
+            self.0 = v;
+        }
+    }
+
+    /// `on_bemf_irq` is AM32's COMP_IRQHandler gate. avg 1000:
+    /// open past 500 (clear, Open); closed at the pre-ZC level (level ==
+    /// rising) clears, and re-raises if the level flipped during the
+    /// clear; closed at the post-ZC level camps (pending left set);
+    /// nothing pending does nothing, and `entered` runs only when pending.
+    #[test]
+    fn bemf_irq_gate_matches_am32() {
+        use isr_logic::{BemfIrq, on_bemf_irq};
+        let shared = TestShared::new();
+        shared.gate_avg.set(1000);
+        let rising = true;
+        let cases: [(bool, u32, &[bool], BemfIrq, &[u8]); 5] = [
+            (false, 900, &[], BemfIrq::Spurious, b""),
+            (true, 501, &[], BemfIrq::Open, b"c"),
+            (true, 500, &[true, true], BemfIrq::Noise, b"c"),
+            (true, 500, &[true, false], BemfIrq::Noise, b"cr"),
+            (true, 10, &[false], BemfIrq::Camp, b""),
+        ];
+        for (pending, cnt, levels, want, log) in cases {
+            let mut sensor = GateSensor::new(pending, levels);
+            let mut entered = 0;
+            let got = on_bemf_irq(&shared, &mut sensor, &GateTimer(cnt), rising, || {
+                entered += 1
+            });
+            assert_eq!(got, want, "cnt {cnt} levels {levels:?}");
+            assert_eq!(
+                &sensor.log[..sensor.n_log],
+                log,
+                "cnt {cnt} levels {levels:?}"
+            );
+            assert_eq!(entered, pending as u32);
+            assert_eq!(sensor.reads.get(), levels.len(), "level reads: {levels:?}");
+        }
+    }
+
+    /// The control tick latches the COMP gate average (e_com / 3 in
+    /// timer ticks), clamped at 0 only (AM32's 5000 is a one-shot reset).
+    /// The one-tick AllOff return keeps the previous latch; the next tick
+    /// latches again.
+    #[test]
+    fn tick_latches_comp_gate_average_every_tick() {
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let order = MockOrder::default();
+        let mut hal = MockMotorHal::new_with_order(&order);
+        for (e_com, action, want) in [
+            (30_000, crate::shared_comm::IsrAction::None, 10_000),
+            (6_000, crate::shared_comm::IsrAction::AllOff, 10_000),
+            (6_000, crate::shared_comm::IsrAction::None, 2_000),
+            (-5, crate::shared_comm::IsrAction::None, 0),
+        ] {
+            shared.e_com_time.set(e_com);
+            shared.isr_action.set(action);
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+            assert_eq!(shared.gate_avg.get(), want, "e_com {e_com}");
         }
     }
 
@@ -418,8 +409,8 @@ mod tests {
             hal: &mut hal,
         });
 
-        assert_eq!(hal.phase.prop_brake_calls, 1);
-        assert!(hal.pwm.last_duty > 0);
+        assert_eq!(hal.bridge.prop_brake_calls, 1);
+        assert!(hal.bridge.last_duty > 0);
         assert!(order.prop_brake.get() < order.set_duty.get());
     }
 
@@ -447,8 +438,8 @@ mod tests {
             hal: &mut hal,
         });
 
-        assert!(hal.phase.all_off_called);
-        assert_eq!(hal.pwm.last_duty, 0);
+        assert!(hal.bridge.all_off_called);
+        assert_eq!(hal.bridge.last_duty, 0);
         assert!(order.all_off.get() < order.set_duty.get());
     }
 
@@ -774,11 +765,11 @@ mod tests {
             hal: &mut hal,
         });
 
-        assert!(hal.phase.all_off_called);
+        assert!(hal.bridge.all_off_called);
         assert!(hal.comp.mask_called);
         assert_eq!(shared.isr_action(), IsrAction::None);
         assert_eq!(shared.duty_cycle_setpoint(), 0);
-        assert_eq!(hal.pwm.last_duty, 0);
+        assert_eq!(hal.bridge.last_duty, 0);
         assert_eq!(shared.signal_timeout(), 0);
     }
 
@@ -1095,6 +1086,123 @@ mod tests {
         );
     }
 
+    /// The COM path hands the bridge the core's drive-mode decision:
+    /// complementary only when the config enables it AND the motor is in
+    /// interrupt mode (diode during polling, `old_routine`).
+    #[test]
+    fn isr_commutation_passes_core_drive_decision() {
+        use crate::motor_mode::MotorMode;
+        for (mode, comp_pwm, want) in [
+            (MotorMode::Running, true, true),
+            (MotorMode::Running, false, false),
+            (MotorMode::OldRoutine, true, false),
+            (MotorMode::OldRoutine, false, false),
+        ] {
+            let mut comm = crate::commutation::Commutation::new();
+            let mut bemf = crate::control::state::BemfState::default();
+            let shared = TestShared::new();
+            shared.mode.set(mode);
+            let mut com_timer = MockComTimer::new();
+            let mut comp = MockComp {
+                level: false,
+                mask_called: false,
+                enable_calls: 0,
+                last_phase: None,
+            };
+            let mut phase = MockBridge::default();
+            isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _, _>(
+                &mut comm,
+                &mut bemf,
+                &shared,
+                &crate::shared_comm::AtomicWriter,
+                &mut com_timer,
+                &mut comp,
+                &mut phase,
+                if comp_pwm {
+                    crate::hal::PwmMode::Complementary
+                } else {
+                    crate::hal::PwmMode::Diode
+                },
+                false,
+                true,
+            );
+            assert_eq!(phase.com_step_calls, 1, "{mode:?}");
+            assert_eq!(
+                phase.last_com_step_mode,
+                Some(if want {
+                    crate::hal::PwmMode::Complementary
+                } else {
+                    crate::hal::PwmMode::Diode
+                }),
+                "{mode:?} comp_pwm={comp_pwm}"
+            );
+        }
+    }
+
+    #[test]
+    fn floating_phase_matches_am32_change_comp_input() {
+        use hal::Phase;
+        // AM32 changeCompInput: step 1/4 -> C, 2/5 -> A, 3/6 -> B; the
+        // ports' old mux tables sent 0 and 7 to C. Values >= 8 (never
+        // produced by Commutation) also fall back to C, never to a valid step.
+        let want = [
+            Phase::C, // 0
+            Phase::C,
+            Phase::A,
+            Phase::B,
+            Phase::C,
+            Phase::A,
+            Phase::B,
+            Phase::C, // 7
+        ];
+        for step in 0..=255u8 {
+            assert_eq!(
+                hal::floating_phase(step),
+                want.get(step as usize).copied().unwrap_or(Phase::C),
+                "step {step}"
+            );
+        }
+    }
+
+    #[test]
+    fn isr_commutation_selects_floating_phase_of_new_step() {
+        for forward in [true, false] {
+            let mut comm = crate::commutation::Commutation::new();
+            comm.forward = forward;
+            for _ in 0..12 {
+                let mut bemf = crate::control::state::BemfState::default();
+                let shared = TestShared::new();
+                shared.mode.set(crate::motor_mode::MotorMode::Running);
+                let mut com_timer = MockComTimer::new();
+                let mut comp = MockComp {
+                    level: false,
+                    mask_called: false,
+                    enable_calls: 0,
+                    last_phase: None,
+                };
+                let mut phase = MockBridge::default();
+                isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _, _>(
+                    &mut comm,
+                    &mut bemf,
+                    &shared,
+                    &crate::shared_comm::AtomicWriter,
+                    &mut com_timer,
+                    &mut comp,
+                    &mut phase,
+                    crate::hal::PwmMode::Diode,
+                    false,
+                    true,
+                );
+                assert_eq!(
+                    comp.last_phase,
+                    Some((hal::floating_phase(comm.step()), comm.rising)),
+                    "forward={forward} step={}",
+                    comm.step()
+                );
+            }
+        }
+    }
+
     #[test]
     fn isr_commutation_timer_advances_step() {
         let mut comm = crate::commutation::Commutation::new();
@@ -1106,8 +1214,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1147,8 +1256,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1186,8 +1296,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1221,8 +1332,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1265,8 +1377,9 @@ mod tests {
                 level: false,
                 mask_called: false,
                 enable_calls: 0,
+                last_phase: None,
             };
-            let mut phase = MockPhase {
+            let mut phase = MockBridge {
                 all_off_called: false,
                 ..Default::default()
             };
@@ -1279,13 +1392,14 @@ mod tests {
                 &mut com_timer,
                 &mut comp,
                 &mut phase,
-                crate::hal::PwmMode::Diode,
+                crate::hal::PwmMode::Complementary,
                 bidirectional,
                 true,
             );
 
             assert!(shared.old_routine());
             assert_eq!(comp.enable_calls, 0);
+            assert_eq!(phase.last_com_step_mode, Some(crate::hal::PwmMode::Diode));
         }
     }
 
@@ -1304,8 +1418,9 @@ mod tests {
                 level: false,
                 mask_called: false,
                 enable_calls: 0,
+                last_phase: None,
             };
-            let mut phase = MockPhase {
+            let mut phase = MockBridge {
                 all_off_called: false,
                 ..Default::default()
             };
@@ -1347,8 +1462,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1382,8 +1498,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1417,8 +1534,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1453,8 +1571,9 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase = MockPhase {
+        let mut phase = MockBridge {
             all_off_called: false,
             ..Default::default()
         };
@@ -1501,14 +1620,16 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
         let mut comp_single = MockComp {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
-        let mut phase_atomic = MockPhase::default();
-        let mut phase_single = MockPhase::default();
+        let mut phase_atomic = MockBridge::default();
+        let mut phase_single = MockBridge::default();
 
         // Step 1: polling -> interrupt changeover via BemfLocked.
         isr_logic::commutation_timer_expired::<crate::platform::TestPlatform, _, _, _, _, _>(
@@ -1588,6 +1709,7 @@ mod tests {
             level: false,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
         let mut interval = MockInterval { count: 500 };
         let mut com_timer = MockComTimer::new();
@@ -1608,35 +1730,6 @@ mod tests {
 
         assert!(accepted);
         assert!(comp.mask_called);
-    }
-
-    #[test]
-    fn isr_bemf_zero_cross_saturates_wide_interval_count() {
-        // A 32-bit interval timer past 0xFFFF must saturate, not wrap
-        // 70_000 into 4_464 (a short interval from a long one).
-        let comm = crate::commutation::Commutation::new(); // rising=true
-        let mut bemf = crate::control::state::BemfState::default();
-        let mut comp = MockComp {
-            level: false,
-            mask_called: false,
-            enable_calls: 0,
-        };
-        let mut interval = MockInterval { count: 70_000 };
-        let mut com_timer = MockComTimer::new();
-        bemf.set_filter_level(1);
-
-        let shared = TestShared::new();
-        shared.mode.set(crate::motor_mode::MotorMode::Running);
-        assert!(isr_logic::bemf_zero_cross(
-            &shared,
-            &comm,
-            &mut bemf,
-            &mut comp,
-            &mut interval,
-            &mut com_timer,
-        ));
-        assert_eq!(bemf.this_zc_time(), u16::MAX);
-        assert_eq!(interval.count, 0);
     }
 
     #[test]
@@ -1675,121 +1768,34 @@ mod tests {
         assert_eq!(hal.interval.count, 0);
     }
 
-    struct GateSensor {
-        pending: bool,
-        levels: [bool; 2],
-        n_levels: usize,
-        reads: core::cell::Cell<usize>,
-        log: [u8; 2],
-        n_log: usize,
-    }
-    impl GateSensor {
-        fn new(pending: bool, levels: &[bool]) -> Self {
-            let mut l = [false; 2];
-            l[..levels.len()].copy_from_slice(levels);
-            Self {
-                pending,
-                levels: l,
-                n_levels: levels.len(),
-                reads: core::cell::Cell::new(0),
-                log: [0; 2],
-                n_log: 0,
-            }
-        }
-        fn push(&mut self, c: u8) {
-            self.log[self.n_log] = c;
-            self.n_log += 1;
-        }
-    }
-    impl hal::BemfSensor for GateSensor {
-        fn select_phase(&mut self, _: hal::Phase, _: bool) {}
-        fn enable_irq(&mut self) {}
-        fn mask_irq(&mut self) {}
-        fn level(&self) -> bool {
-            let i = self.reads.get();
-            assert!(i < self.n_levels, "unscripted level read");
-            self.reads.set(i + 1);
-            self.levels[i]
-        }
-        fn pending(&self) -> bool {
-            self.pending
-        }
-        fn clear_pending(&mut self) {
-            self.push(b'c');
-        }
-        fn repend(&mut self) {
-            self.push(b'r');
-        }
-    }
-    struct GateTimer(u32);
-    impl hal::IntervalTimer for GateTimer {
-        fn count(&self) -> u32 {
-            self.0
-        }
-        fn set_count(&mut self, v: u32) {
-            self.0 = v;
-        }
-    }
-
     #[test]
-    fn bemf_irq_gate_matches_am32() {
-        use isr_logic::{BemfIrq, on_bemf_irq};
-        let shared = TestShared::new();
-        shared.gate_avg.set(1000);
-        let rising = true;
-        let cases: [(bool, u32, &[bool], BemfIrq, &[u8]); 5] = [
-            (false, 900, &[], BemfIrq::Spurious, b""),
-            (true, 501, &[], BemfIrq::Open, b"c"),
-            (true, 500, &[true, true], BemfIrq::Noise, b"c"),
-            (true, 500, &[true, false], BemfIrq::Noise, b"cr"),
-            (true, 10, &[false], BemfIrq::Camp, b""),
-        ];
-        for (pending, cnt, levels, want, log) in cases {
-            let mut sensor = GateSensor::new(pending, levels);
-            let mut entered = 0;
-            let got = on_bemf_irq(&shared, &mut sensor, &GateTimer(cnt), rising, || {
-                entered += 1
-            });
-            assert_eq!(got, want, "cnt {cnt} levels {levels:?}");
-            assert_eq!(
-                &sensor.log[..sensor.n_log],
-                log,
-                "cnt {cnt} levels {levels:?}"
-            );
-            assert_eq!(entered, pending as u32);
-            assert_eq!(sensor.reads.get(), levels.len(), "level reads: {levels:?}");
-        }
-    }
-
-    #[test]
-    fn tick_latches_comp_gate_average_every_tick() {
-        let mut comm = crate::commutation::Commutation::new();
+    fn isr_bemf_zero_cross_saturates_wide_interval_count() {
+        // A 32-bit interval timer past 0xFFFF must saturate, not wrap
+        // 70_000 into 4_464 (a short interval from a long one).
+        let comm = crate::commutation::Commutation::new(); // rising=true
         let mut bemf = crate::control::state::BemfState::default();
-        let mut duty = crate::control::state::DutyState::default();
-        let config = crate::config::EepromConfig::default();
-        let mut armed_timeout = make_armed_timeout();
+        let mut comp = MockComp {
+            level: false,
+            mask_called: false,
+            enable_calls: 0,
+            last_phase: None,
+        };
+        let mut interval = MockInterval { count: 70_000 };
+        let mut com_timer = MockComTimer::new();
+        bemf.set_filter_level(1);
+
         let shared = TestShared::new();
-        let mut hal = MockMotorHal::new();
-        for (e_com, action, want) in [
-            (30_000, crate::shared_comm::IsrAction::None, 10_000),
-            (6_000, crate::shared_comm::IsrAction::AllOff, 10_000),
-            (6_000, crate::shared_comm::IsrAction::None, 2_000),
-            (-5, crate::shared_comm::IsrAction::None, 0),
-        ] {
-            shared.e_com_time.set(e_com);
-            shared.isr_action.set(action);
-            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
-                commutation: &mut comm,
-                bemf: &mut bemf,
-                duty: &mut duty,
-                config: &config,
-                armed_timeout_count: &mut armed_timeout,
-                voltage_based_ramp: false,
-                shared: &shared,
-                hal: &mut hal,
-            });
-            assert_eq!(shared.gate_avg.get(), want, "e_com {e_com}");
-        }
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        assert!(isr_logic::bemf_zero_cross(
+            &shared,
+            &comm,
+            &mut bemf,
+            &mut comp,
+            &mut interval,
+            &mut com_timer
+        ));
+        assert_eq!(bemf.this_zc_time(), u16::MAX);
+        assert_eq!(interval.count, 0);
     }
 
     #[test]
@@ -1873,7 +1879,7 @@ mod tests {
                 &hal_split.interval,
             );
 
-            assert_eq!(split_duty, hal_full.pwm.last_duty);
+            assert_eq!(split_duty, hal_full.bridge.last_duty);
             assert_eq!(split_period, 1777);
             assert_eq!(duty_split.cycle(), duty_full.cycle());
             assert_eq!(duty_split.last(), duty_full.last());
@@ -1957,6 +1963,90 @@ mod tests {
     }
 
     #[test]
+    fn sine_start_enters_without_manual_mode_injection() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.adjusted_input.set(80);
+        let config = crate::config::EepromConfig {
+            use_sine_start: 1,
+            ..Default::default()
+        };
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert!(shared.stepper_sine());
+        assert_eq!(hal.bridge.com_step_calls, 0);
+    }
+
+    #[test]
+    fn sine_pwm_survives_control_ticks() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::StepperSine);
+        shared.adjusted_input.set(80);
+        let config = crate::config::EepromConfig::default();
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        hal.bridge.last_duty = 123;
+        hal.bridge.compares = [111, 222, 333];
+        for _ in 0..3 {
+            isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+                commutation: &mut comm,
+                bemf: &mut bemf,
+                duty: &mut duty,
+                config: &config,
+                armed_timeout_count: &mut armed_timeout,
+                voltage_based_ramp: false,
+                shared: &shared,
+                hal: &mut hal,
+            });
+        }
+        assert_eq!(hal.bridge.last_duty, 123);
+        assert_eq!(hal.bridge.compares, [111, 222, 333]);
+        assert!(!hal.bridge.all_off_called);
+    }
+
+    #[test]
+    fn active_tone_owns_idle_bridge_writes_until_scheduler_releases_it() {
+        let shared = TestShared::new();
+        shared.mode.set(crate::motor_mode::MotorMode::Armed);
+        shared.tone_active.set(true);
+        let config = crate::config::EepromConfig::default();
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let mut armed_timeout = 0;
+        let mut hal = MockMotorHal::new();
+        hal.bridge.last_duty = 45;
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+        assert_eq!(hal.bridge.last_duty, 45);
+        assert!(!hal.bridge.all_off_called);
+    }
+
+    #[test]
     fn isr_bemf_zero_cross_filtered_out() {
         let comm = crate::commutation::Commutation::new(); // rising=true
         let mut bemf = crate::control::state::BemfState::default();
@@ -1964,6 +2054,7 @@ mod tests {
             level: true,
             mask_called: false,
             enable_calls: 0,
+            last_phase: None,
         };
         let mut interval = MockInterval { count: 0 };
         let mut com_timer = MockComTimer::new();
@@ -2000,6 +2091,47 @@ mod tests {
             actual_current > 5700 && actual_current < 5800,
             "expected ~5750, got {}",
             actual_current
+        );
+    }
+
+    #[test]
+    fn commutate_kick_inflates_ci_zcfoundroutine() {
+        // AM32 zcfoundroutine (main.c:1870-1874): the BEMF-timeout kick
+        // folds the stalled interval count into ci = (count + 3*ci)/4
+        // BEFORE the forced step. A mid-run timeout at ci=200 must restart
+        // at the slow crawl (~11400), never at the pre-fault cadence.
+        let mut comm = crate::commutation::Commutation::new();
+        let mut bemf = crate::control::state::BemfState::default();
+        let mut duty = crate::control::state::DutyState::default();
+        let config = crate::config::EepromConfig::default();
+        let mut armed_timeout = make_armed_timeout();
+        let shared = TestShared::new();
+        let mut hal = MockMotorHal::new();
+
+        shared.mode.set(crate::motor_mode::MotorMode::Running);
+        shared.commutation_interval.set(200);
+        hal.interval.count = 45001;
+        crate::shared_comm::Commands::request_isr_action(
+            &shared,
+            crate::shared_comm::IsrAction::CommutateKick,
+        );
+
+        isr_logic::ten_khz_tick(&mut crate::control::context::MotorContext {
+            commutation: &mut comm,
+            bemf: &mut bemf,
+            duty: &mut duty,
+            config: &config,
+            armed_timeout_count: &mut armed_timeout,
+            voltage_based_ramp: false,
+            shared: &shared,
+            hal: &mut hal,
+        });
+
+        assert_eq!(shared.commutation_interval.get(), (45001 + 3 * 200) / 4);
+        assert_eq!(hal.interval.count, 0);
+        assert_eq!(
+            crate::shared_comm::Commands::isr_action(&shared),
+            crate::shared_comm::IsrAction::None
         );
     }
 }

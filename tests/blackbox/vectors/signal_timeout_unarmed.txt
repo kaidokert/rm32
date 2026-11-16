@@ -2,6 +2,8 @@
 # REQ-SAFE-SIGNAL_TIMEOUT (unarmed path)
 # C firmware: unarmed + signaltimeout > 40000 → inputSet=0
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1
@@ -10,4 +12,4 @@ dshot=1
 @sequence
 # Unarmed, input detected, no signal arriving (throttle=-1 disables injection)
 config throttle=-1
-ticks 42000 | | inputSet=0 needs_reset=1
+ticks 2100ms | | inputSet=0 needs_reset=1

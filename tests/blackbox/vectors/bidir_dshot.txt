@@ -1,6 +1,8 @@
 # Bidirectional DShot throttle
 # Verify: DShot values >1047 = forward, 48-1047 = reverse, <48 = zero
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

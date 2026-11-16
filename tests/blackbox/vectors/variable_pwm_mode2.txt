@@ -4,6 +4,8 @@
 # average_interval > 250 → clamp to 250*CPU_MHZ/9
 # else → average_interval*CPU_MHZ/9
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -2,6 +2,8 @@
 # When input pin is HIGH during servo transfercomplete, sets buffersize=3
 # to capture an extra edge for realignment.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

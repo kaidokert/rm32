@@ -1,6 +1,8 @@
 # Ramp rate limiting
 # Verify: duty cycle ramps up gradually, doesn't jump to setpoint
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

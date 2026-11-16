@@ -1,6 +1,8 @@
 # DShot bidirectional telemetry path
 # Lights up: make_dshot_package, transfercomplete telem branches
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -1,6 +1,8 @@
 # Speed control PID (stall_protection=1)
 # Exercises the speed PID path with target_e_com_time computation.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -16,7 +18,7 @@ eeprom.motor_poles=14
 @sequence
 # With stall protection on, speed PID computes target_e_com_time
 # and overrides input via input_override
-ticks 20 | throttle=1000 | running=1
+ticks 1ms | throttle=1000 | running=1
 
 # Zero throttle should clear speed PID
 ticks 5  | throttle=0    | duty_cycle_setpoint=0

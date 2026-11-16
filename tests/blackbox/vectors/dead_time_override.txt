@@ -7,6 +7,8 @@
 #   minimum_duty = 5 + 160 = 165
 # Throttle=200 maps to setpoint ~300 (raised floor vs ~153 without override)
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -19,4 +21,7 @@ eeprom.driving_brake_strength=5
 load_eeprom
 
 # Low throttle with override: setpoint reflects raised minimum duty
-tick 1  | throttle=200 | duty_cycle_setpoint>250
+tick 1  | throttle=200 | armed=1 running=1 duty_cycle_setpoint>250
+
+# Verify motor responds and startup ceiling reflects dead-time override (560 vs 460)
+ticks 5 | throttle=1000 | running=1 duty_cycle_setpoint=560

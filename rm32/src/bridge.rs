@@ -41,6 +41,30 @@ pub const fn step_legs(step: u8, mode: PwmMode) -> [LegRole; 3] {
     }
 }
 
+/// The drive-mode decision: whether the driven leg of a commutation step
+/// switches complementary (high and low FET alternate, synchronous
+/// rectification) or diode (low FET off, freewheel through its body diode).
+///
+/// When complementary PWM is configured, six-step commutation drives
+/// complementary in interrupt mode (`!shared.old_routine()`) and diode during
+/// polling startup and recovery (`old_routine`). Complementary drive's
+/// synchronous rectification actively brakes the rotor if a polling step fires
+/// off-phase during startup or recovery, whereas diode drive lets the driven
+/// phase freewheel until BEMF lock is established.
+///
+/// `old_routine` is read only when complementary is configured, avoiding an
+/// unnecessary atomic load per step when diode mode is configured.
+#[inline(always)]
+pub fn drive_mode<S: crate::shared_comm::SharedComm + ?Sized>(
+    configured: PwmMode,
+    shared: &S,
+) -> PwmMode {
+    match configured {
+        PwmMode::Complementary if !shared.old_routine() => PwmMode::Complementary,
+        _ => PwmMode::Diode,
+    }
+}
+
 /// The power stage as the core drives it: the gate legs plus the PWM timer
 /// behind them (AM32's TIM1 period, compare, dead-time and prescaler writes).
 pub trait Bridge: PhaseOutput {

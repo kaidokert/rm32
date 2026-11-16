@@ -2,6 +2,8 @@
 # When rising=0, uses bemfcounter > min_bemf_counts_down for ZC detection.
 # Exercises the falling-edge path of the BEMF filter.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

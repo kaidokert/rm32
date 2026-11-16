@@ -1,7 +1,20 @@
-# Stuck rotor increment rate
+# Stuck rotor increment rate — regression test for interval timer reset
 #
-# A single stale interval-timer sample should not make the BEMF timeout
-# counter advance every main-loop tick.
+# Bug: rm32 doesn't reset interval_timer_count after stall detection,
+# so bemf_timeout_happened increments at main-loop rate (~8kHz) instead
+# of C's throttled rate (~44Hz, one per 22.5ms re-arm cycle).
+#
+# This test sets interval_timer=50000 ONCE, then ticks freely without
+# re-asserting it. After 20 ticks:
+# - C: interval_timer resets to 0 after each stall → only 1 increment
+#   per 22.5ms → bemf_timeout_happened stays low (≈1)
+# - Rust (broken): interval_timer stays >45000 → increments every tick
+#   → bemf_timeout_happened races to 20+
+#
+# With stuck_rotor_protection=1 and threshold=10, the Rust bug causes
+# the motor to latch off during normal startup.
+
+@tuning am32
 
 @config
 armed=1
@@ -13,8 +26,15 @@ old_routine=1
 eeprom.stuck_rotor_protection=1
 
 @sequence
+# Normal tick to establish baseline
 tick 1  | throttle=500 interval_timer=1000 comp=1 | running=1
 
+# Set interval timer above stall threshold ONCE, then let firmware tick.
+# comp=1 prevents false BEMF zero-crosses from resetting the timer.
 config interval_timer=50000
 
-ticks 20 | throttle=500 comp=1 | running=1 input>0
+# After 20 free ticks, bemf_timeout_happened should be low (C resets
+# the timer after each stall). If it races past 10, the latch fires.
+# Bug: Rust never resets interval_timer after stall → counter races
+# past threshold → input latched to 0 → motor can never spin up.
+ticks 1ms | throttle=500 comp=1 | running=1 input>0

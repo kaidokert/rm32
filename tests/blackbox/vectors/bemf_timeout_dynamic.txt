@@ -3,6 +3,8 @@
 # High throttle (>= 150): bemf_timeout = 10 (strict)
 # Also: timeout suppressed when zero_crosses > 100 and adjusted_input < 200
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -1,6 +1,8 @@
 # Extended DShot commands: save, EDT, programming mode
 # Lights up: more branches in computeDshotDMA command switch
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

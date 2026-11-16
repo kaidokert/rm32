@@ -1,6 +1,8 @@
 # Desync detection with average_interval reset
 # When motor has > 100 zero crosses and desyncs, average_interval resets to 5000.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

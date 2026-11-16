@@ -3,6 +3,8 @@
 # by the firmware ISR, causing e_com_time to always be zero.
 # Golden values captured from C harness.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1

@@ -1,9 +1,12 @@
 # Variable PWM all modes
 # Mode 0: fixed (pwm_arr stays at default 1999)
-# Mode 1: maps commutation_interval 96-200 → 50%-100% of max ARR
+# Mode 1: maps commutation_interval 48-100 us → 50%-100% of max ARR
+# (96-200 counts on the 2 MHz timer; durations so other timer rates map alike)
 #
 # Note: variable_pwm sets tim1_arr in main_loop, which is applied via
 # set_auto_reload in the NEXT tick's tenKhzRoutine. So we need 2 ticks.
+
+@tuning am32
 
 @config
 armed=1
@@ -16,14 +19,14 @@ zero_crosses=200
 @sequence
 # --- Mode 0 (fixed): pwm_arr should be default 1999 ---
 config eeprom.variable_pwm=0
-config commutation_interval=100
+config commutation_interval=50us
 ticks 2 | throttle=1000 | pwm_arr=1999
 
-# --- Mode 1: fast commutation (96) → lower arr (~50% of 1999 ≈ 999) ---
+# --- Mode 1: fast commutation (48 us) → lower arr (~50% of 1999 ≈ 999) ---
 config eeprom.variable_pwm=1
-config commutation_interval=96
+config commutation_interval=48us
 ticks 2 | throttle=1000 | pwm_arr<=1050
 
-# --- Mode 1: slow commutation (200) → higher arr (~100% of 1999) ---
-config commutation_interval=200
+# --- Mode 1: slow commutation (100 us) → higher arr (~100% of 1999) ---
+config commutation_interval=100us
 ticks 2 | throttle=1000 | pwm_arr>=1900

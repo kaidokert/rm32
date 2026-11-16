@@ -854,16 +854,20 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
         assert!(r.log.borrow().contains(&"sine"));
         assert_eq!(r.hal.phase.pwm_mode, want);
 
-        // Sine-to-six-step handoff com_step uses configured comp_pwm.
+        // Sine-to-six-step handoff lands in polling (OldRoutine), where
+        // `rm32::bridge::drive_mode` drives diode regardless of `comp_pwm`.
+        let polling = PwmMode::Diode;
+
         r.tick(250);
         r.sine();
         r.log.borrow_mut().clear();
         r.hal.phase.pwm_mode = opposite;
         r.tick(250);
         assert!(r.log.borrow().contains(&"sector"));
-        assert_eq!(r.hal.phase.pwm_mode, want);
+        assert!(r.shared.old_routine());
+        assert_eq!(r.hal.phase.pwm_mode, polling);
 
-        // Commutation timer expiration uses configured comp_pwm.
+        // Commutation timer expiration in polling drives diode under `drive_mode`.
         r.hal.phase.pwm_mode = opposite;
         isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _, _>(
             &mut r.comm,
@@ -877,6 +881,28 @@ fn explicit_complementary_drive_mode_propagates_across_sine_handoff_brake_and_co
             false,
             false,
         );
+        assert_eq!(r.hal.phase.pwm_mode, polling);
+
+        // Commutation timer expiration in interrupt mode uses configured comp_pwm
+        // when the commutation interval stays within the interrupt-mode band.
+        r.shared.set_commutation_interval(500);
+        r.comm = rm32::commutation::Commutation::new();
+        r.shared.transition(MotorEvent::BemfLocked);
+        assert!(r.shared.running() && !r.shared.old_routine());
+        r.hal.phase.pwm_mode = opposite;
+        isr_logic::commutation_timer_expired::<TestPlatform, _, _, _, _, _>(
+            &mut r.comm,
+            &mut r.bemf,
+            &r.shared,
+            &rm32::shared_comm::AtomicWriter,
+            &mut r.hal.com,
+            &mut r.hal.comp,
+            &mut r.hal.phase,
+            want,
+            false,
+            false,
+        );
+        assert!(!r.shared.old_routine());
         assert_eq!(r.hal.phase.pwm_mode, want);
     }
 }

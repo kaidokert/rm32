@@ -5,6 +5,8 @@
 # Harness is compiled with MCU_F051 (gcr_shift=6, multiplier=64).
 # The gcr_encode command sets running=1 internally via config.
 
+@tuning am32
+
 @config
 running=1
 armed=1

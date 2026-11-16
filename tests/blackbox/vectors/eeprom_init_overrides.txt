@@ -3,6 +3,8 @@
 # read_flash_bin is a no-op in the harness, so eepromBuffer keeps our values.
 # Must set eeprom_version >= EEPROM_VERSION to skip version-upgrade block.
 
+@tuning am32
+
 @config
 armed=0
 inputSet=1

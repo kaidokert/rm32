@@ -2,6 +2,8 @@
 # Verify PID accumulators don't wind up beyond limits.
 # Exercises stall/speed/current PID with extreme inputs.
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -15,7 +17,7 @@ eeprom.stall_protection=1
 
 @sequence
 # High throttle for many ticks — PID accumulators should clamp
-ticks 100 | throttle=2047 | running=1
+ticks 5ms | throttle=2047 | running=1 duty_cycle_setpoint>0 duty_cycle_setpoint<=2000
 
 # Drop to zero — PID should recover (not stuck at windup limit)
-ticks 50  | throttle=0    | duty_cycle_setpoint=0
+ticks 2.5ms | throttle=0    | duty_cycle_setpoint=0

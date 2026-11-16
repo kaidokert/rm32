@@ -1,0 +1,14 @@
+[package]
+name = "rm32-harness"
+version = "0.1.0"
+edition = "2024"
+description = "Host std harness driving the rm32 core for the blackbox vectors"
+publish = false
+
+[dependencies]
+rm32 = { path = "../rm32" }
+rm32-sim = { path = "../rm32-sim" }
+
+[[bin]]
+name = "rm32_harness"
+path = "src/main.rs"

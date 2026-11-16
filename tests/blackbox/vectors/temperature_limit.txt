@@ -1,6 +1,8 @@
 # Temperature limiting
 # Verify: duty_cycle_maximum reduces when temperature exceeds limit
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -22,4 +24,4 @@ tick 1  | throttle=2047 | duty_cycle_maximum=2000
 # main.c:2010 PROCESS_ADC_FLAG). Allow >20 ticks for the reading to
 # propagate to the duty ceiling.
 config degrees_celsius=85
-ticks 40 | throttle=2047 | duty_cycle_maximum<2000
+ticks 2ms | throttle=2047 | duty_cycle_maximum<2000

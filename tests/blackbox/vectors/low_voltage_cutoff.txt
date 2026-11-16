@@ -5,6 +5,8 @@
 # ADC processes every PID_LOOP_DIVIDER=20 ticks
 # We pre-set low_voltage_count near threshold to avoid 200k ticks
 
+@tuning am32
+
 @config
 armed=1
 inputSet=1
@@ -22,4 +24,4 @@ config low_voltage_count=9999
 
 # A few more ADC cycles (20 ticks each) should push it over
 # allOff must be called to physically cut FETs on LVC fault
-ticks 100 | throttle=500 | armed=0 alloff_count>0
+ticks 5ms | throttle=500 | armed=0 alloff_count>0
